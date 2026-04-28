@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "connectors": [
+    {
+      "id": "nhtsa-vpic",
+      "name": "NHTSA vPIC",
+      "category": "vehicle_decode",
+      "connectionType": "open_api",
+      "status": "connected",
+      "confidence": "high_for_vehicle_identity",
+      "whatItCanProvide": ["year", "make", "model", "trim", "body", "engine", "drive", "plant", "VIN validation"],
+      "whatItCannotProvide": ["FCC ID", "key blank", "remote board", "programmer coverage", "supplier part quality"],
+      "notes": "Already used by VIN Bench for live VIN decoding."
+    },
+    {
+      "id": "ilco-mykeys-pro",
+      "name": "Ilco MYKEYS Pro",
+      "category": "key_reference",
+      "connectionType": "partner_api_or_export",
+      "status": "needs_credentials_or_export",
+      "confidence": "high_when_verified",
+      "whatItCanProvide": ["vehicle key guide", "key cutting guide", "programming procedures", "Ilco / AD product data"],
+      "whatItCannotProvide": ["free unauthenticated lookup"],
+      "notes": "Best integration path is official account/API/export or manually reviewed catalog import."
+    },
+    {
+      "id": "strattec-aftermarket",
+      "name": "STRATTEC Aftermarket",
+      "category": "oem_equivalent_parts",
+      "connectionType": "catalog_or_partner_api",
+      "status": "needs_catalog_import",
+      "confidence": "high_when_verified",
+      "whatItCanProvide": ["OEM-equivalent keys", "locks", "part applications", "application guide data"],
+      "whatItCannotProvide": ["programmer coverage"],
+      "notes": "Good source for premium/OEM-equivalent fallback options."
+    },
+    {
+      "id": "jma-ejma",
+      "name": "JMA / e-JMA",
+      "category": "key_reference",
+      "connectionType": "catalog_or_partner_api",
+      "status": "needs_catalog_import",
+      "confidence": "high_when_verified",
+      "whatItCanProvide": ["key blanks", "transponder references", "remote controls", "cross references"],
+      "whatItCannotProvide": ["vehicle build sheet certainty"],
+      "notes": "Useful for blank/transponder cross-reference and quality alternatives."
+    },
+    {
+      "id": "keyline",
+      "name": "Keyline",
+      "category": "key_reference",
+      "connectionType": "catalog_or_partner_api",
+      "status": "needs_catalog_import",
+      "confidence": "high_when_verified",
+      "whatItCanProvide": ["transponder catalog", "cloning/programming product references", "key product data"],
+      "whatItCannotProvide": ["all supplier pricing"],
+      "notes": "Useful for transponder and cloning workflow references."
+    },
+    {
+      "id": "programmer-coverage",
+      "name": "Programmer Coverage Library",
+      "category": "tool_coverage",
+      "connectionType": "vendor_exports_manual_verification",
+      "status": "needs_data_source",
+      "confidence": "varies_by_vendor_and_date",
+      "whatItCanProvide": ["Smart Pro coverage", "Autel coverage", "Xtool coverage", "Xhorse coverage", "OEM tool requirements"],
+      "whatItCannotProvide": ["guarantee without current coverage verification"],
+      "notes": "Should store last verified date because coverage changes with software updates."
+    },
+    {
+      "id": "shop-history",
+      "name": "Shop History",
+      "category": "local_evidence",
+      "connectionType": "local_database",
+      "status": "connected",
+      "confidence": "medium_to_high",
+      "whatItCanProvide": ["past VINs", "tools used", "programmers used", "price hints", "customer-provided key outcomes"],
+      "whatItCannotProvide": ["catalog-complete part numbers"],
+      "notes": "Your completed work is evidence, but supplier part data still needs verification."
+    }
+  ]
+}

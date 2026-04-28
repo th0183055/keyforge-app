@@ -1,0 +1,365 @@
+{
+  "schemaVersion": 1,
+  "records": [
+    {
+      "id": "ford-f-150-2025",
+      "match": {
+        "yearStart": 2025,
+        "yearEnd": 2025,
+        "make": "FORD",
+        "model": "F-150"
+      },
+      "keySystem": {
+        "name": "Ford F-150 late-model key system",
+        "confidence": "medium",
+        "notes": "Verified from shop experience. Confirm supplier catalog data before ordering."
+      },
+      "keyOptions": [
+        {
+          "name": "Supplier-grade remote / prox option",
+          "position": "Recommended value",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-FCC-AND-BLADE",
+          "quality": "Verified",
+          "costPosition": "mid",
+          "notes": ""
+        }
+      ],
+      "programmers": [
+        {
+          "name": "FDRS",
+          "type": "Verified",
+          "confidence": "medium",
+          "notes": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "FRD8334",
+          "type": "Verified",
+          "confidence": "medium",
+          "notes": ""
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "FCC / frequency",
+        "Blade / emergency key",
+        "Remote button layout",
+        "Programmer coverage",
+        "Battery condition"
+      ],
+      "sourceJobIds": [],
+      "updatedAt": "2026-04-26T02:45:30.848Z"
+    },
+    {
+      "id": "honda-civic-2020",
+      "match": {
+        "yearStart": 2020,
+        "yearEnd": 2020,
+        "make": "HONDA",
+        "model": "Civic"
+      },
+      "keySystem": {
+        "name": "Honda Civic verified placeholder",
+        "confidence": "medium",
+        "notes": "Write-path test record. Replace with verified supplier data before production use."
+      },
+      "keyOptions": [
+        {
+          "name": "Catalog-verified Honda key option",
+          "position": "Recommended value",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-BY-SUPPLIER",
+          "quality": "Verified",
+          "costPosition": "mid",
+          "notes": ""
+        }
+      ],
+      "programmers": [
+        {
+          "name": "Validated Honda-capable programmer",
+          "type": "Verified",
+          "confidence": "medium",
+          "notes": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "Honda keyway/origination tool",
+          "type": "Verified",
+          "confidence": "medium",
+          "notes": ""
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "Transponder generation",
+        "keyway",
+        "remote style",
+        "programmer coverage",
+        "authorization"
+      ],
+      "sourceJobIds": [],
+      "updatedAt": "2026-04-25T20:58:34.997Z"
+    },
+    {
+      "id": "ford-f150-2025",
+      "match": {
+        "yearStart": 2025,
+        "yearEnd": 2025,
+        "make": "FORD",
+        "model": "F-150"
+      },
+      "keySystem": {
+        "name": "Ford F-150 late-model key system",
+        "confidence": "medium",
+        "notes": "Seeded from completed 2025 F-150 duplicate-key job. Exact FCC, blade, and part number must be verified against supplier catalog before ordering."
+      },
+      "keyOptions": [
+        {
+          "name": "Supplier-grade Ford remote / prox option",
+          "position": "Recommended value",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-FCC-AND-BLADE",
+          "quality": "Good aftermarket",
+          "costPosition": "mid",
+          "notes": "Use when FCC, frequency, button layout, emergency blade, and board are confirmed by supplier lookup."
+        },
+        {
+          "name": "STRATTEC / OEM-equivalent Ford option",
+          "position": "Premium fallback",
+          "supplier": "OEM-equivalent",
+          "partNumber": "VERIFY-OE",
+          "quality": "OEM-equivalent",
+          "costPosition": "high",
+          "notes": "Use when module sensitivity, warranty risk, or customer preference justifies higher cost."
+        }
+      ],
+      "programmers": [
+        {
+          "name": "FDRS",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Your completed 2025 F-150 job records FRD8334 + FDRS."
+        },
+        {
+          "name": "Validated advanced aftermarket programmer",
+          "type": "Coverage-check alternative",
+          "confidence": "medium",
+          "notes": "Use only after checking exact year/model/key-system coverage and whether OEM service functions are required."
+        }
+      ],
+      "tools": [
+        {
+          "name": "FRD8334",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Recorded on your 2025 F-150 duplicate-key job."
+        },
+        {
+          "name": "Battery support",
+          "type": "Required support",
+          "confidence": "high",
+          "notes": "Use stable voltage support for programming sessions."
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "FCC / frequency",
+        "Blade / emergency key",
+        "Remote button layout",
+        "FDRS subscription and login readiness",
+        "Battery condition"
+      ],
+      "sourceJobIds": [
+        "job-dk-25-f150-gry"
+      ]
+    },
+    {
+      "id": "ford-expedition-2024",
+      "match": {
+        "yearStart": 2024,
+        "yearEnd": 2024,
+        "make": "FORD",
+        "model": "Expedition"
+      },
+      "keySystem": {
+        "name": "Ford Expedition late-model duplicate key",
+        "confidence": "medium",
+        "notes": "Seeded from completed 2024 Expedition job with key code and FDRS note."
+      },
+      "keyOptions": [
+        {
+          "name": "Supplier-grade Expedition remote / prox option",
+          "position": "Recommended value",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-FCC-AND-BLADE",
+          "quality": "Good aftermarket",
+          "costPosition": "mid",
+          "notes": "Good first choice when supplier lookup confirms exact board, frequency, and blade."
+        },
+        {
+          "name": "OEM Ford / STRATTEC option",
+          "position": "Premium fallback",
+          "supplier": "OEM-equivalent",
+          "partNumber": "VERIFY-OE",
+          "quality": "OEM-equivalent",
+          "costPosition": "high",
+          "notes": "Use when value part confidence is low or dealer/fleet expectations require OEM-grade reliability."
+        }
+      ],
+      "programmers": [
+        {
+          "name": "FDRS",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Your completed 2024 Expedition job records PCP + FDRS."
+        }
+      ],
+      "tools": [
+        {
+          "name": "PCP",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Recorded in your job notes."
+        },
+        {
+          "name": "Key code workflow",
+          "type": "Origination support",
+          "confidence": "medium",
+          "notes": "Your job note includes Kc: 10077. Verify lawful code source and cut path."
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "FCC / frequency",
+        "Emergency blade",
+        "FDRS access",
+        "Key code source",
+        "Invoice/payment terms"
+      ],
+      "sourceJobIds": [
+        "job-dk-24-expedition-blk-ehs"
+      ]
+    },
+    {
+      "id": "toyota-camry-hybrid-2025",
+      "match": {
+        "yearStart": 2025,
+        "yearEnd": 2025,
+        "make": "TOYOTA",
+        "model": "Camry"
+      },
+      "keySystem": {
+        "name": "Toyota Camry hybrid late-model proximity system",
+        "confidence": "medium",
+        "notes": "Seeded from completed 2025 Camry hybrid customer-provided-key programming job. Exact FCC and board must be verified."
+      },
+      "keyOptions": [
+        {
+          "name": "Quality Toyota prox key from reputable supplier",
+          "position": "Recommended value",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-FCC-BOARD-BLADE",
+          "quality": "Good aftermarket",
+          "costPosition": "mid",
+          "notes": "Best cost-effective path when supplier confirms hybrid/prox compatibility, FCC, frequency, emergency blade, and board."
+        },
+        {
+          "name": "OEM Toyota prox key",
+          "position": "Required-risk fallback",
+          "supplier": "OEM",
+          "partNumber": "VERIFY-OE",
+          "quality": "OEM",
+          "costPosition": "high",
+          "notes": "Use when aftermarket confidence is low, customer demands OEM, or coverage risk would cost more than the part savings."
+        }
+      ],
+      "programmers": [
+        {
+          "name": "TIS / Techstream",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Your completed 2025 Camry job records PCP + TIS."
+        },
+        {
+          "name": "Validated Toyota-capable aftermarket programmer",
+          "type": "Coverage-check alternative",
+          "confidence": "medium",
+          "notes": "Only use after confirming exact 2025 Camry hybrid coverage and security workflow."
+        }
+      ],
+      "tools": [
+        {
+          "name": "PCP",
+          "type": "Verified from past job",
+          "confidence": "high",
+          "notes": "Recorded in your completed Camry job."
+        },
+        {
+          "name": "TIS login / subscription readiness",
+          "type": "Required support",
+          "confidence": "high",
+          "notes": "Prepare before arrival to avoid wasted dealer/fleet time."
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "FCC / board",
+        "Emergency blade",
+        "Hybrid/prox compatibility",
+        "TIS access",
+        "Customer-provided key quality"
+      ],
+      "sourceJobIds": [
+        "job-pcp-25-camry-wht-ewc"
+      ]
+    },
+    {
+      "id": "honda-accord-2000",
+      "match": {
+        "yearStart": 2000,
+        "yearEnd": 2000,
+        "make": "HONDA",
+        "model": "Accord"
+      },
+      "keySystem": {
+        "name": "Honda Accord legacy field service",
+        "confidence": "low",
+        "notes": "Seeded from an auto-unlock dealer job. Not enough evidence yet for key origination/programming recommendations."
+      },
+      "keyOptions": [
+        {
+          "name": "Honda-compatible blank / transponder option",
+          "position": "Verify first",
+          "supplier": "Preferred locksmith supplier",
+          "partNumber": "VERIFY-BY-CATALOG",
+          "quality": "Catalog verified",
+          "costPosition": "unknown",
+          "notes": "This record needs a verified key-making job before the app should recommend parts confidently."
+        }
+      ],
+      "programmers": [
+        {
+          "name": "Validated Honda-capable programmer",
+          "type": "Needs verification",
+          "confidence": "low",
+          "notes": "Calendar evidence only confirms unlock service, not programming."
+        }
+      ],
+      "tools": [
+        {
+          "name": "Field unlock tools",
+          "type": "Verified from past job",
+          "confidence": "medium",
+          "notes": "Completed job was AU only."
+        }
+      ],
+      "verifyBeforeDispatch": [
+        "Transponder presence",
+        "Keyway",
+        "Programming need",
+        "Customer authorization"
+      ],
+      "sourceJobIds": [
+        "job-au-00-accord-del-auto"
+      ]
+    }
+  ]
+}

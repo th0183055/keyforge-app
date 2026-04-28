@@ -1,0 +1,131 @@
+{
+  "generatedAt": "2026-04-25T19:16:31.905Z",
+  "sourceFile": "Tim Work_tim@wekeycars.com.ics",
+  "totalEvents": 7740,
+  "datedEvents": 7740,
+  "dateRange": {
+    "start": "2012-07-12T17:30:00.000Z",
+    "end": "2026-09-04T00:00:00.000Z"
+  },
+  "revenueSignals": {
+    "eventsWithAmounts": 5052,
+    "visibleTotal": 1207094.54,
+    "averageVisibleTicket": 238.93
+  },
+  "timeSignals": {
+    "eventsWithDuration": 7507,
+    "averageDurationMinutes": 38
+  },
+  "jobCodes": [
+    {
+      "name": "KM",
+      "count": 2009
+    },
+    {
+      "name": "DK",
+      "count": 1502
+    },
+    {
+      "name": "OTHER",
+      "count": 1482
+    },
+    {
+      "name": "AU",
+      "count": 225
+    },
+    {
+      "name": "PCP",
+      "count": 173
+    },
+    {
+      "name": "ADV",
+      "count": 158
+    },
+    {
+      "name": "ILP",
+      "count": 152
+    },
+    {
+      "name": "MA",
+      "count": 143
+    },
+    {
+      "name": "RRK",
+      "count": 139
+    },
+    {
+      "name": "OH",
+      "count": 128
+    },
+    {
+      "name": "CXD",
+      "count": 111
+    },
+    {
+      "name": "PR",
+      "count": 95
+    },
+    {
+      "name": "CRK",
+      "count": 94
+    },
+    {
+      "name": "ARK",
+      "count": 93
+    },
+    {
+      "name": "ECS",
+      "count": 90
+    },
+    {
+      "name": "CLP",
+      "count": 76
+    },
+    {
+      "name": "UTS",
+      "count": 63
+    },
+    {
+      "name": "RU",
+      "count": 62
+    },
+    {
+      "name": "RLP",
+      "count": 55
+    },
+    {
+      "name": "RLI",
+      "count": 53
+    }
+  ],
+  "paymentMethods": [
+    {
+      "name": "unknown",
+      "count": 6570
+    },
+    {
+      "name": "n30",
+      "count": 1148
+    },
+    {
+      "name": "cr",
+      "count": 16
+    },
+    {
+      "name": "ch",
+      "count": 4
+    },
+    {
+      "name": "cc",
+      "count": 2
+    }
+  ],
+  "likelyDealerOrFleetEvents": 1787,
+  "sampleSellableFeatures": [
+    "Calendar import that turns shorthand appointments into structured jobs",
+    "Job-code analytics for DK, AKL, PCP, AU, CU, RLP, and other locksmith workflows",
+    "Price, payment, invoice, VIN, key-code, tool, and mileage extraction",
+    "Repeat customer and dealer/fleet account detection",
+    "AI closeout summaries and quote templates from completed job history"
+  ]
+}

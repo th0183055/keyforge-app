@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LockForge Systems</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary">
+        <div class="brand">
+          <div class="brand-mark">LF</div>
+          <div>
+            <p class="eyebrow">LockForge</p>
+            <h1>LockForge Systems</h1>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Main navigation">
+          <button class="nav-item active" data-view="vin">VIN Lookup</button>
+          <button class="nav-item" data-view="settings">Settings</button>
+          <button class="nav-item" data-view="about">About</button>
+        </nav>
+
+        <section class="operator-panel">
+          <p class="eyebrow">Field mode</p>
+          <strong>Fast lookup first</strong>
+          <span>Decode the vehicle, compare fitment, then verify before ordering or programming.</span>
+        </section>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">VIN to key</p>
+            <h2>Scan a VIN. See the vehicle, keys, and supplier matches.</h2>
+          </div>
+          <button class="primary-action" data-view-target="settings">Supplier Setup</button>
+        </header>
+
+        <section class="view active" id="vin">
+          <div class="vin-layout">
+            <section class="panel wide vin-main-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Step 1</p>
+                  <h3>Scan or enter VIN</h3>
+                </div>
+              </div>
+              <form id="vinForm" class="vin-form">
+                <label>
+                  VIN number
+                  <input name="vin" value="1FTFW3L58SKD97045" maxlength="17" autocomplete="off" />
+                </label>
+                <button class="scan-action" type="button" title="Camera VIN scanning will connect here">Scan</button>
+                <button class="primary-action" type="submit">Decode</button>
+              </form>
+              <div class="vin-result" id="vinResult"></div>
+            </section>
+
+            <section class="panel vin-side-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Supplier access</p>
+                  <h3>Key Innovations</h3>
+                </div>
+              </div>
+              <div class="assistant-card" id="vinRecommendation">
+                <strong>Catalog source ready</strong>
+                <p>Possible keys come from the imported Key Innovations catalog. Supplier login can be added for live price and stock.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="dashboard">
+          <div class="metric-grid">
+            <article class="metric">
+              <span>Today</span>
+              <strong>12</strong>
+              <p>Active and completed jobs</p>
+            </article>
+            <article class="metric">
+              <span>Avg close</span>
+              <strong>38m</strong>
+              <p>Dispatch to paid invoice</p>
+            </article>
+            <article class="metric">
+              <span>AI saves</span>
+              <strong>4.6h</strong>
+              <p>Estimated weekly research time</p>
+            </article>
+            <article class="metric">
+              <span>Trust score</span>
+              <strong>97%</strong>
+              <p>Complete audit coverage</p>
+            </article>
+          </div>
+
+          <div class="content-grid">
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Live work queue</p>
+                  <h3>Field Jobs</h3>
+                </div>
+                <button class="secondary-action" data-view-target="jobs">View all</button>
+              </div>
+              <div class="job-list" id="dashboardJobs"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">AI assist</p>
+                  <h3>Next Best Step</h3>
+                </div>
+              </div>
+              <div class="assistant-card">
+                <strong>2018 Ford F-150 all keys lost</strong>
+                <p>Confirm ownership, scan VIN profile, verify immobilizer family, then prepare programmer checklist and quote range.</p>
+                <button class="primary-action small" data-view-target="ai">Open AI Bench</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="jobs">
+          <div class="split-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Create</p>
+                  <h3>Job Intake</h3>
+                </div>
+              </div>
+              <form id="jobForm" class="form-stack">
+                <label>
+                  Customer
+                  <input name="customer" value="Maria Santos" autocomplete="off" />
+                </label>
+                <label>
+                  Vehicle / lock
+                  <input name="vehicle" value="2018 Ford F-150" autocomplete="off" />
+                </label>
+                <label>
+                  Service type
+                  <select name="service">
+                    <option>All keys lost</option>
+                    <option>Duplicate key</option>
+                    <option>Lockout</option>
+                    <option>Rekey</option>
+                    <option>Commercial hardware</option>
+                  </select>
+                </label>
+                <label>
+                  Verification
+                  <select name="verification">
+                    <option>Customer ID + registration checked</option>
+                    <option>Customer ID pending</option>
+                    <option>Property manager approval</option>
+                    <option>Fleet authorization on file</option>
+                  </select>
+                </label>
+                <button class="primary-action" type="submit">Add Job</button>
+              </form>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Operations</p>
+                  <h3>Job Board</h3>
+                </div>
+              </div>
+              <div class="job-list" id="jobBoard"></div>
+              <div class="job-detail" id="jobDetail"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="keys">
+          <div class="split-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Verification layer</p>
+                  <h3>Add Key Intelligence</h3>
+                </div>
+              </div>
+              <form id="keyIntelForm" class="form-stack compact-form">
+                <label>
+                  Year
+                  <input name="yearStart" value="2025" inputmode="numeric" />
+                </label>
+                <label>
+                  Make
+                  <input name="make" value="FORD" />
+                </label>
+                <label>
+                  Model
+                  <input name="model" value="F-150" />
+                </label>
+                <label>
+                  Key system
+                  <input name="keySystemName" value="Ford F-150 late-model key system" />
+                </label>
+                <label>
+                  Key / part option
+                  <input name="keyName" value="Supplier-grade remote / prox option" />
+                </label>
+                <label>
+                  Supplier part number
+                  <input name="partNumber" value="VERIFY-FCC-AND-BLADE" />
+                </label>
+                <label>
+                  Programmer
+                  <input name="programmerName" value="FDRS" />
+                </label>
+                <label>
+                  Tool
+                  <input name="toolName" value="FRD8334" />
+                </label>
+                <label>
+                  Verify before dispatch
+                  <textarea name="verifyBeforeDispatch">FCC / frequency; Blade / emergency key; Remote button layout; Programmer coverage; Battery condition</textarea>
+                </label>
+                <label>
+                  Notes
+                  <textarea name="notes">Verified from shop experience. Confirm supplier catalog data before ordering.</textarea>
+                </label>
+                <button class="primary-action" type="submit">Save Record</button>
+              </form>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Verified applications</p>
+                  <h3>Key Intelligence Records</h3>
+                </div>
+              </div>
+              <div class="key-record-list" id="keyRecordList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="sources">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Data integrations</p>
+                <h3>Source Connectors</h3>
+              </div>
+            </div>
+            <div class="source-list" id="sourceList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="insights">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Calendar intelligence</p>
+                <h3>Real Work Import</h3>
+              </div>
+            </div>
+            <div class="metric-grid insights-metrics" id="insightsMetrics"></div>
+            <div class="insights-grid">
+              <section>
+                <p class="eyebrow">Top job codes</p>
+                <div class="rank-list" id="jobCodeList"></div>
+              </section>
+              <section>
+                <p class="eyebrow">Sellable feature map</p>
+                <div class="feature-list" id="featureList"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="ai">
+          <div class="split-layout">
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Professional assistant</p>
+                  <h3>AI Bench</h3>
+                </div>
+              </div>
+              <div class="chat-log" id="chatLog"></div>
+              <form id="aiForm" class="prompt-row">
+                <input name="prompt" placeholder="Ask about quote prep, parts checklist, customer notes, or job workflow..." />
+                <button class="primary-action" type="submit">Ask</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Guardrails</p>
+                  <h3>Allowed Output</h3>
+                </div>
+              </div>
+              <ul class="plain-list">
+                <li>Ownership verification checklist</li>
+                <li>VIN/job record organization</li>
+                <li>Quote and parts prep</li>
+                <li>Tool compatibility notes</li>
+                <li>Refusal for bypass or unauthorized entry</li>
+              </ul>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="vehicles">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Reference</p>
+                <h3>Vehicle Data Workspace</h3>
+              </div>
+            </div>
+            <div class="vehicle-grid" id="vehicleGrid"></div>
+          </section>
+        </section>
+
+        <section class="view" id="settings">
+          <div class="split-layout">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Supplier login</p>
+                  <h3>Key Innovations</h3>
+                </div>
+              </div>
+              <form id="supplierSettingsForm" class="form-stack">
+                <label>
+                  Login URL
+                  <input name="loginUrl" placeholder="https://..." autocomplete="off" />
+                </label>
+                <label>
+                  Username / email
+                  <input name="username" autocomplete="username" />
+                </label>
+                <label>
+                  Password
+                  <input name="password" type="password" autocomplete="current-password" placeholder="Leave blank to keep saved password" />
+                </label>
+                <label class="toggle-row">
+                  <input name="enabled" type="checkbox" />
+                  Use this account for live supplier lookup
+                </label>
+                <button class="primary-action" type="submit">Save Supplier Login</button>
+              </form>
+              <div class="form-status" id="supplierSettingsStatus"></div>
+            </section>
+
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Connected suppliers</p>
+                  <h3>Account Vault</h3>
+                </div>
+              </div>
+              <div class="source-list" id="supplierAccountList"></div>
+              <div class="assistant-card source-card">
+                <strong>How this fits VIN lookup</strong>
+                <p>When a VIN is decoded, LockForge can use the saved supplier account to run the supplier search for that user and return live price, stock, and exact fitment when the supplier allows it.</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="about">
+          <section class="panel about-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">LockForge Systems</p>
+                <h3>Built for locksmiths in the field</h3>
+              </div>
+            </div>
+            <div class="about-grid">
+              <article>
+                <span>1</span>
+                <strong>VIN-first workflow</strong>
+                <p>Start with the vehicle, not a pile of catalog tabs. Decode year, make, model, trim, body, and fitment clues in one place.</p>
+              </article>
+              <article>
+                <span>2</span>
+                <strong>Supplier-backed parts</strong>
+                <p>Use saved supplier access to pull matching key options, pictures, pricing clues, and condition filters directly into the lookup flow.</p>
+              </article>
+              <article>
+                <span>3</span>
+                <strong>New tech, old-timer depth</strong>
+                <p>Show the quick answer first, then let experienced locksmiths open the deeper fitment, source, and programming detail when needed.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="trust">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Compliance by design</p>
+                <h3>Trust Center</h3>
+              </div>
+            </div>
+            <div class="trust-steps">
+              <article>
+                <strong>1. Verify the locksmith</strong>
+                <p>Business identity, license details where applicable, insurance, and account review.</p>
+              </article>
+              <article>
+                <strong>2. Verify the job</strong>
+                <p>Customer consent, ID/ownership record, location, photos, and signed authorization.</p>
+              </article>
+              <article>
+                <strong>3. Log sensitive work</strong>
+                <p>Every high-risk AI request is tied to a job, operator, timestamp, and outcome.</p>
+              </article>
+              <article>
+                <strong>4. Protect the trade</strong>
+                <p>The product assists professionals without publishing unsafe bypass instructions to the public.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
