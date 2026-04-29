@@ -634,6 +634,170 @@ function productBadges(product, index) {
   return badges.slice(0, 5);
 }
 
+function normalizePrice(value) {
+  const numeric = Number(String(value || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function normalizedSupplierOffer(product) {
+  return {
+    supplier: product.supplier || "Key Innovations",
+    partName: product.name || "Supplier part",
+    sku: product.keyInfo?.sku || "",
+    oem: product.keyInfo?.oem || "",
+    fcc: product.keyInfo?.fcc || "",
+    condition: product.keyInfo?.condition || "Verify",
+    stock: product.keyInfo?.stock || "Verify",
+    price: product.price || "",
+    priceValue: normalizePrice(product.price),
+    image: product.image || "",
+    productUrl: product.url || "",
+    productType: product.keyInfo?.productType || "Verify",
+    buttons: product.keyInfo?.buttons || "",
+    chip: product.keyInfo?.chip || "",
+    fitmentConfidence: product.source?.includes("exact") ? "Exact fitment" : "Verify fitment",
+    rawProduct: product,
+  };
+}
+
+function identityParts(offer) {
+  const primary = offer.fcc || offer.oem || offer.sku || offer.partName;
+  return String(primary || "Unknown part")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compareScore(offer, index) {
+  let score = 0;
+  if (index === 0) score += 15;
+  if (offer.fitmentConfidence === "Exact fitment") score += 30;
+  if (offer.stock === "In stock") score += 25;
+  if (offer.fcc) score += 15;
+  if (offer.condition && !/verify/i.test(offer.condition)) score += 10;
+  if (offer.priceValue) score += 5;
+  return score;
+}
+
+function groupSupplierOffers(products) {
+  const groups = new Map();
+  products.forEach((product, index) => {
+    const offer = normalizedSupplierOffer(product);
+    offer.score = compareScore(offer, index);
+    const key = identityParts(offer);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        title: offer.fcc || offer.oem || offer.partName,
+        image: offer.image,
+        offers: [],
+      });
+    }
+    const group = groups.get(key);
+    if (!group.image && offer.image) group.image = offer.image;
+    group.offers.push(offer);
+  });
+
+  return Array.from(groups.values())
+    .map((group) => {
+      group.offers.sort((a, b) => {
+        if ((b.stock === "In stock") !== (a.stock === "In stock")) return b.stock === "In stock" ? 1 : -1;
+        return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || b.score - a.score;
+      });
+      group.bestOffer = group.offers[0];
+      group.lowestInStock = group.offers
+        .filter((offer) => offer.stock === "In stock" && offer.priceValue)
+        .sort((a, b) => a.priceValue - b.priceValue)[0];
+      group.inStockCount = group.offers.filter((offer) => offer.stock === "In stock").length;
+      return group;
+    })
+    .sort((a, b) => {
+      if ((b.inStockCount > 0) !== (a.inStockCount > 0)) return b.inStockCount > 0 ? 1 : -1;
+      return b.bestOffer.score - a.bestOffer.score;
+    });
+}
+
+function renderOfferBadges(offer) {
+  return [offer.fitmentConfidence, offer.stock, offer.condition, offer.fcc ? "FCC" : "", offer.buttons ? `${offer.buttons} button` : ""]
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((badge) => `<span>${escapeHtml(badge)}</span>`)
+    .join("");
+}
+
+function renderSupplierComparison(lookup, products) {
+  if (!lookup) return "";
+  const filteredProducts = products.filter(productPassesLiveFilters);
+  const groups = groupSupplierOffers(filteredProducts);
+
+  if (!products.length) {
+    return renderLiveSupplierProducts(lookup, products);
+  }
+
+  return `
+    <section class="supplier-compare">
+      <div class="live-product-workspace">
+        ${renderLiveFilters(products, filteredProducts)}
+        <div class="compare-board">
+          <div class="compare-summary">
+            <div>
+              <p class="eyebrow">Compare price and inventory</p>
+              <h3>${groups.length} part groups</h3>
+            </div>
+            <span>${filteredProducts.length} of ${products.length} offers shown</span>
+          </div>
+          ${
+            groups.length
+              ? groups
+                  .map(
+                    (group, index) => `
+                      <article class="compare-card ${index === 0 ? "best" : ""}">
+                        ${group.image ? `<img src="${escapeHtml(group.image)}" alt="${escapeHtml(group.title)}" />` : ""}
+                        <div class="compare-card-body">
+                          <div class="compare-card-head">
+                            <div>
+                              <span>${index === 0 ? "Best comparison match" : "Part group"}</span>
+                              <strong>${escapeHtml(group.title)}</strong>
+                              <p>${escapeHtml(group.bestOffer.partName)}</p>
+                            </div>
+                            <div class="compare-price">
+                              <small>${group.lowestInStock ? "Lowest in stock" : "Reference only"}</small>
+                              <strong>${group.lowestInStock?.priceValue ? `$${group.lowestInStock.priceValue.toFixed(2)}` : "Check"}</strong>
+                            </div>
+                          </div>
+                          <div class="offer-list">
+                            ${group.offers
+                              .map(
+                                (offer) => `
+                                  <div class="offer-row ${offer.stock === "Out of stock" ? "out-of-stock" : ""}">
+                                    <div>
+                                      <strong>${escapeHtml(offer.supplier)}</strong>
+                                      <p>${escapeHtml([offer.sku, offer.oem, offer.productType].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
+                                      <div class="badge-row">${renderOfferBadges(offer)}</div>
+                                    </div>
+                                    <div class="offer-actions">
+                                      <span>${offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : "Check"}</span>
+                                      ${offer.productUrl ? `<a href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+                                    </div>
+                                  </div>
+                                `,
+                              )
+                              .join("")}
+                          </div>
+                        </div>
+                      </article>
+                    `,
+                  )
+                  .join("")
+              : `<article class="assistant-card"><strong>No offers match those filters</strong><p>Clear a filter or choose a broader condition/type.</p></article>`
+          }
+        </div>
+      </div>
+      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Supplier offers are grouped by FCC, OEM, SKU, or part name so additional suppliers can compare under the same part." : "")}</p>
+    </section>
+  `;
+}
+
 function renderRecommendedProducts(lookup) {
   const products = (lookup?.products || []).slice(0, 3);
   if (!lookup) return "";
@@ -914,9 +1078,9 @@ function renderKeyChoicesScreen(profile) {
       <div class="workflow-heading">
         <p class="eyebrow">Screen 4</p>
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
-        <p>${escapeHtml(`${selectedProducts.length} selected options shown, including out-of-stock reference products.`)}</p>
+        <p>${escapeHtml(`${selectedProducts.length} selected options shown, grouped for price and inventory comparison. Out-of-stock reference products stay visible.`)}</p>
       </div>
-      ${renderLiveSupplierProducts(profile.liveSupplierLookup, selectedProducts)}
+      ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="family">Back to key family</button>`,
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
