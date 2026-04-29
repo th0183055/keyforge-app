@@ -685,7 +685,7 @@ function compareScore(offer, index) {
   let score = 0;
   if (index === 0) score += 15;
   if (offer.fitmentConfidence === "Exact fitment") score += 30;
-  if (offer.stock === "In stock") score += 25;
+  if (/^In stock/i.test(offer.stock)) score += 25;
   if (offer.fcc) score += 15;
   if (offer.condition && !/verify/i.test(offer.condition)) score += 10;
   if (offer.priceValue) score += 5;
@@ -719,9 +719,9 @@ function groupSupplierOffers(products) {
       });
       group.bestOffer = group.offers[0];
       group.lowestInStock = group.offers
-        .filter((offer) => offer.stock === "In stock" && offer.priceValue)
+        .filter((offer) => /^In stock/i.test(offer.stock) && offer.priceValue)
         .sort((a, b) => a.priceValue - b.priceValue)[0];
-      group.inStockCount = group.offers.filter((offer) => offer.stock === "In stock").length;
+      group.inStockCount = group.offers.filter((offer) => /^In stock/i.test(offer.stock)).length;
       return group;
     })
     .sort((a, b) => {

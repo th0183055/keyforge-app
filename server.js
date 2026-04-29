@@ -54,8 +54,8 @@ const supplierRegistry = [
   {
     id: "golden-supply",
     name: "Golden Supply Inc.",
-    loginUrl: "",
-    lookupMode: "login/import planned",
+    loginUrl: "https://www.goldenremotes.com/sca-golden-dev/checkout.ssp?is=login&login=T",
+    lookupMode: "live public connector",
   },
 ];
 
@@ -385,6 +385,10 @@ function decodeHtml(value) {
     .trim();
 }
 
+function stripHtml(value) {
+  return decodeHtml(String(value || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " "));
+}
+
 function normalizeImageUrl(url) {
   const cleanUrl = decodeHtml(url).replace("{:size}", "500x659");
   if (!cleanUrl) return "";
@@ -402,6 +406,7 @@ function parseProductCards(html) {
       normalizeImageUrl(card.match(/data-srcset="([^"]+)"/i)?.[1]?.split(" ")[0]);
     cards.push({
       id: decodeHtml(card.match(/data-entity-id="([^"]+)"/i)?.[1]),
+      supplier: "Key Innovations",
       name: decodeHtml(card.match(/data-name="([^"]+)"/i)?.[1]),
       brand: decodeHtml(card.match(/data-product-brand="([^"]*)"/i)?.[1]),
       price: decodeHtml(card.match(/data-product-price="\s*([^"\s]+)/i)?.[1]),
@@ -680,6 +685,7 @@ async function searchKeyInnovationsFitment(vehicle) {
       .map((result) => {
         const product = {
           id: String(result.uid || result.id || ""),
+          supplier: "Key Innovations",
           name: decodeHtml(result.name),
           brand: decodeHtml(result.brand),
           price: result.price || result.ss_retail_price || "",
@@ -712,6 +718,161 @@ async function searchKeyInnovationsFitment(vehicle) {
   };
 }
 
+function goldenSupplyValueFromDescription(description, label) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const html = String(description || "").replace(/\r?\n/g, "<br>");
+  const match = html.match(new RegExp(`${escapedLabel}\\s*:\\s*([\\s\\S]*?)(?:<br\\s*\\/?>|$)`, "i"));
+  return stripHtml(match?.[1] || "");
+}
+
+function goldenSupplyUrl(item) {
+  const component = cleanString(item.urlcomponent);
+  if (!component) return "https://www.goldenremotes.com/";
+  return `https://www.goldenremotes.com/${component}`;
+}
+
+function goldenSupplyImage(item) {
+  return normalizeImageUrl(item.itemimages_detail?.media?.url || item.itemimages_detail?.urls?.[0]?.url || "");
+}
+
+function goldenSupplyCoversVehicle(item, vehicle) {
+  const make = cleanString(vehicle.make).toUpperCase();
+  const model = cleanString(vehicle.model).toUpperCase();
+  const itemMake = cleanString(item.custitem2).toUpperCase();
+  const itemModel = cleanString(item.custitem_tt_model).toUpperCase();
+  const yearText = cleanString(item.custitemtt_year);
+
+  if (make && itemMake && itemMake !== make) return false;
+  if (model && itemModel) {
+    const normalizedModel = model.replace(/[^A-Z0-9]/g, "");
+    const normalizedItemModel = itemModel.replace(/[^A-Z0-9]/g, "");
+    if (normalizedItemModel !== normalizedModel) return false;
+  }
+  if (vehicle.year && yearText && !lineCoversYear(yearText, vehicle.year)) return false;
+  return true;
+}
+
+function scoreGoldenSupplyItem(item, vehicle) {
+  const text = [
+    item.itemid,
+    item.displayname,
+    item.storedisplayname2,
+    item.custitem1,
+    item.custitem2,
+    item.custitem_tt_model,
+    item.storedetaileddescription,
+  ]
+    .map(stripHtml)
+    .join(" ")
+    .toUpperCase();
+  let score = 0;
+  if (goldenSupplyCoversVehicle(item, vehicle)) score += 140;
+  if (/SMART|PROX|PROXIMITY/.test(text)) score += 35;
+  if (/FLIP|REMOTE|TRANSPONDER|INSERT KEY|KEY/.test(text)) score += 30;
+  if (/FCC ID|FREQUENCY|TRANSPONDER TYPE|PART #/.test(text)) score += 25;
+  if (/SHELL|CASE|BUTTON PAD|BATTERY|EMERGENCY INSERT/.test(text)) score -= 20;
+  if (/PROGRAMMER|TOOL|MACHINE|LISHI|PICK/.test(text)) score -= 60;
+  return score;
+}
+
+function normalizeGoldenSupplyItem(item, vehicle, matchedQuery) {
+  const description = item.storedetaileddescription || item.storedescription || "";
+  const part = goldenSupplyValueFromDescription(description, "PART #") || item.displayname || "";
+  const fcc = goldenSupplyValueFromDescription(description, "FCC ID");
+  const frequency = goldenSupplyValueFromDescription(description, "FREQUENCY");
+  const chip = goldenSupplyValueFromDescription(description, "TRANSPONDER TYPE");
+  const quantity = Number(item.quantityavailable || 0);
+  const productType = cleanString(item.custitem1 || item.department || "");
+  const fitment = [item.custitemtt_year, item.custitem2, item.custitem_tt_model].filter(Boolean).join(" ");
+  const product = {
+    id: String(item.internalid || item.itemid || ""),
+    supplier: "Golden Supply Inc.",
+    name: cleanString(item.storedisplayname2 || item.displayname || item.itemid),
+    brand: cleanString(item.custitem2 || ""),
+    price: item.onlinecustomerprice_detail?.onlinecustomerprice ?? item.pricelevel2 ?? item.pricelevel1 ?? "",
+    priceFormatted:
+      item.onlinecustomerprice_detail?.onlinecustomerprice_formatted ||
+      item.pricelevel2_formatted ||
+      item.pricelevel1_formatted ||
+      "",
+    url: goldenSupplyUrl(item),
+    image: goldenSupplyImage(item),
+    source: "Golden Supply live item search",
+    matchedQuery,
+    fitmentLines: fitment ? [fitment] : [],
+    customFields: {
+      itemId: item.itemid || "",
+      displayName: item.displayname || "",
+      productType,
+      year: item.custitemtt_year || "",
+      make: item.custitem2 || "",
+      model: item.custitem_tt_model || "",
+      quantityAvailable: Number.isFinite(quantity) ? quantity : "",
+      purchasable: Boolean(item.ispurchasable),
+      backorderable: Boolean(item.isbackorderable),
+      description: stripHtml(description),
+    },
+    keyInfo: {
+      sku: item.itemid || "",
+      itemNumber: part,
+      fcc,
+      oem: part,
+      chip,
+      frequency,
+      buttons: "",
+      battery: "",
+      condition: "",
+      productType,
+      stock: item.isinstock ? `In stock${Number.isFinite(quantity) ? ` (${quantity})` : ""}` : "Out of stock",
+      fitment,
+    },
+  };
+  product.score = scoreGoldenSupplyItem(item, vehicle);
+  return product;
+}
+
+async function goldenSupplyRequest(query) {
+  const url =
+    `https://www.goldenremotes.com/api/items?fieldset=details&language=en&country=US&currency=USD&limit=100&q=${encodeURIComponent(query)}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "LockForge Systems supplier connector/0.1",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Golden Supply returned ${response.status}`);
+  }
+  return response.json();
+}
+
+async function searchGoldenSupplyProducts(vehicle, vin) {
+  const queries = searchQueriesForVehicle(vehicle, vin).filter((query) => query !== vin);
+  const seen = new Map();
+  const searchAttempts = [];
+
+  for (const query of queries.slice(0, 4)) {
+    const payload = await goldenSupplyRequest(query);
+    const items = payload.items || [];
+    searchAttempts.push({ query, resultCount: Number(payload.total || items.length), returnedCount: items.length });
+    items.forEach((item) => {
+      if (!goldenSupplyCoversVehicle(item, vehicle)) return;
+      const key = item.internalid || item.itemid || item.urlcomponent;
+      if (!seen.has(key)) seen.set(key, normalizeGoldenSupplyItem(item, vehicle, query));
+    });
+  }
+
+  return {
+    connected: true,
+    source: "Golden Supply live item search",
+    searchAttempts,
+    products: Array.from(seen.values())
+      .filter((product) => product.score > 0)
+      .sort((a, b) => b.score - a.score || Number(a.price || 0) - Number(b.price || 0))
+      .slice(0, 60),
+  };
+}
+
 async function liveKeyInnovationsLookup(vehicle, vin) {
   const supplierAccounts = await readSupplierAccounts();
   const account = supplierAccounts.accounts.find((item) => item.id === "key-innovations");
@@ -726,10 +887,21 @@ async function liveKeyInnovationsLookup(vehicle, vin) {
   };
 }
 
+async function liveGoldenSupplyLookup(vehicle, vin) {
+  const live = await searchGoldenSupplyProducts(vehicle, vin);
+  return {
+    supplier: "Golden Supply Inc.",
+    loginStatus: "connected",
+    statusMessage: "Golden Supply public item search is connected.",
+    vinLookupAvailable: false,
+    ...live,
+  };
+}
+
 function supplierLookupStatus(account, override = {}) {
   const enabled = Boolean(account?.enabled);
   const configured = Boolean(account?.username && account?.passwordCipher);
-  const connectorLive = account?.id === "key-innovations";
+  const connectorLive = account?.id === "key-innovations" || account?.id === "golden-supply";
   return {
     id: account?.id || "",
     name: account?.name || "Supplier",
@@ -741,7 +913,9 @@ function supplierLookupStatus(account, override = {}) {
     message:
       override.message ||
       (connectorLive
-        ? "Live lookup is wired."
+        ? account?.id === "golden-supply"
+          ? "Live Golden Supply item search is wired."
+          : "Live lookup is wired."
         : enabled
           ? "Login is saved, but this supplier still needs a connector before parts can appear in comparisons."
           : "Disabled in Settings."),
@@ -753,9 +927,18 @@ async function liveSupplierLookups(vehicle, vin) {
   const supplierAccounts = await readSupplierAccounts();
   const statuses = supplierAccounts.accounts.map((account) => supplierLookupStatus(account));
   const keyIndex = statuses.findIndex((status) => status.id === "key-innovations");
+  const goldenIndex = statuses.findIndex((status) => status.id === "golden-supply");
+  const products = [];
+  const searchAttempts = [];
+  let loginStatus = "connected";
+  let statusMessage = "Supplier lookups completed.";
+  let connected = false;
 
   try {
     const keyInnovations = await liveKeyInnovationsLookup(vehicle, vin);
+    products.push(...(keyInnovations.products || []));
+    searchAttempts.push(...(keyInnovations.searchAttempts || []));
+    connected = connected || Boolean(keyInnovations.connected);
     if (keyIndex >= 0) {
       statuses[keyIndex] = supplierLookupStatus(
         supplierAccounts.accounts.find((account) => account.id === "key-innovations"),
@@ -766,10 +949,6 @@ async function liveSupplierLookups(vehicle, vin) {
         },
       );
     }
-    return {
-      ...keyInnovations,
-      supplierStatuses: statuses,
-    };
   } catch (error) {
     if (keyIndex >= 0) {
       statuses[keyIndex] = supplierLookupStatus(
@@ -781,15 +960,50 @@ async function liveSupplierLookups(vehicle, vin) {
         },
       );
     }
-    return {
-      supplier: "Supplier comparison",
-      loginStatus: "error",
-      statusMessage: error.message || "Live supplier lookup failed.",
-      products: [],
-      searchAttempts: [],
-      supplierStatuses: statuses,
-    };
+    loginStatus = "partial";
+    statusMessage = error.message || "Key Innovations lookup failed.";
   }
+
+  try {
+    const goldenSupply = await liveGoldenSupplyLookup(vehicle, vin);
+    products.push(...(goldenSupply.products || []));
+    searchAttempts.push(...(goldenSupply.searchAttempts || []));
+    connected = connected || Boolean(goldenSupply.connected);
+    if (goldenIndex >= 0) {
+      statuses[goldenIndex] = supplierLookupStatus(
+        supplierAccounts.accounts.find((account) => account.id === "golden-supply"),
+        {
+          status: goldenSupply.loginStatus,
+          message: goldenSupply.statusMessage,
+          productCount: goldenSupply.products?.length || 0,
+        },
+      );
+    }
+  } catch (error) {
+    if (goldenIndex >= 0) {
+      statuses[goldenIndex] = supplierLookupStatus(
+        supplierAccounts.accounts.find((account) => account.id === "golden-supply"),
+        {
+          status: "error",
+          message: error.message || "Golden Supply lookup failed.",
+          productCount: 0,
+        },
+      );
+    }
+    loginStatus = products.length ? "partial" : "error";
+    statusMessage = products.length ? "Golden Supply lookup failed after other supplier results loaded." : error.message || "Live supplier lookup failed.";
+  }
+
+  return {
+    supplier: "Supplier comparison",
+    loginStatus,
+    statusMessage,
+    connected,
+    source: "Multi-supplier live search",
+    products,
+    searchAttempts,
+    supplierStatuses: statuses,
+  };
 }
 
 async function readJsonBody(request) {
