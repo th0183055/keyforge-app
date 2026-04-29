@@ -782,6 +782,9 @@ function normalizeGoldenSupplyItem(item, vehicle, matchedQuery) {
   const frequency = goldenSupplyValueFromDescription(description, "FREQUENCY");
   const chip = goldenSupplyValueFromDescription(description, "TRANSPONDER TYPE");
   const quantity = Number(item.quantityavailable || 0);
+  const fullPrice = Number(item.onlinecustomerprice_detail?.onlinecustomerprice ?? item.pricelevel1 ?? 0);
+  const lowerPrice = Number(item.pricelevel2 ?? fullPrice);
+  const hasLowerPrice = lowerPrice > 0 && fullPrice > lowerPrice;
   const productType = cleanString(item.custitem1 || item.department || "");
   const fitment = [item.custitemtt_year, item.custitem2, item.custitem_tt_model].filter(Boolean).join(" ");
   const product = {
@@ -789,12 +792,12 @@ function normalizeGoldenSupplyItem(item, vehicle, matchedQuery) {
     supplier: "Golden Supply Inc.",
     name: cleanString(item.storedisplayname2 || item.displayname || item.itemid),
     brand: cleanString(item.custitem2 || ""),
-    price: item.onlinecustomerprice_detail?.onlinecustomerprice ?? item.pricelevel2 ?? item.pricelevel1 ?? "",
-    priceFormatted:
-      item.onlinecustomerprice_detail?.onlinecustomerprice_formatted ||
-      item.pricelevel2_formatted ||
-      item.pricelevel1_formatted ||
-      "",
+    price: hasLowerPrice ? lowerPrice : fullPrice || item.pricelevel2 || item.pricelevel1 || "",
+    priceFormatted: hasLowerPrice
+      ? item.pricelevel2_formatted
+      : item.onlinecustomerprice_detail?.onlinecustomerprice_formatted || item.pricelevel2_formatted || item.pricelevel1_formatted || "",
+    listPrice: hasLowerPrice ? fullPrice : "",
+    listPriceFormatted: hasLowerPrice ? item.pricelevel1_formatted || item.onlinecustomerprice_detail?.onlinecustomerprice_formatted || "" : "",
     url: goldenSupplyUrl(item),
     image: goldenSupplyImage(item),
     source: "Golden Supply live item search",

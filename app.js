@@ -13,7 +13,7 @@ const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
   type: new Set(),
-  brand: new Set(),
+  supplier: new Set(),
 };
 
 const chatLog = [
@@ -527,18 +527,63 @@ function renderSupplierCandidates(candidates = [], compact = false) {
   `;
 }
 
+function conditionBucket(product) {
+  const text = String(product.keyInfo?.condition || product.name || "").toLowerCase();
+  if (!product.keyInfo?.condition) return "Unlisted";
+  if (text.includes("refurb")) return "Refurbished";
+  if (text.includes("oem") || text === "new") return "OEM / new";
+  if (text.includes("aftermarket")) return "Aftermarket";
+  return "Other condition";
+}
+
+function stockBucket(product) {
+  const text = String(product.keyInfo?.stock || "").toLowerCase();
+  if (text.startsWith("in stock")) return "In stock";
+  if (text.includes("out of stock")) return "Out of stock";
+  return "Stock unknown";
+}
+
+function partTypeBucket(product) {
+  const text = [product.name, product.keyInfo?.productType, product.keyInfo?.buttons, product.keyInfo?.chip]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/prox|proximity|smart/.test(text)) return "Proximity / smart";
+  if (/flip|remote head|switchblade/.test(text)) return "Flip / remote head";
+  if (/insert|blade|emergency/.test(text)) return "Insert / blade";
+  if (/transponder|chip/.test(text)) return "Transponder key";
+  if (/tool|machine|lishi|pick|decoder/.test(text)) return "Tools / machines";
+  return "Other key item";
+}
+
 function liveFilterValue(product, group) {
-  if (group === "condition") return product.keyInfo?.condition || "Unlisted";
-  if (group === "stock") return product.keyInfo?.stock || "Unlisted";
-  if (group === "type") return product.keyInfo?.productType || "Unlisted";
-  if (group === "brand") return product.brand || "Unlisted";
+  if (group === "condition") return conditionBucket(product);
+  if (group === "stock") return stockBucket(product);
+  if (group === "type") return partTypeBucket(product);
+  if (group === "supplier") return product.supplier || "Key Innovations";
   return "Unlisted";
 }
 
 function liveFilterOptions(products, group) {
-  return [...new Set(products.map((product) => liveFilterValue(product, group)).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b),
-  );
+  const counts = products.reduce((bucketCounts, product) => {
+    const value = liveFilterValue(product, group);
+    if (value) bucketCounts[value] = (bucketCounts[value] || 0) + 1;
+    return bucketCounts;
+  }, {});
+  const preferredOrder = {
+    condition: ["OEM / new", "Refurbished", "Aftermarket", "Unlisted", "Other condition"],
+    stock: ["In stock", "Out of stock", "Stock unknown"],
+    type: ["Proximity / smart", "Flip / remote head", "Transponder key", "Insert / blade", "Tools / machines", "Other key item"],
+  };
+  return Object.keys(counts)
+    .sort((a, b) => {
+      const order = preferredOrder[group] || [];
+      const aIndex = order.indexOf(a);
+      const bIndex = order.indexOf(b);
+      if (aIndex >= 0 || bIndex >= 0) return (aIndex >= 0 ? aIndex : 999) - (bIndex >= 0 ? bIndex : 999);
+      return a.localeCompare(b);
+    })
+    .map((value) => ({ value, count: counts[value] }));
 }
 
 function productPassesLiveFilters(product) {
@@ -599,17 +644,17 @@ function renderLiveFilterGroup(label, group, products) {
   const options = liveFilterOptions(products, group);
   if (!options.length) return "";
   return `
-    <details class="live-filter-group" ${group === "condition" ? "open" : ""}>
+    <details class="live-filter-group" ${group === "condition" || group === "stock" ? "open" : ""}>
       <summary>${label}</summary>
       <div>
         ${options
           .map(
             (option) => `
               <label class="filter-check">
-                <input type="checkbox" data-live-filter="${group}" value="${escapeHtml(option)}" ${
-                  liveProductFilters[group].has(option) ? "checked" : ""
+                <input type="checkbox" data-live-filter="${group}" value="${escapeHtml(option.value)}" ${
+                  liveProductFilters[group].has(option.value) ? "checked" : ""
                 } />
-                <span>${escapeHtml(option)}</span>
+                <span>${escapeHtml(option.value)} <small>${option.count}</small></span>
               </label>
             `,
           )
@@ -631,8 +676,8 @@ function renderLiveFilters(products, visibleProducts) {
       </div>
       ${renderLiveFilterGroup("Condition", "condition", products)}
       ${renderLiveFilterGroup("Stock", "stock", products)}
-      ${renderLiveFilterGroup("Part Type", "type", products)}
-      ${renderLiveFilterGroup("Brand", "brand", products)}
+      ${renderLiveFilterGroup("Part Style", "type", products)}
+      ${renderLiveFilterGroup("Supplier", "supplier", products)}
     </div>
   `;
 }
@@ -662,7 +707,11 @@ function normalizedSupplierOffer(product) {
     condition: product.keyInfo?.condition || "Verify",
     stock: product.keyInfo?.stock || "Verify",
     price: product.price || "",
+    priceFormatted: product.priceFormatted || "",
     priceValue: normalizePrice(product.price),
+    listPrice: product.listPrice || "",
+    listPriceFormatted: product.listPriceFormatted || "",
+    listPriceValue: normalizePrice(product.listPrice),
     image: product.image || "",
     productUrl: product.url || "",
     productType: product.keyInfo?.productType || "Verify",
@@ -694,6 +743,19 @@ function compareScore(offer, index) {
 
 function offerIsInStock(offer) {
   return /^In stock/i.test(offer.stock || "");
+}
+
+function sortSupplierOffers(products) {
+  return products
+    .map((product, index) => {
+      const offer = normalizedSupplierOffer(product);
+      offer.score = compareScore(offer, index);
+      return offer;
+    })
+    .sort((a, b) => {
+      if (offerIsInStock(b) !== offerIsInStock(a)) return offerIsInStock(b) ? 1 : -1;
+      return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || a.supplier.localeCompare(b.supplier) || b.score - a.score;
+    });
 }
 
 function groupSupplierOffers(products) {
@@ -744,7 +806,17 @@ function supplierCounts(products) {
 }
 
 function renderOfferBadges(offer) {
-  return [offer.fitmentConfidence, offer.stock, offer.condition, offer.fcc ? "FCC" : "", offer.buttons ? `${offer.buttons} button` : ""]
+  const condition = conditionBucket(offer.rawProduct);
+  const stock = stockBucket(offer.rawProduct);
+  const type = partTypeBucket(offer.rawProduct);
+  return [
+    offer.fitmentConfidence,
+    stock !== "Stock unknown" ? stock : "",
+    condition !== "Unlisted" ? condition : "",
+    type !== "Other key item" ? type : "",
+    offer.fcc ? "FCC" : "",
+    offer.buttons ? `${offer.buttons} button` : "",
+  ]
     .filter(Boolean)
     .slice(0, 5)
     .map((badge) => `<span>${escapeHtml(badge)}</span>`)
@@ -758,10 +830,21 @@ function renderOfferThumb(offer, title = "") {
     : `<div class="offer-thumb empty" aria-hidden="true">${escapeHtml(String(label).charAt(0) || "?")}</div>`;
 }
 
+function renderOfferPrice(offer) {
+  const current = offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : offer.priceFormatted || "Check";
+  const list = offer.listPriceValue && offer.priceValue && offer.listPriceValue > offer.priceValue ? `$${offer.listPriceValue.toFixed(2)}` : "";
+  return `
+    <div class="price-stack">
+      ${list ? `<s>${escapeHtml(list)}</s>` : ""}
+      <span>${escapeHtml(current)}</span>
+    </div>
+  `;
+}
+
 function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
   const filteredProducts = products.filter(productPassesLiveFilters);
-  const groups = groupSupplierOffers(filteredProducts);
+  const offers = sortSupplierOffers(filteredProducts);
   const supplierStatuses = lookup.supplierStatuses || [];
   const visibleSupplierCounts = supplierCounts(filteredProducts);
   const selectedSupplierCounts = supplierCounts(products);
@@ -779,7 +862,7 @@ function renderSupplierComparison(lookup, products) {
             <div>
               <p class="eyebrow">Compare price and inventory</p>
               <h3>${filteredProducts.length} offers</h3>
-              <p>${groups.length} part groups after FCC/OEM matching</p>
+              <p>Every matching item is shown. Use filters to narrow condition, stock, type, or supplier.</p>
             </div>
             <span>${filteredProducts.length} of ${products.length} shown</span>
           </div>
@@ -802,60 +885,33 @@ function renderSupplierComparison(lookup, products) {
               : ""
           }
           ${
-            groups.length
-              ? groups
+            offers.length
+              ? `<div class="offer-list direct-offer-list">
+                  ${offers
                   .map(
-                    (group, index) => `
-                      <article class="compare-card ${index === 0 ? "best" : ""}">
-                        ${
-                          group.image
-                            ? `<img src="${escapeHtml(group.image)}" alt="${escapeHtml(group.title)}" />`
-                            : `<div class="compare-image-placeholder" aria-hidden="true">No image</div>`
-                        }
-                        <div class="compare-card-body">
-                          <div class="compare-card-head">
-                            <div>
-                              <span>${index === 0 ? "Best comparison match" : "Part group"}</span>
-                              <strong>${escapeHtml(group.title)}</strong>
-                              <p>${escapeHtml(group.bestOffer.partName)}</p>
-                              <p>${group.offers.length} visible offer${group.offers.length === 1 ? "" : "s"} in this group</p>
-                            </div>
-                            <div class="compare-price">
-                              <small>${group.lowestInStock ? "Lowest in stock" : "Reference only"}</small>
-                              <strong>${group.lowestInStock?.priceValue ? `$${group.lowestInStock.priceValue.toFixed(2)}` : "Check"}</strong>
-                            </div>
-                          </div>
-                          <div class="offer-list">
-                            ${group.offers
-                              .map(
-                                (offer) => `
-                                  <div class="offer-row ${offer.stock === "Out of stock" ? "out-of-stock" : ""}">
-                                    ${renderOfferThumb(offer, group.title)}
-                                    <div>
-                                      <strong>${escapeHtml(offer.supplier)}</strong>
-                                      <p>${escapeHtml(offer.partName)}</p>
-                                      <p>${escapeHtml([offer.sku, offer.oem, offer.productType].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
-                                      <div class="badge-row">${renderOfferBadges(offer)}</div>
-                                    </div>
-                                    <div class="offer-actions">
-                                      <span>${offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : "Check"}</span>
-                                      ${offer.productUrl ? `<a href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open</a>` : ""}
-                                    </div>
-                                  </div>
-                                `,
-                              )
-                              .join("")}
-                          </div>
+                    (offer) => `
+                      <div class="offer-row direct-offer ${offer.stock === "Out of stock" ? "out-of-stock" : ""}">
+                        ${renderOfferThumb(offer)}
+                        <div>
+                          <strong>${escapeHtml(offer.partName)}</strong>
+                          <p>${escapeHtml(offer.supplier)}</p>
+                          <p>${escapeHtml([offer.sku, offer.oem, offer.fcc, offer.productType].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
+                          <div class="badge-row">${renderOfferBadges(offer)}</div>
                         </div>
-                      </article>
+                        <div class="offer-actions">
+                          ${renderOfferPrice(offer)}
+                          ${offer.productUrl ? `<a href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open</a>` : ""}
+                        </div>
+                      </div>
                     `,
                   )
-                  .join("")
+                  .join("")}
+                </div>`
               : `<article class="assistant-card"><strong>No offers match those filters</strong><p>Clear a filter or choose a broader condition/type.</p></article>`
           }
         </div>
       </div>
-      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Supplier offers are grouped by FCC, OEM, SKU, or part name so additional suppliers can compare under the same part. Saved suppliers without connectors will show in the status strip but will not return parts yet." : "")}</p>
+      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Supplier offers are live results. Out-of-stock items stay visible so the app works as a reference guide, not just a shopping cart." : "")}</p>
     </section>
   `;
 }

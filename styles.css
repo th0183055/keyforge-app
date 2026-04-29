@@ -1159,6 +1159,26 @@ textarea {
   accent-color: var(--accent);
 }
 
+.filter-check span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.filter-check small {
+  min-width: 24px;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #f3dfd7;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-align: center;
+}
+
 .live-product-card {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
@@ -1391,6 +1411,14 @@ textarea {
   background: #fffaf6;
 }
 
+.direct-offer-list {
+  gap: 8px;
+}
+
+.direct-offer {
+  background: white;
+}
+
 .offer-thumb {
   width: 58px;
   height: 58px;
@@ -1419,7 +1447,20 @@ textarea {
   justify-items: end;
 }
 
-.offer-actions span {
+.price-stack {
+  display: grid;
+  justify-items: end;
+  line-height: 1.1;
+}
+
+.price-stack s {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.offer-actions span,
+.price-stack span {
   color: var(--accent-dark);
   font-size: 1rem;
   font-weight: 900;
