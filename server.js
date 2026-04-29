@@ -20,6 +20,73 @@ const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
 const localSecretPath = path.join(dataDir, ".lockforge-secret");
 
+const supplierRegistry = [
+  {
+    id: "key-innovations",
+    name: "Key Innovations",
+    loginUrl: "https://keyinnovations.com/login.php",
+    lookupMode: "live connector",
+  },
+  {
+    id: "uhs",
+    name: "UHS Hardware",
+    loginUrl: "https://www.uhs-hardware.com/login.php",
+    lookupMode: "planned connector",
+  },
+  {
+    id: "transponder-island",
+    name: "Transponder Island",
+    loginUrl: "https://transponderisland.com/",
+    lookupMode: "planned connector",
+  },
+  {
+    id: "key4",
+    name: "Key4",
+    loginUrl: "https://www.key4.com/",
+    lookupMode: "planned connector",
+  },
+  {
+    id: "idn-hoffman",
+    name: "IDN-H. Hoffman",
+    loginUrl: "https://www.idn-inc.com/",
+    lookupMode: "login/import planned",
+  },
+  {
+    id: "golden-supply",
+    name: "Golden Supply Inc.",
+    loginUrl: "",
+    lookupMode: "login/import planned",
+  },
+];
+
+function supplierDefaults(definition) {
+  return {
+    id: definition.id,
+    name: definition.name,
+    loginUrl: definition.loginUrl || "",
+    username: "",
+    enabled: definition.id === "key-innovations" ? false : false,
+    passwordCipher: null,
+    lookupMode: definition.lookupMode,
+    updatedAt: null,
+  };
+}
+
+function mergeSupplierRegistry(accounts) {
+  const existing = new Map((accounts || []).map((account) => [account.id, account]));
+  const merged = supplierRegistry.map((definition) => ({
+    ...supplierDefaults(definition),
+    ...(existing.get(definition.id) || {}),
+    name: definition.name,
+    lookupMode: definition.lookupMode,
+    loginUrl: existing.get(definition.id)?.loginUrl || definition.loginUrl || "",
+  }));
+  for (const account of accounts || []) {
+    if (!supplierRegistry.some((definition) => definition.id === account.id)) merged.push(account);
+  }
+  return merged;
+}
+
 const seedStore = {
   jobs: [
     {
@@ -245,22 +312,19 @@ async function readSupplierAccounts() {
   if (!existsSync(supplierAccountsPath)) {
     const seed = {
       generatedAt: new Date().toISOString(),
-      accounts: [
-        {
-          id: "key-innovations",
-          name: "Key Innovations",
-          loginUrl: "",
-          username: "",
-          enabled: false,
-          passwordCipher: null,
-          updatedAt: null,
-        },
-      ],
+      accounts: mergeSupplierRegistry([]),
     };
     await writeFile(supplierAccountsPath, `${JSON.stringify(seed, null, 2)}\n`);
     return seed;
   }
-  return JSON.parse(await readFile(supplierAccountsPath, "utf8"));
+  const vault = JSON.parse(await readFile(supplierAccountsPath, "utf8"));
+  const accounts = mergeSupplierRegistry(vault.accounts);
+  if (accounts.length !== vault.accounts?.length) {
+    const nextVault = { ...vault, accounts };
+    await writeSupplierAccounts(nextVault);
+    return nextVault;
+  }
+  return { ...vault, accounts };
 }
 
 async function writeSupplierAccounts(accounts) {
@@ -277,6 +341,7 @@ function publicSupplierAccount(account) {
     enabled: Boolean(account.enabled),
     connected: Boolean(account.enabled && account.username && account.passwordCipher),
     hasPassword: Boolean(account.passwordCipher),
+    lookupMode: account.lookupMode || "planned connector",
     updatedAt: account.updatedAt || null,
   };
 }

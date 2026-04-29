@@ -1554,6 +1554,20 @@ textarea {
   background: var(--soft);
 }
 
+.supplier-account-row {
+  display: grid;
+  gap: 8px;
+}
+
+.supplier-account-row.selected {
+  border: 2px solid var(--accent);
+  background: #fff8f0;
+}
+
+.supplier-account-row .secondary-action {
+  justify-self: start;
+}
+
 .source-card-row strong,
 .source-card-row span {
   display: block;

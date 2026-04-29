@@ -4,6 +4,7 @@ let calendarAnalysis = null;
 let keyIntelligence = [];
 let sourceConnectors = [];
 let supplierAccounts = [];
+let selectedSupplierId = "key-innovations";
 let selectedJobId = null;
 let latestVinProfile = null;
 let vinWorkflowStep = "entry";
@@ -38,6 +39,7 @@ const sourceList = document.querySelector("#sourceList");
 const supplierSettingsForm = document.querySelector("#supplierSettingsForm");
 const supplierSettingsStatus = document.querySelector("#supplierSettingsStatus");
 const supplierAccountList = document.querySelector("#supplierAccountList");
+const supplierSelect = document.querySelector("#supplierSelect");
 const vinForm = document.querySelector("#vinForm");
 const vinResult = document.querySelector("#vinResult");
 const vinRecommendation = document.querySelector("#vinRecommendation");
@@ -300,30 +302,41 @@ function renderSupplierAccounts() {
   if (!supplierAccountList || !supplierSettingsForm) return;
 
   if (!supplierAccounts.length) {
-    supplierAccountList.innerHTML = `<article class="source-card-row"><strong>No supplier accounts</strong><p>Add Key Innovations first, then we can add other suppliers.</p></article>`;
+    supplierAccountList.innerHTML = `<article class="source-card-row"><strong>No supplier accounts</strong><p>Supplier registry has not loaded yet.</p></article>`;
     return;
   }
 
-  const keyInnovations = supplierAccounts.find((account) => account.id === "key-innovations") || supplierAccounts[0];
-  supplierSettingsForm.elements.loginUrl.value = keyInnovations.loginUrl || "";
-  supplierSettingsForm.elements.username.value = keyInnovations.username || "";
+  if (!supplierAccounts.some((account) => account.id === selectedSupplierId)) {
+    selectedSupplierId = supplierAccounts[0].id;
+  }
+  const selectedAccount = supplierAccounts.find((account) => account.id === selectedSupplierId) || supplierAccounts[0];
+  if (supplierSelect) {
+    supplierSelect.innerHTML = supplierAccounts
+      .map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.name)}</option>`)
+      .join("");
+    supplierSelect.value = selectedAccount.id;
+  }
+
+  supplierSettingsForm.elements.loginUrl.value = selectedAccount.loginUrl || "";
+  supplierSettingsForm.elements.username.value = selectedAccount.username || "";
   supplierSettingsForm.elements.password.value = "";
-  supplierSettingsForm.elements.enabled.checked = Boolean(keyInnovations.enabled);
+  supplierSettingsForm.elements.enabled.checked = Boolean(selectedAccount.enabled);
 
   supplierAccountList.innerHTML = supplierAccounts
     .map(
       (account) => `
-        <article class="source-card-row">
+        <article class="source-card-row supplier-account-row ${account.id === selectedAccount.id ? "selected" : ""}">
           <div>
             <strong>${escapeHtml(account.name)}</strong>
-            <span>${account.connected ? "Connected" : account.hasPassword ? "Saved, disabled" : "Not connected"}</span>
+            <span>${account.connected ? "Enabled with saved login" : account.hasPassword ? "Login saved, disabled" : "Not connected"}</span>
           </div>
-          <p>${escapeHtml(account.username || "No username saved")}</p>
+          <p>${escapeHtml(account.username || "No username saved")} · ${escapeHtml(account.lookupMode || "planned connector")}</p>
           <div class="tag-row">
             <span>${account.enabled ? "Live lookup on" : "Live lookup off"}</span>
             <span>${account.hasPassword ? "Password saved" : "Password missing"}</span>
             <span>${account.updatedAt ? `Updated ${new Date(account.updatedAt).toLocaleDateString()}` : "Not updated"}</span>
           </div>
+          <button class="secondary-action small" type="button" data-edit-supplier="${escapeHtml(account.id)}">Edit</button>
         </article>
       `,
     )
@@ -1412,6 +1425,14 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.viewTarget));
 });
 
+if (supplierSelect) {
+  supplierSelect.addEventListener("change", () => {
+    selectedSupplierId = supplierSelect.value;
+    supplierSettingsStatus.textContent = "";
+    renderSupplierAccounts();
+  });
+}
+
 document.addEventListener("change", (event) => {
   const input = event.target.closest("[data-live-filter]");
   if (!input || !latestVinProfile) return;
@@ -1453,6 +1474,14 @@ document.addEventListener("click", (event) => {
     vinWorkflowStep = "parts";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const editSupplierButton = event.target.closest("[data-edit-supplier]");
+  if (editSupplierButton) {
+    selectedSupplierId = editSupplierButton.dataset.editSupplier;
+    supplierSettingsStatus.textContent = "";
+    renderSupplierAccounts();
     return;
   }
 
@@ -1519,10 +1548,12 @@ if (supplierSettingsForm) {
     try {
       submitButton.disabled = true;
       supplierSettingsStatus.textContent = "Saving supplier login...";
-      const payload = await api("/api/supplier-accounts/key-innovations", {
+      const supplierId = data.get("supplierId") || selectedSupplierId;
+      const supplier = supplierAccounts.find((account) => account.id === supplierId);
+      const payload = await api(`/api/supplier-accounts/${encodeURIComponent(supplierId)}`, {
         method: "POST",
         body: JSON.stringify({
-          name: "Key Innovations",
+          name: supplier?.name || supplierId,
           loginUrl: data.get("loginUrl"),
           username: data.get("username"),
           password: data.get("password"),

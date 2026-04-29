@@ -331,11 +331,15 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Supplier login</p>
-                  <h3>Key Innovations</h3>
+                  <p class="eyebrow">Supplier logins</p>
+                  <h3>Account setup</h3>
                 </div>
               </div>
               <form id="supplierSettingsForm" class="form-stack">
+                <label>
+                  Supplier
+                  <select name="supplierId" id="supplierSelect"></select>
+                </label>
                 <label>
                   Login URL
                   <input name="loginUrl" placeholder="https://..." autocomplete="off" />
@@ -367,7 +371,7 @@
               <div class="source-list" id="supplierAccountList"></div>
               <div class="assistant-card source-card">
                 <strong>How this fits VIN lookup</strong>
-                <p>When a VIN is decoded, LockForge can use the saved supplier account to run the supplier search for that user and return live price, stock, and exact fitment when the supplier allows it.</p>
+                <p>When a VIN is decoded, LockForge can run enabled supplier connectors and compare normalized price, stock, condition, and fitment. Key Innovations is live now; the rest are ready for connector wiring.</p>
               </div>
             </section>
           </div>
