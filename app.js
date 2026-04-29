@@ -692,6 +692,10 @@ function compareScore(offer, index) {
   return score;
 }
 
+function offerIsInStock(offer) {
+  return /^In stock/i.test(offer.stock || "");
+}
+
 function groupSupplierOffers(products) {
   const groups = new Map();
   products.forEach((product, index) => {
@@ -714,20 +718,29 @@ function groupSupplierOffers(products) {
   return Array.from(groups.values())
     .map((group) => {
       group.offers.sort((a, b) => {
-        if ((b.stock === "In stock") !== (a.stock === "In stock")) return b.stock === "In stock" ? 1 : -1;
+        if (offerIsInStock(b) !== offerIsInStock(a)) return offerIsInStock(b) ? 1 : -1;
         return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || b.score - a.score;
       });
       group.bestOffer = group.offers[0];
+      group.image = group.bestOffer?.image || group.image || group.offers.find((offer) => offer.image)?.image || "";
       group.lowestInStock = group.offers
-        .filter((offer) => /^In stock/i.test(offer.stock) && offer.priceValue)
+        .filter((offer) => offerIsInStock(offer) && offer.priceValue)
         .sort((a, b) => a.priceValue - b.priceValue)[0];
-      group.inStockCount = group.offers.filter((offer) => /^In stock/i.test(offer.stock)).length;
+      group.inStockCount = group.offers.filter(offerIsInStock).length;
       return group;
     })
     .sort((a, b) => {
       if ((b.inStockCount > 0) !== (a.inStockCount > 0)) return b.inStockCount > 0 ? 1 : -1;
       return b.bestOffer.score - a.bestOffer.score;
     });
+}
+
+function supplierCounts(products) {
+  return products.reduce((counts, product) => {
+    const supplier = product.supplier || "Key Innovations";
+    counts[supplier] = (counts[supplier] || 0) + 1;
+    return counts;
+  }, {});
 }
 
 function renderOfferBadges(offer) {
@@ -738,11 +751,20 @@ function renderOfferBadges(offer) {
     .join("");
 }
 
+function renderOfferThumb(offer, title = "") {
+  const label = offer?.partName || title || offer?.supplier || "Part";
+  return offer?.image
+    ? `<img class="offer-thumb" src="${escapeHtml(offer.image)}" alt="${escapeHtml(label)}" />`
+    : `<div class="offer-thumb empty" aria-hidden="true">${escapeHtml(String(label).charAt(0) || "?")}</div>`;
+}
+
 function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
   const filteredProducts = products.filter(productPassesLiveFilters);
   const groups = groupSupplierOffers(filteredProducts);
   const supplierStatuses = lookup.supplierStatuses || [];
+  const visibleSupplierCounts = supplierCounts(filteredProducts);
+  const selectedSupplierCounts = supplierCounts(products);
 
   if (!products.length) {
     return renderLiveSupplierProducts(lookup, products);
@@ -756,19 +778,22 @@ function renderSupplierComparison(lookup, products) {
           <div class="compare-summary">
             <div>
               <p class="eyebrow">Compare price and inventory</p>
-              <h3>${groups.length} part groups</h3>
+              <h3>${filteredProducts.length} offers</h3>
+              <p>${groups.length} part groups after FCC/OEM matching</p>
             </div>
-            <span>${filteredProducts.length} of ${products.length} offers shown</span>
+            <span>${filteredProducts.length} of ${products.length} shown</span>
           </div>
           ${
             supplierStatuses.length
               ? `<div class="supplier-status-strip">
                   ${supplierStatuses
-                    .filter((status) => status.enabled || status.productCount)
+                    .filter((status) => status.enabled || status.productCount || selectedSupplierCounts[status.name])
                     .map(
                       (status) => `
                         <span class="${status.connectorLive && status.productCount ? "ready" : "planned"}">
-                          ${escapeHtml(status.name)}: ${escapeHtml(status.productCount ? `${status.productCount} offers` : status.status)}
+                          ${escapeHtml(status.name)}: ${escapeHtml(
+                            `${visibleSupplierCounts[status.name] || 0} shown${status.productCount ? ` / ${status.productCount} found` : ""}`,
+                          )}
                         </span>
                       `,
                     )
@@ -782,13 +807,18 @@ function renderSupplierComparison(lookup, products) {
                   .map(
                     (group, index) => `
                       <article class="compare-card ${index === 0 ? "best" : ""}">
-                        ${group.image ? `<img src="${escapeHtml(group.image)}" alt="${escapeHtml(group.title)}" />` : ""}
+                        ${
+                          group.image
+                            ? `<img src="${escapeHtml(group.image)}" alt="${escapeHtml(group.title)}" />`
+                            : `<div class="compare-image-placeholder" aria-hidden="true">No image</div>`
+                        }
                         <div class="compare-card-body">
                           <div class="compare-card-head">
                             <div>
                               <span>${index === 0 ? "Best comparison match" : "Part group"}</span>
                               <strong>${escapeHtml(group.title)}</strong>
                               <p>${escapeHtml(group.bestOffer.partName)}</p>
+                              <p>${group.offers.length} visible offer${group.offers.length === 1 ? "" : "s"} in this group</p>
                             </div>
                             <div class="compare-price">
                               <small>${group.lowestInStock ? "Lowest in stock" : "Reference only"}</small>
@@ -800,8 +830,10 @@ function renderSupplierComparison(lookup, products) {
                               .map(
                                 (offer) => `
                                   <div class="offer-row ${offer.stock === "Out of stock" ? "out-of-stock" : ""}">
+                                    ${renderOfferThumb(offer, group.title)}
                                     <div>
                                       <strong>${escapeHtml(offer.supplier)}</strong>
+                                      <p>${escapeHtml(offer.partName)}</p>
                                       <p>${escapeHtml([offer.sku, offer.oem, offer.productType].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
                                       <div class="badge-row">${renderOfferBadges(offer)}</div>
                                     </div>
