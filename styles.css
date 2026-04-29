@@ -1260,6 +1260,31 @@ textarea {
   white-space: nowrap;
 }
 
+.supplier-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.supplier-status-strip span {
+  border-radius: 999px;
+  padding: 7px 9px;
+  background: #f4dfdc;
+  color: var(--accent-dark);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.supplier-status-strip span.ready {
+  background: var(--charcoal);
+  color: #fff6ef;
+}
+
+.supplier-status-strip span.planned {
+  background: #f7e7d1;
+  color: #7a4b13;
+}
+
 .compare-card {
   display: grid;
   grid-template-columns: 118px minmax(0, 1fr);

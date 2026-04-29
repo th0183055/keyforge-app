@@ -742,6 +742,7 @@ function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
   const filteredProducts = products.filter(productPassesLiveFilters);
   const groups = groupSupplierOffers(filteredProducts);
+  const supplierStatuses = lookup.supplierStatuses || [];
 
   if (!products.length) {
     return renderLiveSupplierProducts(lookup, products);
@@ -759,6 +760,22 @@ function renderSupplierComparison(lookup, products) {
             </div>
             <span>${filteredProducts.length} of ${products.length} offers shown</span>
           </div>
+          ${
+            supplierStatuses.length
+              ? `<div class="supplier-status-strip">
+                  ${supplierStatuses
+                    .filter((status) => status.enabled || status.productCount)
+                    .map(
+                      (status) => `
+                        <span class="${status.connectorLive && status.productCount ? "ready" : "planned"}">
+                          ${escapeHtml(status.name)}: ${escapeHtml(status.productCount ? `${status.productCount} offers` : status.status)}
+                        </span>
+                      `,
+                    )
+                    .join("")}
+                </div>`
+              : ""
+          }
           ${
             groups.length
               ? groups
@@ -806,7 +823,7 @@ function renderSupplierComparison(lookup, products) {
           }
         </div>
       </div>
-      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Supplier offers are grouped by FCC, OEM, SKU, or part name so additional suppliers can compare under the same part." : "")}</p>
+      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Supplier offers are grouped by FCC, OEM, SKU, or part name so additional suppliers can compare under the same part. Saved suppliers without connectors will show in the status strip but will not return parts yet." : "")}</p>
     </section>
   `;
 }
@@ -1243,7 +1260,11 @@ function renderVinProfile(profile) {
     <strong>${escapeHtml(profile.liveSupplierLookup?.loginStatus === "connected" ? "Live supplier connected" : "Supplier search fallback")}</strong>
     <p>${escapeHtml(profile.liveSupplierLookup?.statusMessage || "Current matches use imported Key Innovations labels until live supplier lookup is connected.")}</p>
     <div class="tag-row">
-      <span>Key Innovations</span><span>${escapeHtml(`${profile.liveSupplierLookup?.products?.length || 0} live products`)}</span><span>Verify before ordering</span>
+      ${(profile.liveSupplierLookup?.supplierStatuses || [])
+        .filter((status) => status.enabled || status.productCount)
+        .map((status) => `<span>${escapeHtml(`${status.name}: ${status.productCount ? `${status.productCount} offers` : status.status}`)}</span>`)
+        .join("")}
+      <span>Verify before ordering</span>
     </div>
   `;
   return;

@@ -726,6 +726,72 @@ async function liveKeyInnovationsLookup(vehicle, vin) {
   };
 }
 
+function supplierLookupStatus(account, override = {}) {
+  const enabled = Boolean(account?.enabled);
+  const configured = Boolean(account?.username && account?.passwordCipher);
+  const connectorLive = account?.id === "key-innovations";
+  return {
+    id: account?.id || "",
+    name: account?.name || "Supplier",
+    enabled,
+    configured,
+    connectorLive,
+    lookupMode: account?.lookupMode || "planned connector",
+    status: override.status || (connectorLive ? "live connector" : enabled ? "saved, connector planned" : "disabled"),
+    message:
+      override.message ||
+      (connectorLive
+        ? "Live lookup is wired."
+        : enabled
+          ? "Login is saved, but this supplier still needs a connector before parts can appear in comparisons."
+          : "Disabled in Settings."),
+    productCount: override.productCount || 0,
+  };
+}
+
+async function liveSupplierLookups(vehicle, vin) {
+  const supplierAccounts = await readSupplierAccounts();
+  const statuses = supplierAccounts.accounts.map((account) => supplierLookupStatus(account));
+  const keyIndex = statuses.findIndex((status) => status.id === "key-innovations");
+
+  try {
+    const keyInnovations = await liveKeyInnovationsLookup(vehicle, vin);
+    if (keyIndex >= 0) {
+      statuses[keyIndex] = supplierLookupStatus(
+        supplierAccounts.accounts.find((account) => account.id === "key-innovations"),
+        {
+          status: keyInnovations.loginStatus,
+          message: keyInnovations.statusMessage,
+          productCount: keyInnovations.products?.length || 0,
+        },
+      );
+    }
+    return {
+      ...keyInnovations,
+      supplierStatuses: statuses,
+    };
+  } catch (error) {
+    if (keyIndex >= 0) {
+      statuses[keyIndex] = supplierLookupStatus(
+        supplierAccounts.accounts.find((account) => account.id === "key-innovations"),
+        {
+          status: "error",
+          message: error.message || "Key Innovations lookup failed.",
+          productCount: 0,
+        },
+      );
+    }
+    return {
+      supplier: "Supplier comparison",
+      loginStatus: "error",
+      statusMessage: error.message || "Live supplier lookup failed.",
+      products: [],
+      searchAttempts: [],
+      supplierStatuses: statuses,
+    };
+  }
+}
+
 async function readJsonBody(request) {
   let body = "";
   for await (const chunk of request) {
@@ -1564,18 +1630,7 @@ async function buildLocksmithProfile(vin, decode, store) {
   const record = findIntelligenceRecord(vehicle, intelligence);
   const matchedJobs = summarizeMatchedJobs(record, store.jobs);
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
-  let liveSupplierLookup = null;
-  try {
-    liveSupplierLookup = await liveKeyInnovationsLookup(vehicle, vin);
-  } catch (error) {
-    liveSupplierLookup = {
-      supplier: "Key Innovations",
-      loginStatus: "error",
-      statusMessage: error.message || "Live supplier lookup failed.",
-      products: [],
-      searchAttempts: [],
-    };
-  }
+  const liveSupplierLookup = await liveSupplierLookups(vehicle, vin);
   const selected = record
     ? {
         keys: record.keyOptions,
