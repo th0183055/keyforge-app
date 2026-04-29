@@ -12,6 +12,19 @@ npm start
 
 Then open `http://127.0.0.1:4173/`.
 
+## Deploy on Render
+
+This app must be deployed as a Render **Web Service**, not a Static Site.
+
+Use these settings:
+
+- Runtime: `Node`
+- Build command: `npm install`
+- Start command: `npm start`
+- Health check path: `/`
+
+The included `render.yaml` is a Render Blueprint for the same setup. If the deployed app shows `404` for `/api/vin/...`, the service was created as a Static Site or is pointing at the wrong Render service URL.
+
 ## What Exists Now
 
 - Clickable dashboard
