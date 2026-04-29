@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4173);
+const host = process.env.HOST || "0.0.0.0";
 const dataDir = path.join(__dirname, "data");
 const storePath = path.join(dataDir, "store.json");
 const keyIntelligencePath = path.join(dataDir, "key-intelligence.json");
@@ -1874,6 +1875,6 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, "127.0.0.1", () => {
-  console.log(`Premier Locksmith AI running at http://127.0.0.1:${port}/`);
+server.listen(port, host, () => {
+  console.log(`LockForge Systems running at http://${host}:${port}/`);
 });

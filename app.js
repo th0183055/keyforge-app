@@ -1185,11 +1185,22 @@ async function api(path, options = {}) {
     ...options,
   });
 
-  const payload = await response.json();
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}. On Render, deploy this as a Node web service with npm start, not a static site.`);
+  }
   if (!response.ok) {
     throw new Error(payload.error || "Request failed");
   }
   return payload;
+}
+
+function normalizeVinInput(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
 }
 
 async function loadJobs() {
@@ -1393,10 +1404,14 @@ aiForm.addEventListener("submit", async (event) => {
 vinForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(vinForm);
-  const vin = String(data.get("vin") || "").trim().toUpperCase();
+  const vin = normalizeVinInput(data.get("vin"));
   const submitButton = vinForm.querySelector("button[type='submit']");
 
   try {
+    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+      throw new Error("Enter a valid 17-character VIN. VINs do not use I, O, or Q.");
+    }
+    vinForm.querySelector("input[name='vin']").value = vin;
     submitButton.disabled = true;
     vinWorkflowStep = "vehicle";
     selectedKeyFamily = "";
