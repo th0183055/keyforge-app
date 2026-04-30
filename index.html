@@ -56,6 +56,25 @@
                 <button class="scan-action" type="button" title="Camera VIN scanning will connect here">Scan</button>
                 <button class="primary-action" type="submit">Decode</button>
               </form>
+              <form id="ymmForm" class="ymm-form">
+                <div>
+                  <p class="eyebrow">No VIN or VIN is inconclusive?</p>
+                  <strong>Search by vehicle instead</strong>
+                </div>
+                <label>
+                  Year
+                  <input name="year" inputmode="numeric" maxlength="4" placeholder="2025" autocomplete="off" />
+                </label>
+                <label>
+                  Make
+                  <input name="make" placeholder="Ford" autocomplete="off" />
+                </label>
+                <label>
+                  Model
+                  <input name="model" placeholder="F-150" autocomplete="off" />
+                </label>
+                <button class="secondary-action" type="submit">Find Parts</button>
+              </form>
               <div class="vin-result" id="vinResult"></div>
             </section>
 

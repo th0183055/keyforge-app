@@ -401,6 +401,24 @@ main {
   box-shadow: 0 12px 26px rgba(72, 9, 16, 0.16);
 }
 
+.ymm-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) 92px minmax(120px, 1fr) minmax(130px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: -4px 0 16px;
+  padding: 12px;
+  border: 1px solid #ead0ca;
+  border-radius: 12px;
+  background: rgba(255, 248, 240, 0.72);
+}
+
+.ymm-form strong {
+  display: block;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
 .vin-form label {
   color: var(--accent-dark);
   font-size: 0.78rem;
@@ -416,6 +434,12 @@ main {
   font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ymm-form input {
+  min-height: 44px;
+  background: white;
   text-transform: uppercase;
 }
 
@@ -440,7 +464,8 @@ main {
   padding-inline: 18px;
 }
 
-.vin-form.is-hidden {
+.vin-form.is-hidden,
+.ymm-form.is-hidden {
   display: none;
 }
 
@@ -1440,6 +1465,48 @@ textarea {
   background: #fbf2e8;
 }
 
+.part-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.part-reference-grid span {
+  min-width: 0;
+  border: 1px solid #ead5cc;
+  border-radius: 8px;
+  padding: 6px 7px;
+  background: #fffaf6;
+}
+
+.part-reference-grid small {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.part-reference-grid strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.part-reference-grid.empty {
+  display: block;
+}
+
+.part-reference-grid.empty span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .offer-actions {
   display: grid;
   gap: 7px;
@@ -1816,6 +1883,16 @@ textarea {
     font-size: 0.78rem;
   }
 
+  .ymm-form {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0 -2px 12px;
+  }
+
+  .ymm-form > div,
+  .ymm-form button {
+    grid-column: 1 / -1;
+  }
+
   .vin-form input {
     min-height: 54px;
     font-size: 1.2rem;
@@ -2027,6 +2104,10 @@ textarea {
     min-height: 46px;
   }
 
+  .ymm-form {
+    grid-template-columns: 1fr;
+  }
+
   .recommended-product {
     grid-template-columns: 82px minmax(0, 1fr);
   }
@@ -2073,6 +2154,10 @@ textarea {
   .offer-thumb {
     width: 52px;
     height: 52px;
+  }
+
+  .part-reference-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .offer-actions {

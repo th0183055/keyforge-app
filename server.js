@@ -1724,7 +1724,7 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
       label: "Vehicle identity",
       value: [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" "),
       confidence: "high",
-      source: "NHTSA VIN decode",
+      source: vehicle.identitySource || "NHTSA VIN decode",
     },
     {
       label: "Likely key style",
@@ -1793,13 +1793,13 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
   };
 }
 
-function sourceReadiness(record) {
+function sourceReadiness(record, identity = { status: "connected", result: "Used for VIN decode" }) {
   return [
     {
       sourceId: "nhtsa-vpic",
       label: "Vehicle identity",
-      status: "connected",
-      result: "Used for VIN decode",
+      status: identity.status,
+      result: identity.result,
     },
     {
       sourceId: "shop-history",
@@ -1843,7 +1843,24 @@ async function buildLocksmithProfile(vin, decode, store) {
     driveType: valueFromDecode(decode, "DriveType"),
     plantCity: valueFromDecode(decode, "PlantCity"),
     plantCountry: valueFromDecode(decode, "PlantCountry"),
+    identitySource: "NHTSA VIN decode",
   };
+
+  return buildVehicleProfile(vehicle, store, {
+    vin,
+    vinDetails: parseVin(vin, vehicle.year),
+    confidence: decode?.ErrorCode === "0" ? "High from NHTSA decode" : decode?.ErrorText || "Partial decode",
+    lookupMode: "vin",
+    source: "Vehicle details from NHTSA vPIC; key/programmer/tool guidance from local verified key intelligence database.",
+    fallbackSource: "Vehicle details from NHTSA vPIC; locksmith workflow guidance from local brand fallback model.",
+    sourceReadinessIdentity: { status: "connected", result: "Used for VIN decode" },
+  });
+}
+
+async function buildVehicleProfile(vehicle, store, options = {}) {
+  vehicle.make = cleanString(vehicle.make).toUpperCase();
+  vehicle.model = cleanString(vehicle.model);
+  vehicle.year = cleanString(vehicle.year);
 
   const family = vehicleFamily(vehicle.make, vehicle.model);
   const catalogApplication = await findCatalogApplication(vehicle);
@@ -1852,7 +1869,7 @@ async function buildLocksmithProfile(vin, decode, store) {
   const record = findIntelligenceRecord(vehicle, intelligence);
   const matchedJobs = summarizeMatchedJobs(record, store.jobs);
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
-  const liveSupplierLookup = await liveSupplierLookups(vehicle, vin);
+  const liveSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -1871,10 +1888,11 @@ async function buildLocksmithProfile(vin, decode, store) {
     : fallbackRecommendations(family);
 
   return {
-    vin,
+    vin: options.vin || "",
+    lookupMode: options.lookupMode || "ymm",
     vehicle,
-    vinDetails: parseVin(vin, vehicle.year),
-    confidence: decode?.ErrorCode === "0" ? "High from NHTSA decode" : decode?.ErrorText || "Partial decode",
+    vinDetails: options.vinDetails || null,
+    confidence: options.confidence || "Year/make/model lookup - verify trim and key package",
     keys: selected.keys,
     programmers: selected.programmers,
     tools: selected.tools,
@@ -1886,11 +1904,11 @@ async function buildLocksmithProfile(vin, decode, store) {
     supplierCandidates: supplierCandidates || [],
     liveSupplierLookup,
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
-    sourceReadiness: sourceReadiness(record),
+    sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,
     source: record
-      ? "Vehicle details from NHTSA vPIC; key/programmer/tool guidance from local verified key intelligence database."
-      : "Vehicle details from NHTSA vPIC; locksmith workflow guidance from local brand fallback model.",
+      ? options.source || "Vehicle details from year/make/model; key/programmer/tool guidance from local verified key intelligence database."
+      : options.fallbackSource || "Vehicle details from year/make/model; supplier fitment and locksmith workflow guidance need verification.",
   };
 }
 
@@ -2154,6 +2172,44 @@ async function handleApi(request, response, pathname) {
     const payload = await vinResponse.json();
     const decode = payload.Results?.[0];
     sendJson(response, 200, await buildLocksmithProfile(vin, decode, store));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/vehicle-lookup") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const year = cleanString(url.searchParams.get("year"));
+    const make = cleanString(url.searchParams.get("make"));
+    const model = cleanString(url.searchParams.get("model"));
+
+    if (!/^(19|20)\d{2}$/.test(year) || !make || !model) {
+      sendError(response, 400, "Enter year, make, and model.");
+      return;
+    }
+
+    const vehicle = {
+      year,
+      make,
+      model,
+      trim: "",
+      bodyClass: "",
+      engine: "",
+      driveType: "",
+      plantCity: "",
+      plantCountry: "",
+      identitySource: "Manual year/make/model lookup",
+    };
+    sendJson(
+      response,
+      200,
+      await buildVehicleProfile(vehicle, store, {
+        lookupMode: "ymm",
+        confidence: "Year/make/model lookup - verify trim, package, FCC, buttons, blade, and original key style",
+        sourceReadinessIdentity: {
+          status: "manual",
+          result: "VIN not used; supplier parts are broad fitment candidates",
+        },
+      }),
+    );
     return;
   }
 

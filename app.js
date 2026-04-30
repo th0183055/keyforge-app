@@ -42,6 +42,7 @@ const supplierSettingsStatus = document.querySelector("#supplierSettingsStatus")
 const supplierAccountList = document.querySelector("#supplierAccountList");
 const supplierSelect = document.querySelector("#supplierSelect");
 const vinForm = document.querySelector("#vinForm");
+const ymmForm = document.querySelector("#ymmForm");
 const vinResult = document.querySelector("#vinResult");
 const vinRecommendation = document.querySelector("#vinRecommendation");
 const aiForm = document.querySelector("#aiForm");
@@ -634,10 +635,11 @@ function resetVinWorkflow() {
   selectedKeyFamily = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   vinForm.classList.remove("is-hidden");
+  ymmForm?.classList.remove("is-hidden");
   vinResult.innerHTML = "";
   vinRecommendation.innerHTML = `
     <strong>Catalog source ready</strong>
-    <p>Enter or scan a VIN to begin the guided lookup.</p>
+    <p>Enter a VIN for identity first, or search year/make/model when the VIN cannot prove key package details.</p>
   `;
 }
 
@@ -698,7 +700,13 @@ function normalizePrice(value) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
 }
 
+function buttonCountFromText(value) {
+  const match = String(value || "").match(/\b(\d)\s*(?:button|btn)\b/i);
+  return match ? match[1] : "";
+}
+
 function normalizedSupplierOffer(product) {
+  const buttons = product.keyInfo?.buttons || buttonCountFromText(product.name);
   return {
     supplier: product.supplier || "Key Innovations",
     partName: product.name || "Supplier part",
@@ -716,8 +724,10 @@ function normalizedSupplierOffer(product) {
     image: product.image || "",
     productUrl: product.url || "",
     productType: product.keyInfo?.productType || "Verify",
-    buttons: product.keyInfo?.buttons || "",
+    buttons,
     chip: product.keyInfo?.chip || "",
+    frequency: product.keyInfo?.frequency || "",
+    fitment: product.keyInfo?.fitment || product.fitmentLines?.[0] || "",
     fitmentConfidence: product.source?.includes("exact") ? "Exact fitment" : "Verify fitment",
     rawProduct: product,
   };
@@ -842,6 +852,36 @@ function renderOfferPrice(offer) {
   `;
 }
 
+function renderOfferReference(offer) {
+  const details = [
+    ["FCC", offer.fcc],
+    ["Freq", offer.frequency],
+    ["Chip", offer.chip],
+    ["Buttons", offer.buttons],
+    ["Fitment", offer.fitment],
+  ].filter(([, value]) => value);
+
+  if (!details.length) {
+    return `<div class="part-reference-grid empty"><span>Verify FCC, frequency, chip, buttons, and blade before ordering.</span></div>`;
+  }
+
+  return `
+    <div class="part-reference-grid">
+      ${details
+        .slice(0, 5)
+        .map(
+          ([label, value]) => `
+            <span>
+              <small>${escapeHtml(label)}</small>
+              <strong>${escapeHtml(String(value))}</strong>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
   const filteredProducts = products.filter(productPassesLiveFilters);
@@ -897,6 +937,7 @@ function renderSupplierComparison(lookup, products) {
                           <strong>${escapeHtml(offer.partName)}</strong>
                           <p>${escapeHtml(offer.supplier)}</p>
                           <p>${escapeHtml([offer.sku, offer.oem, offer.fcc, offer.productType].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
+                          ${renderOfferReference(offer)}
                           <div class="badge-row">${renderOfferBadges(offer)}</div>
                         </div>
                         <div class="offer-actions">
@@ -1095,14 +1136,20 @@ function renderSelectedPartsStep(lookup) {
 
 function renderVehicleApprovalScreen(profile, context) {
   const { vehicle, title, quick, bestSupplier, sourceBadge } = context;
+  const identifier = profile.vin || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
+  const identityStatus = profile.vin
+    ? profile.vinDetails?.checkDigitValid
+      ? "VIN OK"
+      : "Check VIN"
+    : "Y/M/M lookup";
   return `
     <section class="program-screen quick-guide">
       <div class="quick-vehicle">
         <p class="eyebrow">Screen 2</p>
         <h3>${escapeHtml(title || "Vehicle details unavailable")}</h3>
         <div class="vin-strip">
-          <span>${escapeHtml(profile.vin)}</span>
-          <span>${profile.vinDetails?.checkDigitValid ? "VIN OK" : "Check VIN"}</span>
+          <span>${escapeHtml(identifier)}</span>
+          <span>${escapeHtml(identityStatus)}</span>
           <span>${escapeHtml(sourceBadge)}</span>
         </div>
       </div>
@@ -1192,12 +1239,15 @@ function renderKeyChoicesScreen(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   ensureSelectedKeyFamily(products);
   const selectedProducts = productsForFamily(products, selectedKeyFamily);
+  const decisionNote = profile.vin
+    ? "VIN identified the vehicle, but FCC, buttons, board, and package still need supplier/vehicle verification."
+    : "Year/make/model search broadens the results. Use buttons, FCC, keyway, trim, and customer key style to narrow the exact part.";
   return `
     <section class="program-screen selected-parts-step">
       <div class="workflow-heading">
         <p class="eyebrow">Screen 4</p>
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
-        <p>${escapeHtml(`${selectedProducts.length} selected options shown, grouped for price and inventory comparison. Out-of-stock reference products stay visible.`)}</p>
+        <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${decisionNote}`)}</p>
       </div>
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
@@ -1314,6 +1364,7 @@ function renderVinProfileLegacy(profile) {
 function renderVinProfile(profile) {
   latestVinProfile = profile;
   vinForm.classList.add("is-hidden");
+  ymmForm?.classList.add("is-hidden");
   const vehicle = profile.vehicle;
   const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
   const requirements = Object.fromEntries(
@@ -1333,7 +1384,9 @@ function renderVinProfile(profile) {
     ? "Verified local match"
     : profile.programmingReference
       ? "Programming data match"
-      : "Needs verification";
+      : profile.lookupMode === "ymm"
+        ? "Y/M/M supplier search"
+        : "Needs verification";
 
   const context = { vehicle, title, quick, bestSupplier, sourceBadge };
   if (vinWorkflowStep === "family") {
@@ -1772,6 +1825,41 @@ vinForm.addEventListener("submit", async (event) => {
     submitButton.disabled = false;
   }
 });
+
+if (ymmForm) {
+  ymmForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(ymmForm);
+    const year = String(data.get("year") || "").trim();
+    const make = String(data.get("make") || "").trim();
+    const model = String(data.get("model") || "").trim();
+    const submitButton = ymmForm.querySelector("button[type='submit']");
+
+    try {
+      if (!/^(19|20)\d{2}$/.test(year) || !make || !model) {
+        throw new Error("Enter year, make, and model to search parts without a VIN.");
+      }
+      submitButton.disabled = true;
+      vinWorkflowStep = "vehicle";
+      selectedKeyFamily = "";
+      Object.values(liveProductFilters).forEach((selected) => selected.clear());
+      vinResult.innerHTML = `
+        <div class="lookup-loading">
+          <article><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
+          <article><strong>2. Searching supplier fitment</strong><p>Returning possible key families, buttons, FCCs, and stock.</p></article>
+        </div>
+      `;
+      const profile = await api(
+        `/api/vehicle-lookup?year=${encodeURIComponent(year)}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`,
+      );
+      renderVinProfile(profile);
+    } catch (error) {
+      renderVinError(error.message);
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
 
 renderChat();
 renderJobs();
