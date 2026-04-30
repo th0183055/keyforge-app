@@ -800,6 +800,50 @@ textarea {
   color: #ffd9a8;
 }
 
+.shop-evidence-card {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 13px;
+  border: 1px solid #d6b28a;
+  border-radius: 12px;
+  background: #fff3df;
+}
+
+.shop-evidence-card.empty {
+  border-color: #ead5cc;
+  background: #fffaf6;
+}
+
+.shop-evidence-card span,
+.shop-evidence-card small {
+  color: #9a5c11;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shop-evidence-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+}
+
+.shop-evidence-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.shop-evidence-card small {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: white;
+  white-space: nowrap;
+}
+
 .workflow-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1935,6 +1979,10 @@ textarea {
 
   .selected-family-strip {
     align-items: stretch;
+    flex-direction: column;
+  }
+
+  .shop-evidence-card {
     flex-direction: column;
   }
 

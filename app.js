@@ -629,6 +629,31 @@ function renderWorkflowActions(actions) {
   return `<div class="workflow-actions">${actions.join("")}</div>`;
 }
 
+function renderShopEvidenceCard(evidence) {
+  if (!evidence) return "";
+  const hasEvidence = evidence.totalMatches > 0;
+  return `
+    <section class="shop-evidence-card ${hasEvidence ? "" : "empty"}">
+      <div>
+        <span>Shop history</span>
+        <strong>${escapeHtml(hasEvidence ? evidence.summary : "No shop match yet")}</strong>
+        <p>${escapeHtml(
+          hasEvidence
+            ? [
+                evidence.programmers?.length ? `Programmers: ${evidence.programmers.join(", ")}` : "",
+                evidence.tools?.length ? `Tools/refs: ${evidence.tools.join(", ")}` : "",
+                evidence.keyCodes?.length ? `Key codes: ${evidence.keyCodes.join(", ")}` : "",
+              ]
+                .filter(Boolean)
+                .join(" | ") || "Use as a confidence clue, then verify FCC/buttons/blade."
+            : "This lookup will start a new evidence trail once the completed job is saved.",
+        )}</p>
+      </div>
+      <small>${escapeHtml(evidence.confidence)} confidence</small>
+    </section>
+  `;
+}
+
 function resetVinWorkflow() {
   vinWorkflowStep = "entry";
   latestVinProfile = null;
@@ -728,6 +753,7 @@ function normalizedSupplierOffer(product) {
     chip: product.keyInfo?.chip || "",
     frequency: product.keyInfo?.frequency || "",
     fitment: product.keyInfo?.fitment || product.fitmentLines?.[0] || "",
+    shopMatch: product.keyInfo?.shopMatch || "",
     fitmentConfidence: product.source?.includes("exact") ? "Exact fitment" : "Verify fitment",
     rawProduct: product,
   };
@@ -823,6 +849,7 @@ function renderOfferBadges(offer) {
   return [
     offer.fitmentConfidence,
     stock !== "Stock unknown" ? stock : "",
+    offer.shopMatch ? "Shop match" : "",
     condition !== "Unlisted" ? condition : "",
     type !== "Other key item" ? type : "",
     offer.fcc ? "FCC" : "",
@@ -854,6 +881,7 @@ function renderOfferPrice(offer) {
 
 function renderOfferReference(offer) {
   const details = [
+    ["Shop", offer.shopMatch],
     ["FCC", offer.fcc],
     ["Freq", offer.frequency],
     ["Chip", offer.chip],
@@ -1180,6 +1208,7 @@ function renderVehicleApprovalScreen(profile, context) {
           <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence - FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
         </article>
       </div>
+      ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
@@ -1249,6 +1278,7 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${decisionNote}`)}</p>
       </div>
+      ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="family">Back to key family</button>`,

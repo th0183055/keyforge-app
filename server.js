@@ -1328,6 +1328,172 @@ function summarizeMatchedJobs(record, jobs) {
     }));
 }
 
+function normalizeVehicleText(value) {
+  return cleanString(value).toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
+function normalizeVinCandidate(value) {
+  const candidate = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return validateVin(candidate) ? candidate : "";
+}
+
+function extractVinsFromText(value) {
+  const text = String(value || "").toUpperCase();
+  const candidates = new Set();
+  for (const match of text.matchAll(/[A-HJ-NPR-Z0-9][A-HJ-NPR-Z0-9\s-]{15,30}[A-HJ-NPR-Z0-9]/g)) {
+    const normalized = normalizeVinCandidate(match[0]);
+    if (normalized) candidates.add(normalized);
+  }
+  return Array.from(candidates);
+}
+
+function jobVehicleText(job) {
+  return normalizeVehicleText([job.title, job.vehicle, ...(job.notes || [])].filter(Boolean).join(" "));
+}
+
+function jobRawText(job) {
+  return [job.title, job.vehicle, job.vin, job.sequence, job.keyCode, ...(job.notes || [])].filter(Boolean).join(" ");
+}
+
+function jobVins(job) {
+  return [...new Set([normalizeVinCandidate(job.vin), ...extractVinsFromText(jobRawText(job))].filter(Boolean))];
+}
+
+function yearTokens(year) {
+  const full = String(year || "");
+  return full ? [full, full.slice(-2)] : [];
+}
+
+function modelTokens(model) {
+  const base = normalizeVehicleText(model);
+  const compact = base.replace(/\s+/g, "");
+  const tokens = new Set([base, compact]);
+  if (/F\s?150|F150/.test(base)) tokens.add("F 150").add("F150").add("F-150");
+  if (/EXPEDITION/.test(base)) tokens.add("EXPEDITION");
+  if (/CAMRY/.test(base)) tokens.add("CAMRY");
+  if (/ACCORD/.test(base)) tokens.add("ACCORD");
+  return Array.from(tokens).filter(Boolean);
+}
+
+function textContainsAny(text, values) {
+  const normalized = normalizeVehicleText(text);
+  const compact = normalized.replace(/\s+/g, "");
+  return values.some((value) => {
+    const token = normalizeVehicleText(value);
+    if (!token) return false;
+    return normalized.includes(token) || compact.includes(token.replace(/\s+/g, ""));
+  });
+}
+
+function jobMatchesVehicle(job, vehicle) {
+  const text = jobVehicleText(job);
+  const make = normalizeVehicleText(vehicle.make);
+  const yearMatch = textContainsAny(text, yearTokens(vehicle.year));
+  const modelMatch = textContainsAny(text, modelTokens(vehicle.model));
+  const makeMatch = make && text.includes(make);
+  if (!modelMatch || !yearMatch) return false;
+  return makeMatch || modelMatch;
+}
+
+function jobMatchesMakeModel(job, vehicle) {
+  const text = jobVehicleText(job);
+  const make = normalizeVehicleText(vehicle.make);
+  const modelMatch = textContainsAny(text, modelTokens(vehicle.model));
+  const makeMatch = make && text.includes(make);
+  return modelMatch && (makeMatch || !make);
+}
+
+function tokenMatchesProduct(token, product) {
+  if (!token || token.length < 4) return false;
+  const productText = normalizeVehicleText([
+    product.name,
+    product.sku,
+    product.id,
+    product.keyInfo?.sku,
+    product.keyInfo?.itemNumber,
+    product.keyInfo?.oem,
+    product.keyInfo?.fcc,
+    product.customFields?.itemId,
+    product.customFields?.displayName,
+  ].filter(Boolean).join(" "));
+  return productText.includes(normalizeVehicleText(token));
+}
+
+function jobReferenceTokens(job) {
+  const tokens = new Set();
+  const text = [job.programmer, job.sequence, job.keyCode, ...(job.notes || [])].filter(Boolean).join(" ");
+  for (const match of text.matchAll(/\b(?:[A-Z]{2,5}\d{3,5}|\d{3}-R\d{4}R?|[A-Z0-9]{3,}-[A-Z0-9]{3,})\b/gi)) {
+    tokens.add(match[0].toUpperCase());
+  }
+  return Array.from(tokens);
+}
+
+function buildShopEvidence(vehicle, vin, jobs) {
+  const lookupVin = normalizeVinCandidate(vin);
+  const exactVinJobs = jobs.filter((job) => lookupVin && jobVins(job).includes(lookupVin));
+  const exactVehicleJobs = jobs.filter((job) => !exactVinJobs.some((exact) => exact.id === job.id) && jobMatchesVehicle(job, vehicle));
+  const makeModelJobs = jobs.filter(
+    (job) =>
+      !exactVinJobs.some((exact) => exact.id === job.id) &&
+      !exactVehicleJobs.some((exact) => exact.id === job.id) &&
+      jobMatchesMakeModel(job, vehicle),
+  );
+  const evidenceJobs = [...exactVinJobs, ...exactVehicleJobs, ...makeModelJobs].slice(0, 8);
+  const tokens = [...new Set(evidenceJobs.flatMap(jobReferenceTokens))];
+  const programmers = [...new Set(evidenceJobs.map((job) => job.programmer).filter(Boolean))];
+  const tools = [...new Set(tokens.filter((token) => /[A-Z]{2,5}\d{3,5}/.test(token)))];
+  const keyCodes = [...new Set(evidenceJobs.map((job) => job.keyCode).filter(Boolean))];
+  const prices = evidenceJobs.map((job) => Number(job.price)).filter((price) => Number.isFinite(price) && price > 0);
+  const confidence = exactVinJobs.length ? "high" : exactVehicleJobs.length ? "medium-high" : makeModelJobs.length ? "medium" : "none";
+
+  return {
+    confidence,
+    exactVinCount: exactVinJobs.length,
+    exactVehicleCount: exactVehicleJobs.length,
+    makeModelCount: makeModelJobs.length,
+    totalMatches: evidenceJobs.length,
+    programmers,
+    tools,
+    keyCodes,
+    tokens,
+    priceRange: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
+    jobs: evidenceJobs.map((job) => ({
+      id: job.id,
+      title: job.title || job.vehicle,
+      vehicle: job.vehicle,
+      vin: job.vin || "",
+      service: job.service,
+      programmer: job.programmer || "",
+      keyCode: job.keyCode || "",
+      price: job.price || "",
+      payment: job.payment || "",
+      notes: job.notes || [],
+    })),
+    summary: evidenceJobs.length
+      ? `${evidenceJobs.length} completed shop job${evidenceJobs.length === 1 ? "" : "s"} matched this lookup.`
+      : "No completed shop job matched this exact vehicle yet.",
+  };
+}
+
+function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
+  if (!liveSupplierLookup?.products?.length || !shopEvidence?.tokens?.length) return liveSupplierLookup;
+  return {
+    ...liveSupplierLookup,
+    products: liveSupplierLookup.products.map((product) => {
+      const matchedTokens = shopEvidence.tokens.filter((token) => tokenMatchesProduct(token, product));
+      if (!matchedTokens.length) return product;
+      return {
+        ...product,
+        score: (product.score || 0) + 35,
+        keyInfo: {
+          ...(product.keyInfo || {}),
+          shopMatch: matchedTokens.slice(0, 3).join(", "),
+        },
+      };
+    }),
+  };
+}
+
 async function findCatalogApplication(vehicle) {
   try {
     const catalog = JSON.parse(await readFile(vpicCatalogPath, "utf8"));
@@ -1804,8 +1970,8 @@ function sourceReadiness(record, identity = { status: "connected", result: "Used
     {
       sourceId: "shop-history",
       label: "Past job evidence",
-      status: record?.sourceJobIds?.length ? "matched" : "no exact match",
-      result: record?.sourceJobIds?.length ? `${record.sourceJobIds.length} linked job record` : "No exact verified local job match",
+      status: record?.sourceJobIds?.length ? "matched" : "dynamic match",
+      result: record?.sourceJobIds?.length ? `${record.sourceJobIds.length} linked job record` : "Checked completed job history for VIN/YMM evidence",
     },
     {
       sourceId: "key-db",
@@ -1867,9 +2033,11 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const programmingReference = await findProgrammingReference(vehicle);
   const intelligence = await readKeyIntelligence();
   const record = findIntelligenceRecord(vehicle, intelligence);
-  const matchedJobs = summarizeMatchedJobs(record, store.jobs);
+  const shopEvidence = buildShopEvidence(vehicle, options.vin || "", store.jobs);
+  const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
+  const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
-  const liveSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
+  const liveSupplierLookup = applyShopEvidenceToProducts(await liveSupplierLookups(vehicle, options.vin || ""), shopEvidence);
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -1902,6 +2070,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     matchedJobs,
     programmingReference,
     supplierCandidates: supplierCandidates || [],
+    shopEvidence,
     liveSupplierLookup,
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
