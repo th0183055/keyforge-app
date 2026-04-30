@@ -1629,6 +1629,25 @@ textarea {
   font-size: 0.78rem;
 }
 
+.feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.feedback-grid .secondary-action {
+  min-height: 34px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 0.72rem;
+}
+
+.feedback-grid .secondary-action.good {
+  border-color: #127c45;
+  color: #0d6234;
+  background: #eefaf2;
+}
+
 .selection-engine {
   display: grid;
   gap: 6px;

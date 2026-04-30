@@ -770,6 +770,7 @@ function normalizedSupplierOffer(product) {
     frequency: product.keyInfo?.frequency || "",
     fitment: product.keyInfo?.fitment || product.fitmentLines?.[0] || "",
     shopMatch: product.keyInfo?.shopMatch || "",
+    shopWarning: product.keyInfo?.shopWarning || "",
     selectionRank: product.selection?.rank || product.keyInfo?.selectionRank || "",
     selectionScore: Number.isFinite(Number(product.selection?.score ?? product.keyInfo?.selectionScore))
       ? Number(product.selection?.score ?? product.keyInfo?.selectionScore)
@@ -887,6 +888,7 @@ function renderOfferBadges(offer) {
     offer.fitmentConfidence,
     stock !== "Stock unknown" ? stock : "",
     offer.shopMatch ? "Shop match" : "",
+    offer.shopWarning ? "Feedback warning" : "",
     condition !== "Unlisted" ? condition : "",
     type !== "Other key item" ? type : "",
     offer.fcc ? "FCC" : "",
@@ -919,6 +921,7 @@ function renderSelectionEngine(offer) {
   const reasons = offer.selectionReasons.length ? offer.selectionReasons : ["No strong part evidence yet"];
   const missing = offer.selectionMissing.length ? offer.selectionMissing : [];
   const warnings = offer.selectionWarnings.length ? offer.selectionWarnings : [];
+  if (offer.shopWarning) warnings.unshift(`past feedback warned on ${offer.shopWarning}`);
   return `
     <div class="selection-engine ${escapeHtml(selectionClassName(rank))}">
       <div>
@@ -1016,7 +1019,14 @@ function renderPartDetail(offer, alternates) {
             ? `<p><strong>Known alternates:</strong> ${escapeHtml(alternates.map((item) => `${item.supplier} ${item.priceFormatted || item.price || ""}`.trim()).join(" | "))}</p>`
             : ""
         }
-        <button class="secondary-action small" type="button" data-part-worked="${escapeHtml(offerIdentityKey(offer))}">Mark worked</button>
+        <div class="feedback-grid" data-feedback-group="${escapeHtml(offerIdentityKey(offer))}">
+          <button class="secondary-action small good" type="button" data-part-feedback="worked" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Worked</button>
+          <button class="secondary-action small" type="button" data-part-feedback="failed-program" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Did not program</button>
+          <button class="secondary-action small" type="button" data-part-feedback="wrong-fcc" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Wrong FCC</button>
+          <button class="secondary-action small" type="button" data-part-feedback="wrong-buttons" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Wrong buttons</button>
+          <button class="secondary-action small" type="button" data-part-feedback="ordered-alternate" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Ordered alternate</button>
+          <button class="secondary-action small" type="button" data-part-feedback="different-key-style" data-part-id="${escapeHtml(offerIdentityKey(offer))}">Different style</button>
+        </div>
       </div>
     </details>
   `;
@@ -1069,6 +1079,17 @@ function renderOfferLanes(offers) {
 function findOfferByIdentity(identity) {
   const products = latestVinProfile?.liveSupplierLookup?.products || [];
   return products.map(normalizedSupplierOffer).find((offer) => offerIdentityKey(offer) === identity) || null;
+}
+
+function feedbackLabel(outcome) {
+  return {
+    worked: "Worked",
+    "failed-program": "Did not program",
+    "wrong-fcc": "Wrong FCC",
+    "wrong-buttons": "Wrong buttons",
+    "ordered-alternate": "Ordered alternate",
+    "different-key-style": "Different style",
+  }[outcome] || "Feedback";
 }
 
 function renderOfferThumb(offer, title = "") {
@@ -1933,15 +1954,20 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const workedButton = event.target.closest("[data-part-worked]");
-  if (workedButton && latestVinProfile) {
-    const offer = findOfferByIdentity(workedButton.dataset.partWorked);
+  const feedbackButton = event.target.closest("[data-part-feedback]");
+  if (feedbackButton && latestVinProfile) {
+    const offer = findOfferByIdentity(feedbackButton.dataset.partId);
     if (!offer) return;
-    workedButton.disabled = true;
-    workedButton.textContent = "Saving...";
+    const outcome = feedbackButton.dataset.partFeedback;
+    const group = feedbackButton.closest("[data-feedback-group]");
+    group?.querySelectorAll("button").forEach((button) => {
+      button.disabled = true;
+    });
+    feedbackButton.textContent = "Saving...";
     api("/api/part-outcomes", {
       method: "POST",
       body: JSON.stringify({
+        outcome,
         vin: latestVinProfile.vin,
         vehicle: latestVinProfile.vehicle,
         part: {
@@ -1960,11 +1986,13 @@ document.addEventListener("click", (event) => {
       }),
     })
       .then(() => {
-        workedButton.textContent = "Saved as worked";
+        feedbackButton.textContent = `Saved: ${feedbackLabel(outcome)}`;
       })
       .catch((error) => {
-        workedButton.disabled = false;
-        workedButton.textContent = "Mark worked";
+        group?.querySelectorAll("button").forEach((button) => {
+          button.disabled = false;
+        });
+        feedbackButton.textContent = feedbackLabel(outcome);
         alert(error.message);
       });
     return;

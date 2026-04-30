@@ -1063,6 +1063,15 @@ function cleanJob(input) {
 function cleanPartOutcome(input) {
   const vehicle = input.vehicle || {};
   const part = input.part || {};
+  const outcome = cleanString(input.outcome || "worked").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "worked";
+  const outcomeLabels = {
+    worked: "Worked",
+    "failed-program": "Did not program",
+    "wrong-fcc": "Wrong FCC",
+    "wrong-buttons": "Wrong buttons",
+    "ordered-alternate": "Ordered alternate",
+    "different-key-style": "Customer had different key style",
+  };
   const year = cleanString(vehicle.year);
   const make = cleanString(vehicle.make).toUpperCase();
   const model = cleanString(vehicle.model);
@@ -1085,17 +1094,17 @@ function cleanPartOutcome(input) {
 
   return {
     id: randomUUID(),
-    title: `Verified part - ${year} ${make} ${model}`,
+    title: `${outcome === "worked" ? "Verified part" : "Part feedback"} - ${year} ${make} ${model}`,
     customer: "Shop evidence",
     vehicle: [year, make, model, cleanString(vehicle.trim)].filter(Boolean).join(" "),
-    service: "Verified key part",
+    service: outcome === "worked" ? "Verified key part" : "Part selection feedback",
     verification: "Part marked worked in LockForge",
-    status: "Completed",
+    status: outcome === "worked" ? "Completed" : "Review",
     vin: cleanString(input.vin).toUpperCase(),
     programmer: [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
     sequence: partName,
-    tags: ["verified-part", supplier, make].filter(Boolean),
-    notes: [supplier ? `Supplier ${supplier}` : "", partName, ...refs].filter(Boolean),
+    tags: ["part-outcome", `outcome-${outcome}`, supplier, make].filter(Boolean),
+    notes: [`Outcome ${outcomeLabels[outcome] || outcome}`, supplier ? `Supplier ${supplier}` : "", partName, ...refs].filter(Boolean),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1468,6 +1477,14 @@ function jobReferenceTokens(job) {
   return Array.from(tokens);
 }
 
+function jobOutcome(job) {
+  const tags = (job.tags || []).map((tag) => String(tag).toLowerCase());
+  const tag = tags.find((item) => item.startsWith("outcome-"));
+  if (tag) return tag.replace("outcome-", "");
+  if (tags.includes("verified-part")) return "worked";
+  return "";
+}
+
 function buildShopEvidence(vehicle, vin, jobs) {
   const lookupVin = normalizeVinCandidate(vin);
   const exactVinJobs = jobs.filter((job) => lookupVin && jobVins(job).includes(lookupVin));
@@ -1480,6 +1497,15 @@ function buildShopEvidence(vehicle, vin, jobs) {
   );
   const evidenceJobs = [...exactVinJobs, ...exactVehicleJobs, ...makeModelJobs].slice(0, 8);
   const tokens = [...new Set(evidenceJobs.flatMap(jobReferenceTokens))];
+  const tokenOutcomes = evidenceJobs.flatMap((job) => {
+    const outcome = jobOutcome(job);
+    if (!outcome) return [];
+    return jobReferenceTokens(job).map((token) => ({ token, outcome, jobId: job.id }));
+  });
+  const positiveTokens = [...new Set(tokenOutcomes.filter((item) => item.outcome === "worked").map((item) => item.token))];
+  const negativeTokens = [
+    ...new Set(tokenOutcomes.filter((item) => item.outcome && item.outcome !== "worked" && item.outcome !== "ordered-alternate").map((item) => item.token)),
+  ];
   const programmers = [...new Set(evidenceJobs.map((job) => job.programmer).filter(Boolean))];
   const tools = [...new Set(tokens.filter((token) => /[A-Z]{2,5}\d{3,5}/.test(token)))];
   const keyCodes = [...new Set(evidenceJobs.map((job) => job.keyCode).filter(Boolean))];
@@ -1496,6 +1522,9 @@ function buildShopEvidence(vehicle, vin, jobs) {
     tools,
     keyCodes,
     tokens,
+    positiveTokens,
+    negativeTokens,
+    tokenOutcomes,
     priceRange: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
     jobs: evidenceJobs.map((job) => ({
       id: job.id,
@@ -1508,6 +1537,7 @@ function buildShopEvidence(vehicle, vin, jobs) {
       price: job.price || "",
       payment: job.payment || "",
       notes: job.notes || [],
+      outcome: jobOutcome(job),
     })),
     summary: evidenceJobs.length
       ? `${evidenceJobs.length} completed shop job${evidenceJobs.length === 1 ? "" : "s"} matched this lookup.`
@@ -1520,14 +1550,18 @@ function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
   return {
     ...liveSupplierLookup,
     products: liveSupplierLookup.products.map((product) => {
-      const matchedTokens = shopEvidence.tokens.filter((token) => tokenMatchesProduct(token, product));
-      if (!matchedTokens.length) return product;
+      const matchedTokens = (shopEvidence.positiveTokens?.length ? shopEvidence.positiveTokens : shopEvidence.tokens).filter((token) =>
+        tokenMatchesProduct(token, product),
+      );
+      const negativeTokens = (shopEvidence.negativeTokens || []).filter((token) => tokenMatchesProduct(token, product));
+      if (!matchedTokens.length && !negativeTokens.length) return product;
       return {
         ...product,
-        score: (product.score || 0) + 35,
+        score: (product.score || 0) + (matchedTokens.length ? 35 : 0) - (negativeTokens.length ? 30 : 0),
         keyInfo: {
           ...(product.keyInfo || {}),
           shopMatch: matchedTokens.slice(0, 3).join(", "),
+          shopWarning: negativeTokens.slice(0, 3).join(", "),
         },
       };
     }),
@@ -1645,6 +1679,11 @@ function evaluatePartSelection(product, vehicle, shopEvidence, programmingRefere
   if (product.keyInfo?.shopMatch) {
     score += shopEvidence?.exactVinCount ? 38 : 24;
     reasons.push(`shop history matched ${product.keyInfo.shopMatch}`);
+  }
+
+  if (product.keyInfo?.shopWarning) {
+    score -= shopEvidence?.exactVinCount ? 36 : 24;
+    warnings.push(`shop feedback warned on ${product.keyInfo.shopWarning}`);
   }
 
   if (expected !== "unknown") {
