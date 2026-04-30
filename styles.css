@@ -1444,6 +1444,158 @@ textarea {
   font-weight: 900;
 }
 
+.exact-part-group {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffaf6;
+}
+
+.exact-part-group.multi-supplier {
+  border-left: 5px solid var(--accent);
+}
+
+.exact-group-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.exact-group-head span,
+.exact-group-summary span {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.exact-group-head strong {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.15;
+}
+
+.exact-group-head p,
+.exact-group-foot,
+.supplier-part-tab p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.exact-group-summary {
+  min-width: 88px;
+  text-align: right;
+}
+
+.exact-group-summary strong {
+  color: var(--accent-dark);
+  font-size: 1.05rem;
+}
+
+.exact-supplier-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.supplier-part-tab {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #ead5cc;
+  border-radius: 8px;
+  background: white;
+}
+
+.supplier-part-tab.in-stock {
+  border-color: #c9decf;
+  background: #fbfffc;
+}
+
+.supplier-tab-head,
+.supplier-tab-body {
+  display: flex;
+  gap: 9px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.supplier-tab-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.supplier-tab-head span {
+  color: var(--accent-dark);
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  text-align: right;
+}
+
+.supplier-tab-body {
+  justify-content: start;
+}
+
+.supplier-tab-body .offer-thumb {
+  flex: 0 0 auto;
+}
+
+.supplier-tab-body p {
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.supplier-tab-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.supplier-tab-meta span {
+  min-width: 0;
+  padding: 6px;
+  border-radius: 7px;
+  background: #fff3eb;
+}
+
+.supplier-tab-meta small {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.58rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.supplier-tab-meta strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.supplier-tab-detail {
+  border-top: 1px solid #ead5cc;
+  padding-top: 5px;
+}
+
+.supplier-tab-detail summary,
+.supplier-tab-link {
+  color: var(--accent-dark);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.supplier-tab-link {
+  justify-self: start;
+}
+
 .decision-summary {
   display: flex;
   gap: 12px;

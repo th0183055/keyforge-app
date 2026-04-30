@@ -794,6 +794,39 @@ function identityParts(offer) {
     .trim();
 }
 
+function partNumberTokens(value) {
+  const text = String(value || "").toUpperCase();
+  const tokens = [];
+  for (const match of text.matchAll(/\b\d{3}-R\d{4}R?\b/g)) {
+    tokens.push(match[0].replace(/[^A-Z0-9]/g, "").replace(/R$/, ""));
+  }
+  for (const match of text.matchAll(/\b[A-Z]{2,5}-?R?\d{3,5}\b/g)) {
+    tokens.push(match[0].replace(/[^A-Z0-9]/g, "").replace(/R$/, ""));
+  }
+  return [...new Set(tokens.filter((token) => token.length >= 5))];
+}
+
+function fccToken(value) {
+  const text = String(value || "").toUpperCase();
+  const match = text.match(/\b[A-Z][A-Z0-9]{2,}-[A-Z0-9]{3,}\b/);
+  return match ? match[0].replace(/[^A-Z0-9]/g, "") : "";
+}
+
+function exactPartKey(offer) {
+  const partTokens = partNumberTokens([offer.oem, offer.sku, offer.partName].filter(Boolean).join(" "));
+  if (partTokens.length) return `part:${partTokens[0]}`;
+  const fcc = fccToken([offer.fcc, offer.partName].filter(Boolean).join(" "));
+  if (fcc) return `fcc:${fcc}:buttons:${String(offer.buttons || "unknown").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
+  return `single:${offerIdentityKey(offer)}`;
+}
+
+function exactPartLabel(group) {
+  const best = group.bestOffer || group.offers[0];
+  const parts = partNumberTokens([best.oem, best.sku, best.partName].filter(Boolean).join(" "));
+  if (parts.length) return parts[0].replace(/^(\d{3})R/, "$1-R");
+  return best.fcc || best.oem || best.sku || best.partName;
+}
+
 function compareScore(offer, index) {
   let score = 0;
   if (index === 0) score += 15;
@@ -868,6 +901,48 @@ function groupSupplierOffers(products) {
     .sort((a, b) => {
       if ((b.inStockCount > 0) !== (a.inStockCount > 0)) return b.inStockCount > 0 ? 1 : -1;
       return b.bestOffer.score - a.bestOffer.score;
+    });
+}
+
+function exactPartGroups(offers) {
+  const groups = new Map();
+  offers.forEach((offer) => {
+    const key = exactPartKey(offer);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        offers: [],
+      });
+    }
+    groups.get(key).offers.push(offer);
+  });
+
+  return Array.from(groups.values())
+    .map((group) => {
+      group.offers.sort((a, b) => {
+        if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) {
+          return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
+        }
+        if (offerIsInStock(b) !== offerIsInStock(a)) return offerIsInStock(b) ? 1 : -1;
+        return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || a.supplier.localeCompare(b.supplier);
+      });
+      group.bestOffer = group.offers[0];
+      group.label = exactPartLabel(group);
+      group.supplierCount = new Set(group.offers.map((offer) => offer.supplier)).size;
+      group.lowestPrice = group.offers
+        .filter((offer) => offer.priceValue)
+        .sort((a, b) => a.priceValue - b.priceValue)[0];
+      group.inStockCount = group.offers.filter(offerIsInStock).length;
+      group.lane = partLane(group.bestOffer);
+      return group;
+    })
+    .sort((a, b) => {
+      if (selectionRankWeight(b.bestOffer.selectionRank) !== selectionRankWeight(a.bestOffer.selectionRank)) {
+        return selectionRankWeight(b.bestOffer.selectionRank) - selectionRankWeight(a.bestOffer.selectionRank);
+      }
+      if ((b.supplierCount > 1) !== (a.supplierCount > 1)) return b.supplierCount > 1 ? 1 : -1;
+      if (b.inStockCount !== a.inStockCount) return b.inStockCount - a.inStockCount;
+      return (a.lowestPrice?.priceValue ?? Infinity) - (b.lowestPrice?.priceValue ?? Infinity);
     });
 }
 
@@ -963,7 +1038,7 @@ function laneLabel(lane) {
 }
 
 function offerIdentityKey(offer) {
-  return String(offer.fcc || offer.oem || offer.sku || offer.partName)
+  return String([offer.supplier, offer.sku, offer.oem, offer.fcc, offer.partName].filter(Boolean).join("|"))
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
@@ -1055,21 +1130,81 @@ function renderOfferRow(offer, offers) {
   `;
 }
 
+function renderSupplierComparisonTab(offer, groupOffers) {
+  const alternates = alternatesForOffer(offer, groupOffers);
+  const condition = offer.condition && offer.condition !== "Verify" ? offer.condition : conditionBucket(offer.rawProduct);
+  const stock = stockBucket(offer.rawProduct);
+  return `
+    <article class="supplier-part-tab ${offerIsInStock(offer) ? "in-stock" : "not-in-stock"}">
+      <div class="supplier-tab-head">
+        <strong>${escapeHtml(offer.supplier)}</strong>
+        <span>${escapeHtml(confidenceLabel(offer.selectionRank))}</span>
+      </div>
+      <div class="supplier-tab-body">
+        ${renderOfferThumb(offer)}
+        <div>
+          ${renderOfferPrice(offer)}
+          <p>${escapeHtml([condition, stock, offer.buttons].filter(Boolean).join(" | "))}</p>
+          <p>${escapeHtml([offer.sku, offer.oem, offer.fcc].filter(Boolean).join(" - ") || "Verify identifiers")}</p>
+        </div>
+      </div>
+      <div class="supplier-tab-meta">
+        <span><small>Condition</small><strong>${escapeHtml(condition || "Verify")}</strong></span>
+        <span><small>Stock</small><strong>${escapeHtml(offer.stock || stock || "Verify")}</strong></span>
+        <span><small>Price</small><strong>${escapeHtml(offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : offer.priceFormatted || "Check")}</strong></span>
+        <span><small>Score</small><strong>${escapeHtml(offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Pending")}</strong></span>
+      </div>
+      <details class="supplier-tab-detail">
+        <summary>Details</summary>
+        ${renderSelectionEngine(offer)}
+        ${renderOfferReference(offer)}
+        ${renderPartDetail(offer, alternates)}
+      </details>
+      ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open supplier</a>` : ""}
+    </article>
+  `;
+}
+
+function renderExactPartGroup(group, allOffers) {
+  const best = group.bestOffer;
+  const suppliers = group.offers.map((offer) => offer.supplier).join(" / ");
+  const identifiers = [best.oem, best.fcc, best.buttons].filter(Boolean).join(" - ");
+  return `
+    <section class="exact-part-group ${group.supplierCount > 1 ? "multi-supplier" : ""}">
+      <div class="exact-group-head">
+        <div>
+          <span>${group.supplierCount > 1 ? "Exact match comparison" : "Single supplier match"}</span>
+          <strong>${escapeHtml(group.label)}</strong>
+          <p>${escapeHtml(identifiers || best.partName)}</p>
+        </div>
+        <div class="exact-group-summary">
+          <strong>${escapeHtml(group.lowestPrice?.priceValue ? `$${group.lowestPrice.priceValue.toFixed(2)}` : "Check")}</strong>
+          <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"}`)}</span>
+        </div>
+      </div>
+      <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} supplier comparison`)}">
+        ${group.offers.map((offer) => renderSupplierComparisonTab(offer, allOffers)).join("")}
+      </div>
+      <p class="exact-group-foot">${escapeHtml(suppliers)}</p>
+    </section>
+  `;
+}
+
 function renderOfferLanes(offers) {
   const lanes = ["main", "supporting", "reference"];
+  const groups = exactPartGroups(offers);
   return lanes
     .map((lane) => {
-      const laneOffers = offers.filter((offer) => partLane(offer) === lane);
-      if (!laneOffers.length) return "";
+      const laneGroups = groups.filter((group) => group.lane === lane);
+      if (!laneGroups.length) return "";
+      const itemCount = laneGroups.reduce((count, group) => count + group.offers.length, 0);
       return `
         <div class="offer-lane">
           <div class="offer-lane-heading">
             <strong>${escapeHtml(laneLabel(lane))}</strong>
-            <span>${laneOffers.length}</span>
+            <span>${laneGroups.length} parts / ${itemCount} offers</span>
           </div>
-          <div class="offer-list direct-offer-list">
-            ${laneOffers.map((offer) => renderOfferRow(offer, offers)).join("")}
-          </div>
+          ${laneGroups.map((group) => renderExactPartGroup(group, offers)).join("")}
         </div>
       `;
     })
