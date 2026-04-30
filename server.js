@@ -18,6 +18,7 @@ const keyInnovationsLabelsPath = path.join(dataDir, "key-innovations-labels.json
 const programmingReferencePath = path.join(dataDir, "programming-reference.json");
 const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
+const vehicleProfilesPath = path.join(dataDir, "vehicle-profiles.json");
 const localSecretPath = path.join(dataDir, ".lockforge-secret");
 
 const supplierRegistry = [
@@ -256,6 +257,19 @@ async function readStore() {
 async function writeStore(store) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`);
+}
+
+async function readVehicleProfiles() {
+  await mkdir(dataDir, { recursive: true });
+  if (!existsSync(vehicleProfilesPath)) {
+    return { generatedAt: new Date().toISOString(), profiles: [] };
+  }
+  return JSON.parse(await readFile(vehicleProfilesPath, "utf8"));
+}
+
+async function writeVehicleProfiles(profiles) {
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(vehicleProfilesPath, `${JSON.stringify({ ...profiles, updatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
 async function readKeyIntelligence() {
@@ -1378,6 +1392,116 @@ function cleanPartOutcome(input) {
   };
 }
 
+function vehicleProfileKey(vehicle) {
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim]
+    .map((item) => normalizeVehicleText(item).replace(/\s+/g, "-"))
+    .filter(Boolean)
+    .join(":");
+}
+
+function vehicleProfileBaseKey(vehicle) {
+  return [vehicle.year, vehicle.make, vehicle.model]
+    .map((item) => normalizeVehicleText(item).replace(/\s+/g, "-"))
+    .filter(Boolean)
+    .join(":");
+}
+
+function cleanProfilePart(part = {}) {
+  return {
+    name: cleanString(part.name),
+    supplier: cleanString(part.supplier),
+    sku: cleanString(part.sku),
+    oem: cleanString(part.oem),
+    fcc: cleanString(part.fcc),
+    frequency: cleanString(part.frequency),
+    chip: cleanString(part.chip),
+    buttons: cleanString(part.buttons),
+    price: cleanString(part.price),
+    stock: cleanString(part.stock),
+    family: cleanString(part.family),
+  };
+}
+
+function profilePartKey(part = {}) {
+  return normalizeVehicleText([part.oem, part.sku, part.fcc, part.name].filter(Boolean).join(" ")).replace(/[^A-Z0-9]/g, "");
+}
+
+function mergeWorkedPart(existing = {}, nextPart = {}, supplier = "") {
+  const suppliers = new Set([...(existing.suppliers || []), supplier || nextPart.supplier].filter(Boolean));
+  return {
+    ...existing,
+    ...nextPart,
+    count: (existing.count || 0) + 1,
+    suppliers: Array.from(suppliers),
+    lastWorkedAt: new Date().toISOString(),
+  };
+}
+
+async function updateVehicleProfileFromOutcome(input) {
+  const outcome = cleanString(input.outcome || "worked").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "worked";
+  const vehicle = {
+    year: cleanString(input.vehicle?.year),
+    make: cleanString(input.vehicle?.make).toUpperCase(),
+    model: cleanString(input.vehicle?.model),
+    trim: cleanString(input.vehicle?.trim),
+  };
+  if (!vehicle.year || !vehicle.make || !vehicle.model) return null;
+
+  const profiles = await readVehicleProfiles();
+  const baseKey = vehicleProfileBaseKey(vehicle);
+  const exactKey = vehicleProfileKey(vehicle);
+  let profile = profiles.profiles.find((item) => item.key === exactKey) || profiles.profiles.find((item) => item.baseKey === baseKey && !item.trim);
+  if (!profile) {
+    profile = {
+      id: randomUUID(),
+      key: exactKey,
+      baseKey,
+      year: vehicle.year,
+      make: vehicle.make,
+      model: vehicle.model,
+      trim: vehicle.trim,
+      vins: [],
+      verifiedParts: [],
+      warnings: [],
+      confidence: "learning",
+      createdAt: new Date().toISOString(),
+    };
+    profiles.profiles.unshift(profile);
+  }
+
+  const vin = cleanString(input.vin).toUpperCase();
+  if (vin && !profile.vins.includes(vin)) profile.vins.push(vin);
+  const part = cleanProfilePart(input.part);
+  const key = profilePartKey(part);
+
+  if (outcome === "worked") {
+    const index = profile.verifiedParts.findIndex((item) => profilePartKey(item) === key);
+    if (index >= 0) profile.verifiedParts[index] = mergeWorkedPart(profile.verifiedParts[index], part, part.supplier);
+    else profile.verifiedParts.unshift(mergeWorkedPart({ key }, part, part.supplier));
+  } else {
+    profile.warnings.unshift({
+      id: randomUUID(),
+      outcome,
+      part,
+      key,
+      createdAt: new Date().toISOString(),
+    });
+    profile.warnings = profile.warnings.slice(0, 30);
+  }
+
+  profile.verifiedParts.sort((a, b) => (b.count || 0) - (a.count || 0));
+  profile.baselinePart = profile.verifiedParts[0] || profile.baselinePart || null;
+  profile.confidence =
+    (profile.baselinePart?.count || 0) >= 3 || profile.verifiedParts.length >= 3
+      ? "verified"
+      : profile.verifiedParts.length
+        ? "shop-confirmed"
+        : "learning";
+  profile.updatedAt = new Date().toISOString();
+  await writeVehicleProfiles(profiles);
+  return profile;
+}
+
 function cleanString(value) {
   return String(value ?? "").trim();
 }
@@ -1868,11 +1992,13 @@ function productText(product) {
 
 function productFamily(product) {
   const text = productText(product);
+  const nameText = normalizeVehicleText([product.name, product.keyInfo?.productType].filter(Boolean).join(" "));
+  if (/INSERT|BLADE|EMERGENCY/.test(nameText)) return "insert";
   if (/TOOL|MACHINE|LISHI|PICK|DECODER/.test(text)) return "tool";
-  if (/PROX|PROXIMITY|SMART|PUSH|PEPS/.test(text)) return "proximity";
-  if (/FLIP|REMOTE HEAD|REMOTEHEAD|SWITCHBLADE/.test(text)) return "remote-head";
-  if (/TRANSPONDER|CHIP/.test(text)) return "transponder";
-  if (/\bREMOTE\b/.test(text)) return "remote-head";
+  if (/PROX|PROXIMITY|SMART|PUSH|PEPS/.test(nameText)) return "proximity";
+  if (/FLIP|REMOTE HEAD|REMOTEHEAD|SWITCHBLADE/.test(nameText)) return "remote-head";
+  if (/TRANSPONDER|CHIP/.test(nameText)) return "transponder";
+  if (/\bREMOTE\b/.test(nameText)) return "remote-head";
   if (/INSERT|BLADE|EMERGENCY/.test(text)) return "insert";
   return "unknown";
 }
@@ -1924,7 +2050,71 @@ function productHasShopMatch(product) {
   return Boolean(product.keyInfo?.shopMatch);
 }
 
-function evaluatePartSelection(product, vehicle, shopEvidence, programmingReference) {
+function compactToken(value) {
+  return normalizeVehicleText(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function directProfilePartTokens(part = {}) {
+  return [part.oem, part.sku]
+    .filter(Boolean)
+    .flatMap((value) => {
+      const text = normalizeVehicleText(value);
+      const tokens = [compactToken(text)];
+      for (const match of text.matchAll(/\b\d{3}-R\d{4}R?\b/g)) tokens.push(match[0].replace(/[^A-Z0-9]/g, "").replace(/R$/, ""));
+      for (const match of text.matchAll(/\b[A-Z]{2,5}-?R?\d{3,5}\b/g)) tokens.push(match[0].replace(/[^A-Z0-9]/g, "").replace(/R$/, ""));
+      return tokens;
+    })
+    .filter((token) => token && token.length >= 5);
+}
+
+function buttonCount(value) {
+  return String(value || "").match(/\b([2-7])\s*(?:B|BUTTON|BTN)?\b/i)?.[1] || "";
+}
+
+function productMatchesProfilePart(product, part) {
+  const text = normalizeVehicleText([
+    product.name,
+    product.id,
+    product.sku,
+    product.keyInfo?.sku,
+    product.keyInfo?.itemNumber,
+    product.keyInfo?.oem,
+    product.keyInfo?.fcc,
+  ].filter(Boolean).join(" "));
+  const compact = text.replace(/[^A-Z0-9]/g, "");
+  if (directProfilePartTokens(part).some((token) => compact.includes(token))) return true;
+
+  const profileFcc = compactToken(part.fcc);
+  if (!profileFcc || !compact.includes(profileFcc)) return false;
+  const family = productFamily(product);
+  if (["insert", "tool"].includes(family)) return false;
+  const expectedButtons = buttonCount(part.buttons);
+  const productButtons = buttonCount([product.keyInfo?.buttons, product.name].filter(Boolean).join(" "));
+  return expectedButtons ? productButtons === expectedButtons : true;
+}
+
+function applyVehicleProfileToProducts(liveSupplierLookup, verifiedProfile) {
+  if (!liveSupplierLookup?.products?.length || !verifiedProfile) return liveSupplierLookup;
+  return {
+    ...liveSupplierLookup,
+    products: liveSupplierLookup.products.map((product) => {
+      const matchedParts = (verifiedProfile.verifiedParts || []).filter((part) => productMatchesProfilePart(product, part));
+      const warnedParts = (verifiedProfile.warnings || []).filter((warning) => productMatchesProfilePart(product, warning.part));
+      if (!matchedParts.length && !warnedParts.length) return product;
+      return {
+        ...product,
+        score: (product.score || 0) + (matchedParts.length ? 45 : 0) - (warnedParts.length ? 35 : 0),
+        keyInfo: {
+          ...(product.keyInfo || {}),
+          profileMatch: matchedParts[0] ? [matchedParts[0].oem, matchedParts[0].fcc, matchedParts[0].sku].filter(Boolean).join(" / ") : "",
+          profileWarning: warnedParts[0]?.outcome || "",
+        },
+      };
+    }),
+  };
+}
+
+function evaluatePartSelection(product, vehicle, shopEvidence, programmingReference, verifiedProfile) {
   const reasons = [];
   const warnings = [];
   const missing = [];
@@ -1961,6 +2151,16 @@ function evaluatePartSelection(product, vehicle, shopEvidence, programmingRefere
   if (product.keyInfo?.shopWarning) {
     score -= shopEvidence?.exactVinCount ? 36 : 24;
     warnings.push(`shop feedback warned on ${product.keyInfo.shopWarning}`);
+  }
+
+  if (product.keyInfo?.profileMatch) {
+    score += 42;
+    reasons.push(`verified profile matched ${product.keyInfo.profileMatch}`);
+  }
+
+  if (product.keyInfo?.profileWarning) {
+    score -= 35;
+    warnings.push(`profile warning: ${product.keyInfo.profileWarning}`);
   }
 
   if (expected !== "unknown") {
@@ -2083,11 +2283,11 @@ function buildSelectionSummary(products) {
   };
 }
 
-function applyPartSelectionEngine(liveSupplierLookup, vehicle, shopEvidence, programmingReference) {
+function applyPartSelectionEngine(liveSupplierLookup, vehicle, shopEvidence, programmingReference, verifiedProfile) {
   if (!liveSupplierLookup?.products?.length) return liveSupplierLookup;
   const products = liveSupplierLookup.products
     .map((product) => {
-      const selection = evaluatePartSelection(product, vehicle, shopEvidence, programmingReference);
+      const selection = evaluatePartSelection(product, vehicle, shopEvidence, programmingReference, verifiedProfile);
       return {
         ...product,
         score: Math.max(product.score || 0, selection.score),
@@ -2146,6 +2346,20 @@ async function findProgrammingReference(vehicle) {
   } catch {
     return null;
   }
+}
+
+async function findVerifiedVehicleProfile(vehicle) {
+  const profiles = await readVehicleProfiles();
+  const baseKey = vehicleProfileBaseKey(vehicle);
+  const exactKey = vehicleProfileKey(vehicle);
+  return (
+    profiles.profiles
+      .filter((profile) => profile.key === exactKey || profile.baseKey === baseKey)
+      .sort((a, b) => {
+        if ((a.key === exactKey) !== (b.key === exactKey)) return a.key === exactKey ? -1 : 1;
+        return (b.verifiedParts?.length || 0) - (a.verifiedParts?.length || 0) || new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+      })[0] || null
+  );
 }
 
 async function readMasterCatalog() {
@@ -2653,6 +2867,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const family = vehicleFamily(vehicle.make, vehicle.model);
   const catalogApplication = await findCatalogApplication(vehicle);
   const programmingReference = await findProgrammingReference(vehicle);
+  const verifiedProfile = await findVerifiedVehicleProfile(vehicle);
   const intelligence = await readKeyIntelligence();
   const record = findIntelligenceRecord(vehicle, intelligence);
   const shopEvidence = buildShopEvidence(vehicle, options.vin || "", store.jobs);
@@ -2661,7 +2876,8 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
   const rawSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
   const evidenceSupplierLookup = applyShopEvidenceToProducts(rawSupplierLookup, shopEvidence);
-  const liveSupplierLookup = applyPartSelectionEngine(evidenceSupplierLookup, vehicle, shopEvidence, programmingReference);
+  const profiledSupplierLookup = applyVehicleProfileToProducts(evidenceSupplierLookup, verifiedProfile);
+  const liveSupplierLookup = applyPartSelectionEngine(profiledSupplierLookup, vehicle, shopEvidence, programmingReference, verifiedProfile);
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -2694,6 +2910,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     matchedJobs,
     programmingReference,
     supplierCandidates: supplierCandidates || [],
+    verifiedProfile,
     shopEvidence,
     liveSupplierLookup,
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
@@ -2713,6 +2930,11 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/vehicle-profiles") {
+    sendJson(response, 200, await readVehicleProfiles());
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/jobs") {
     const job = cleanJob(await readJsonBody(request));
     store.jobs.unshift(job);
@@ -2722,10 +2944,12 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "POST" && pathname === "/api/part-outcomes") {
-    const job = cleanPartOutcome(await readJsonBody(request));
+    const body = await readJsonBody(request);
+    const job = cleanPartOutcome(body);
     store.jobs.unshift(job);
     await writeStore(store);
-    sendJson(response, 201, { job });
+    const profile = await updateVehicleProfileFromOutcome(body);
+    sendJson(response, 201, { job, profile });
     return;
   }
 

@@ -670,6 +670,33 @@ function renderShopEvidenceCard(evidence) {
   `;
 }
 
+function renderVerifiedProfileCard(profile) {
+  if (!profile) return "";
+  const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
+  const title = [profile.year, profile.make, profile.model, profile.trim].filter(Boolean).join(" ");
+  return `
+    <section class="verified-profile-card">
+      <div>
+        <span>Verified baseline</span>
+        <strong>${escapeHtml(baseline ? [baseline.oem, baseline.fcc, baseline.buttons].filter(Boolean).join(" | ") || baseline.name : title)}</strong>
+        <p>${escapeHtml(
+          baseline
+            ? [
+                baseline.name,
+                baseline.frequency,
+                baseline.chip,
+                baseline.suppliers?.length ? `Suppliers: ${baseline.suppliers.join(", ")}` : "",
+              ]
+                .filter(Boolean)
+                .join(" | ")
+            : "No worked part has been saved yet for this vehicle profile.",
+        )}</p>
+      </div>
+      <small>${escapeHtml(`${profile.confidence || "learning"} | ${profile.verifiedParts?.length || 0} part${profile.verifiedParts?.length === 1 ? "" : "s"}`)}</small>
+    </section>
+  `;
+}
+
 function resetVinWorkflow() {
   vinWorkflowStep = "entry";
   latestVinProfile = null;
@@ -821,6 +848,8 @@ function normalizedSupplierOffer(product) {
     fitment: product.keyInfo?.fitment || product.fitmentLines?.[0] || "",
     shopMatch: product.keyInfo?.shopMatch || "",
     shopWarning: product.keyInfo?.shopWarning || "",
+    profileMatch: product.keyInfo?.profileMatch || "",
+    profileWarning: product.keyInfo?.profileWarning || "",
     selectionRank: product.selection?.rank || product.keyInfo?.selectionRank || "",
     selectionScore: Number.isFinite(Number(product.selection?.score ?? product.keyInfo?.selectionScore))
       ? Number(product.selection?.score ?? product.keyInfo?.selectionScore)
@@ -1016,6 +1045,7 @@ function renderOfferBadges(offer) {
   return [
     offer.selectionRank,
     offer.fitmentConfidence,
+    offer.profileMatch ? "Verified profile" : "",
     stock !== "Stock unknown" ? stock : "",
     offer.shopMatch ? "Shop match" : "",
     offer.shopWarning ? "Feedback warning" : "",
@@ -1052,13 +1082,14 @@ function renderSelectionEngine(offer) {
   const missing = offer.selectionMissing.length ? offer.selectionMissing : [];
   const warnings = offer.selectionWarnings.length ? offer.selectionWarnings : [];
   if (offer.shopWarning) warnings.unshift(`past feedback warned on ${offer.shopWarning}`);
+  if (offer.profileWarning) warnings.unshift(`verified profile warned on ${offer.profileWarning}`);
   return `
     <div class="selection-engine ${escapeHtml(selectionClassName(rank))}">
       <div>
         <span>${escapeHtml(confidenceLabel(rank))}</span>
         <strong>${offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Score pending"}</strong>
       </div>
-      <p>${escapeHtml(reasons.slice(0, 3).join(" + "))}</p>
+      <p>${escapeHtml([offer.profileMatch ? `verified profile ${offer.profileMatch}` : "", ...reasons].filter(Boolean).slice(0, 3).join(" + "))}</p>
       ${
         missing.length || warnings.length
           ? `<small>${escapeHtml(
@@ -1654,6 +1685,7 @@ function renderVehicleApprovalScreen(profile, context) {
           <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence - FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
         </article>
       </div>
+      ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
@@ -1767,6 +1799,7 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
+      ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
@@ -2244,7 +2277,10 @@ document.addEventListener("click", (event) => {
         },
       }),
     })
-      .then(() => {
+      .then((result) => {
+        if (result.profile && latestVinProfile) {
+          latestVinProfile.verifiedProfile = result.profile;
+        }
         feedbackButton.textContent = `Saved: ${feedbackLabel(outcome)}`;
       })
       .catch((error) => {

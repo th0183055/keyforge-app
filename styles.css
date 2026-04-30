@@ -882,6 +882,47 @@ textarea {
   white-space: nowrap;
 }
 
+.verified-profile-card {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 13px;
+  border: 1px solid #c8dccf;
+  border-left: 5px solid #127c45;
+  border-radius: 12px;
+  background: #f2fbf5;
+}
+
+.verified-profile-card span,
+.verified-profile-card small {
+  color: #0d6234;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.verified-profile-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  line-height: 1.18;
+}
+
+.verified-profile-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.verified-profile-card small {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: white;
+  white-space: nowrap;
+}
+
 .workflow-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2398,7 +2439,8 @@ textarea {
     flex-direction: column;
   }
 
-  .shop-evidence-card {
+  .shop-evidence-card,
+  .verified-profile-card {
     flex-direction: column;
   }
 
