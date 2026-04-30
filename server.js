@@ -1060,6 +1060,46 @@ function cleanJob(input) {
   };
 }
 
+function cleanPartOutcome(input) {
+  const vehicle = input.vehicle || {};
+  const part = input.part || {};
+  const year = cleanString(vehicle.year);
+  const make = cleanString(vehicle.make).toUpperCase();
+  const model = cleanString(vehicle.model);
+  const partName = cleanString(part.name);
+  const supplier = cleanString(part.supplier);
+  if (!year || !make || !model || !partName) {
+    throw new Error("Vehicle year/make/model and part name are required");
+  }
+
+  const refs = [
+    part.sku ? `SKU ${cleanString(part.sku)}` : "",
+    part.oem ? `OEM ${cleanString(part.oem)}` : "",
+    part.fcc ? `FCC ${cleanString(part.fcc)}` : "",
+    part.frequency ? `Frequency ${cleanString(part.frequency)}` : "",
+    part.chip ? `Chip ${cleanString(part.chip)}` : "",
+    part.buttons ? `Buttons ${cleanString(part.buttons)}` : "",
+    part.price ? `Price ${cleanString(part.price)}` : "",
+    part.stock ? `Stock ${cleanString(part.stock)}` : "",
+  ].filter(Boolean);
+
+  return {
+    id: randomUUID(),
+    title: `Verified part - ${year} ${make} ${model}`,
+    customer: "Shop evidence",
+    vehicle: [year, make, model, cleanString(vehicle.trim)].filter(Boolean).join(" "),
+    service: "Verified key part",
+    verification: "Part marked worked in LockForge",
+    status: "Completed",
+    vin: cleanString(input.vin).toUpperCase(),
+    programmer: [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
+    sequence: partName,
+    tags: ["verified-part", supplier, make].filter(Boolean),
+    notes: [supplier ? `Supplier ${supplier}` : "", partName, ...refs].filter(Boolean),
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function cleanString(value) {
   return String(value ?? "").trim();
 }
@@ -1491,6 +1531,272 @@ function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
         },
       };
     }),
+  };
+}
+
+function productText(product) {
+  return normalizeVehicleText([
+    product.name,
+    product.brand,
+    product.source,
+    product.customFields?.displayName,
+    product.customFields?.itemId,
+    product.customFields?.year,
+    product.customFields?.make,
+    product.customFields?.model,
+    product.keyInfo?.sku,
+    product.keyInfo?.itemNumber,
+    product.keyInfo?.oem,
+    product.keyInfo?.fcc,
+    product.keyInfo?.chip,
+    product.keyInfo?.productType,
+    product.keyInfo?.fitment,
+    product.customFields?.description,
+  ].filter(Boolean).join(" "));
+}
+
+function productFamily(product) {
+  const text = productText(product);
+  if (/INSERT|BLADE|EMERGENCY/.test(text)) return "insert";
+  if (/TOOL|MACHINE|LISHI|PICK|DECODER/.test(text)) return "tool";
+  if (/PROX|PROXIMITY|SMART|PUSH|PEPS/.test(text)) return "proximity";
+  if (/FLIP|REMOTE HEAD|REMOTEHEAD|SWITCHBLADE/.test(text)) return "remote-head";
+  if (/TRANSPONDER|CHIP/.test(text)) return "transponder";
+  if (/\bREMOTE\b/.test(text)) return "remote-head";
+  return "unknown";
+}
+
+function familyFromShopEvidence(shopEvidence) {
+  const tokens = (shopEvidence?.tokens || []).join(" ").toUpperCase();
+  const jobText = (shopEvidence?.jobs || [])
+    .flatMap((job) => [job.title, job.vehicle, job.programmer, job.keyCode, ...(job.notes || [])])
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase();
+  const text = `${tokens} ${jobText}`;
+  if (/R8370|M3N-A3C108397|M3NA2C93142300|PEPS|PROX|SMART/.test(text)) return "proximity";
+  if (/R8334|R8337|A08TBLP|FLIP|REMOTE HEAD|FRD8334|FRD8337/.test(text)) return "remote-head";
+  if (/R8259|TRANSPONDER|HITAG|ID49/.test(text)) return "transponder";
+  return "";
+}
+
+function expectedFamily(vehicle, programmingReference, shopEvidence) {
+  const shopFamily = shopEvidence?.exactVinCount ? familyFromShopEvidence(shopEvidence) : "";
+  if (shopFamily) return shopFamily;
+  const ignition = String(programmingReference?.ignitionType || "").toLowerCase();
+  if (ignition === "smart") return "proximity";
+  if (ignition === "keyed") return "transponder";
+  const year = Number(vehicle.year);
+  const text = normalizeVehicleText([vehicle.make, vehicle.model, vehicle.trim].join(" "));
+  if (year >= 2018 && /(FORD|LINCOLN|TOYOTA|LEXUS|HONDA|ACURA)/.test(text)) return "proximity";
+  return "unknown";
+}
+
+function conditionScore(product) {
+  const condition = normalizeVehicleText(product.keyInfo?.condition || product.name);
+  if (/OEM|NEW/.test(condition)) return 10;
+  if (/REFURBISHED|GRADE A|RECASE/.test(condition)) return 7;
+  if (/PREMIUM AFTERMARKET|AFTERMARKET/.test(condition)) return 6;
+  return 3;
+}
+
+function partPriceValue(product) {
+  const value = Number(String(product.price || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(value) && value > 0 ? value : Infinity;
+}
+
+function productInStock(product) {
+  return /^In stock/i.test(product.keyInfo?.stock || "");
+}
+
+function productHasShopMatch(product) {
+  return Boolean(product.keyInfo?.shopMatch);
+}
+
+function evaluatePartSelection(product, vehicle, shopEvidence, programmingReference) {
+  const reasons = [];
+  const warnings = [];
+  const missing = [];
+  const text = productText(product);
+  const family = productFamily(product);
+  const expected = expectedFamily(vehicle, programmingReference, shopEvidence);
+  const expectedSource = shopEvidence?.exactVinCount && familyFromShopEvidence(shopEvidence) ? "shop history" : programmingReference ? "programming reference" : "vehicle pattern";
+  let score = 0;
+
+  if (product.fitmentLines?.some((line) => lineCoversYear(line, vehicle.year))) {
+    score += 28;
+    reasons.push("fitment covers model year");
+  } else if (text.includes(String(vehicle.year))) {
+    score += 16;
+    reasons.push("product text includes model year");
+  } else {
+    missing.push("year fitment");
+  }
+
+  if (text.includes(normalizeVehicleText(vehicle.make))) {
+    score += 12;
+    reasons.push("make match");
+  }
+  if (text.includes(normalizeVehicleText(vehicle.model)) || text.replace(/\s+/g, "").includes(normalizeVehicleText(vehicle.model).replace(/\s+/g, ""))) {
+    score += 16;
+    reasons.push("model match");
+  }
+
+  if (product.keyInfo?.shopMatch) {
+    score += shopEvidence?.exactVinCount ? 38 : 24;
+    reasons.push(`shop history matched ${product.keyInfo.shopMatch}`);
+  }
+
+  if (expected !== "unknown") {
+    if (family === expected || (expected === "transponder" && ["remote-head", "transponder"].includes(family))) {
+      score += expectedSource === "shop history" ? 22 : 14;
+      reasons.push(`${expected} family match from ${expectedSource}`);
+    } else if (["insert", "tool"].includes(family)) {
+      score -= 28;
+      warnings.push(`${family} is supporting/reference item, not the main programmable key`);
+    } else if (product.keyInfo?.shopMatch) {
+      warnings.push(`shop evidence matched this item; still verify ${family} vs ${expected}`);
+    } else {
+      score -= 10;
+      warnings.push(`verify ${family} vs expected ${expected}`);
+    }
+  }
+
+  if (product.keyInfo?.fcc) {
+    score += 10;
+    reasons.push("FCC listed");
+  } else {
+    missing.push("FCC");
+  }
+
+  if (product.keyInfo?.frequency) {
+    score += 7;
+    reasons.push("frequency listed");
+  } else if (family !== "insert") {
+    missing.push("frequency");
+  }
+
+  if (product.keyInfo?.chip) {
+    score += 7;
+    reasons.push("chip/transponder listed");
+  } else if (!["insert", "tool"].includes(family)) {
+    missing.push("chip/transponder");
+  }
+
+  if (/\b\d\s*(BUTTON|BTN)\b/i.test(product.name) || product.keyInfo?.buttons) {
+    score += 5;
+    reasons.push("button count clue");
+  } else if (["proximity", "remote-head"].includes(family)) {
+    missing.push("button layout");
+  }
+
+  if (/^In stock/i.test(product.keyInfo?.stock || "")) {
+    score += 9;
+    reasons.push("in stock");
+  } else {
+    warnings.push(product.keyInfo?.stock || "stock unknown");
+  }
+
+  score += conditionScore(product);
+  if (product.price) score += 3;
+  if (family === "tool") score -= 30;
+  if (family === "insert") score -= 12;
+  score = Math.max(0, Math.min(100, score));
+  if (family === "tool") score = Math.min(score, 35);
+  if (family === "insert") score = Math.min(score, 55);
+  if (family === "transponder" && expected === "proximity" && !product.keyInfo?.shopMatch) score = Math.min(score, 60);
+
+  const rank =
+    score >= 82 && !warnings.some((item) => /supporting|tool/i.test(item))
+      ? "Recommended"
+      : score >= 62
+        ? "Possible"
+        : score >= 38
+          ? "Verify carefully"
+          : "Reference only";
+
+  return {
+    score,
+    rank,
+    family,
+    expectedFamily: expected,
+    expectedSource,
+    reasons: reasons.slice(0, 6),
+    warnings: warnings.slice(0, 4),
+    missing: missing.slice(0, 5),
+  };
+}
+
+function selectionRankWeight(rank) {
+  return { Recommended: 4, Possible: 3, "Verify carefully": 2, "Reference only": 1 }[rank] || 0;
+}
+
+function buildSelectionSummary(products) {
+  const counts = products.reduce(
+    (nextCounts, product) => {
+      const rank = product.selection?.rank || "Reference only";
+      nextCounts[rank] = (nextCounts[rank] || 0) + 1;
+      return nextCounts;
+    },
+    {},
+  );
+  const topPick = products.find((product) => product.selection?.rank === "Recommended") || products[0] || null;
+  const bestPick =
+    products.find((product) => product.selection?.rank === "Recommended" && productHasShopMatch(product) && productInStock(product)) ||
+    products.find((product) => product.selection?.rank === "Recommended" && productInStock(product)) ||
+    topPick;
+  const verification = topPick
+    ? [...new Set([...(bestPick.selection?.missing || []), ...(bestPick.selection?.warnings || [])])].slice(0, 5)
+    : ["supplier fitment", "FCC/frequency", "button layout", "blade/keyway"];
+  return {
+    ...counts,
+    counts,
+    topPick: bestPick
+      ? {
+          name: bestPick.name,
+          supplier: bestPick.supplier,
+          score: bestPick.selection?.score || 0,
+          rank: bestPick.selection?.rank || "Reference only",
+          family: bestPick.selection?.family || "unknown",
+          price: bestPick.priceFormatted || bestPick.price || "",
+          stock: bestPick.keyInfo?.stock || "",
+          identifiers: [bestPick.keyInfo?.itemNumber, bestPick.keyInfo?.sku, bestPick.keyInfo?.fcc].filter(Boolean).slice(0, 3),
+        }
+      : null,
+    verification,
+  };
+}
+
+function applyPartSelectionEngine(liveSupplierLookup, vehicle, shopEvidence, programmingReference) {
+  if (!liveSupplierLookup?.products?.length) return liveSupplierLookup;
+  const products = liveSupplierLookup.products
+    .map((product) => {
+      const selection = evaluatePartSelection(product, vehicle, shopEvidence, programmingReference);
+      return {
+        ...product,
+        score: Math.max(product.score || 0, selection.score),
+        selection,
+        keyInfo: {
+          ...(product.keyInfo || {}),
+          selectionRank: selection.rank,
+          selectionScore: selection.score,
+          selectionFamily: selection.family,
+        },
+      };
+    })
+    .sort(
+      (a, b) =>
+        selectionRankWeight(b.selection?.rank) - selectionRankWeight(a.selection?.rank) ||
+        Number(productHasShopMatch(b)) - Number(productHasShopMatch(a)) ||
+        Number(productInStock(b)) - Number(productInStock(a)) ||
+        (b.selection?.score || 0) - (a.selection?.score || 0) ||
+        partPriceValue(a) - partPriceValue(b),
+    );
+  const summary = buildSelectionSummary(products);
+  return {
+    ...liveSupplierLookup,
+    products,
+    selectionSummary: summary,
   };
 }
 
@@ -2037,7 +2343,9 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
-  const liveSupplierLookup = applyShopEvidenceToProducts(await liveSupplierLookups(vehicle, options.vin || ""), shopEvidence);
+  const rawSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
+  const evidenceSupplierLookup = applyShopEvidenceToProducts(rawSupplierLookup, shopEvidence);
+  const liveSupplierLookup = applyPartSelectionEngine(evidenceSupplierLookup, vehicle, shopEvidence, programmingReference);
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -2091,6 +2399,14 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/jobs") {
     const job = cleanJob(await readJsonBody(request));
+    store.jobs.unshift(job);
+    await writeStore(store);
+    sendJson(response, 201, { job });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/part-outcomes") {
+    const job = cleanPartOutcome(await readJsonBody(request));
     store.jobs.unshift(job);
     await writeStore(store);
     sendJson(response, 201, { job });
