@@ -874,10 +874,12 @@ function fccToken(value) {
 }
 
 function exactPartKey(offer) {
-  const partTokens = partNumberTokens([offer.oem, offer.sku, offer.partName].filter(Boolean).join(" "));
-  if (partTokens.length) return `part:${partTokens[0]}`;
   const fcc = fccToken([offer.fcc, offer.partName].filter(Boolean).join(" "));
   if (fcc) return `fcc:${fcc}:buttons:${String(offer.buttons || "unknown").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
+  const oemTokens = partNumberTokens([offer.oem, offer.partName].filter(Boolean).join(" "));
+  if (oemTokens.length) return `oem:${oemTokens[0]}`;
+  const skuTokens = partNumberTokens([offer.sku, offer.partName].filter(Boolean).join(" "));
+  if (skuTokens.length) return `sku:${skuTokens[0]}`;
   return `single:${offerIdentityKey(offer)}`;
 }
 
@@ -1041,11 +1043,12 @@ function gradeABaselineGroups(offers) {
   return exactPartGroups(offers)
     .filter((group) => group.offers.some(isKeyInnovationsGradeA))
     .map((group) => {
-      const focusedOffers = group.offers.filter((offer) => isKeyInnovationsGradeA(offer) || (offer.supplier !== "Key Innovations" && isGradeAEquivalentCondition(offer)));
-      const gradeAOnly = group.offers.filter(isKeyInnovationsGradeA);
-      const summary = buildExactPartGroup(group.key, focusedOffers.length ? focusedOffers : gradeAOnly, {
+      const equivalentCount = group.offers.filter((offer) => offer.supplier !== "Key Innovations" && isGradeAEquivalentCondition(offer)).length;
+      const summary = buildExactPartGroup(group.key, group.offers, {
         focusMode: "grade-a",
-        focusNote: group.supplierCount > focusedOffers.length ? "Showing KI Grade A plus supplier condition-equivalent offers first." : "Showing KI Grade A as the baseline pick.",
+        focusNote: equivalentCount
+          ? "Showing every exact supplier match for this KI Grade A option, with refurbished/equivalent offers included."
+          : "Showing every exact supplier match for this KI Grade A option. Verify condition when another supplier does not publish it.",
         originalOfferCount: group.offers.length,
       });
       summary.lane = "grade-a";

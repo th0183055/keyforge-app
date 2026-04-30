@@ -705,7 +705,7 @@ async function searchKeyInnovationsFitment(vehicle) {
 
   const filter = `${year}>${make}>${model}`;
   const url =
-    `https://api.searchspring.net/api/search/search.json?siteId=0r6l0x&resultsFormat=native&resultsPerPage=40&filter.ss_fitment=${encodeURIComponent(filter)}`;
+    `https://api.searchspring.net/api/search/search.json?siteId=0r6l0x&resultsFormat=native&resultsPerPage=120&filter.ss_fitment=${encodeURIComponent(filter)}`;
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
@@ -751,7 +751,7 @@ async function searchKeyInnovationsFitment(vehicle) {
         return product;
       })
       .sort((a, b) => b.score - a.score || Number(a.price || 0) - Number(b.price || 0))
-      .slice(0, 40),
+      .slice(0, 120),
   };
 }
 
@@ -1250,11 +1250,30 @@ async function liveSupplierLookups(vehicle, vin) {
     ["idn-hoffman", liveIdnLookup],
   ];
 
-  for (const [supplierId, lookup] of lookupTasks) {
-    const account = supplierAccounts.accounts.find((item) => item.id === supplierId);
+  const withTimeout = (promise, supplierName, ms) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`${supplierName} lookup timed out after ${Math.round(ms / 1000)} seconds.`)), ms);
+      }),
+    ]);
+
+  const results = await Promise.all(
+    lookupTasks.map(async ([supplierId, lookup]) => {
+      const account = supplierAccounts.accounts.find((item) => item.id === supplierId);
+      const supplierName = account?.name || supplierId;
+      try {
+        const timeoutMs = supplierId === "key-innovations" ? 12000 : 7000;
+        return { supplierId, account, result: await withTimeout(lookup(vehicle, vin), supplierName, timeoutMs) };
+      } catch (error) {
+        return { supplierId, account, error };
+      }
+    }),
+  );
+
+  for (const { supplierId, account, result, error } of results) {
     const statusIndex = statuses.findIndex((status) => status.id === supplierId);
-    try {
-      const result = await lookup(vehicle, vin);
+    if (result) {
       products.push(...(result.products || []));
       searchAttempts.push(...(result.searchAttempts || []));
       connected = connected || Boolean(result.connected);
@@ -1265,7 +1284,7 @@ async function liveSupplierLookups(vehicle, vin) {
           productCount: result.products?.length || 0,
         });
       }
-    } catch (error) {
+    } else {
       if (statusIndex >= 0) {
         statuses[statusIndex] = supplierLookupStatus(account, {
           status: "error",
