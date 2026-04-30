@@ -15,7 +15,7 @@ const liveProductFilters = {
   type: new Set(),
   supplier: new Set(),
 };
-const apiFallbackOrigin = "https://keyforge-app.onrender.com";
+const apiFallbackOrigin = "https://keyforge-app-x7o0.onrender.com";
 
 const chatLog = [
   {
@@ -1476,15 +1476,28 @@ function apiUrls(path) {
   return urls;
 }
 
+async function fetchWithTimeout(url, options, timeoutMs) {
+  if (!timeoutMs) return fetch(url, options);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 async function api(path, options = {}) {
   let lastError = null;
+  const urls = apiUrls(path);
 
-  for (const url of apiUrls(path)) {
+  for (const [index, url] of urls.entries()) {
     try {
-      const response = await fetch(url, {
+      const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http");
+      const response = await fetchWithTimeout(url, {
         headers: { "Content-Type": "application/json", ...(options.headers || {}) },
         ...options,
-      });
+      }, shouldFastFail ? 2500 : 0);
 
       let payload = null;
       try {
