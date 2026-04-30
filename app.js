@@ -715,34 +715,15 @@ function resetVinWorkflow() {
 const keyPackageOptions = [
   {
     id: "push-start",
-    title: "Push button start",
+    title: "Proximity key",
     family: "proximity",
-    note: "Prioritize smart/proximity keys and emergency inserts.",
+    note: "Smart key, prox, PEPS, push-to-start, and emergency insert references.",
   },
   {
     id: "turn-key",
-    title: "Turn key ignition",
+    title: "Keyed ignition",
     family: "keyed",
-    note: "Prioritize flip, remote-head, and transponder keys.",
-  },
-  {
-    id: "remote-start",
-    title: "Remote start button",
-    family: "",
-    buttonFilter: "Remote start",
-    note: "Keep remote-start button layouts near the top.",
-  },
-  {
-    id: "tailgate-cargo",
-    title: "Tailgate / cargo button",
-    family: "",
-    note: "Use button layout and photo verification before ordering.",
-  },
-  {
-    id: "no-key",
-    title: "No key to compare",
-    family: "",
-    note: "Keep both main families visible and rely on supplier agreement.",
+    note: "Flip key, remote-head key, transponder key, switchblade, and blade references.",
   },
 ];
 
@@ -754,6 +735,7 @@ function applyKeyPackage(option) {
   if (!option) return;
   selectedKeyPackage = option.id;
   if (option.family) selectedKeyFamily = option.family;
+  Object.values(liveProductFilters).forEach((selected) => selected.clear());
   if (option.buttonFilter) {
     liveProductFilters.buttons.clear();
     liveProductFilters.buttons.add(option.buttonFilter);
@@ -983,6 +965,38 @@ function groupSupplierOffers(products) {
     });
 }
 
+function buildExactPartGroup(key, offers, options = {}) {
+  const group = {
+    key,
+    offers: [...offers],
+    focusMode: options.focusMode || "",
+    focusNote: options.focusNote || "",
+    originalOfferCount: options.originalOfferCount || offers.length,
+  };
+  group.offers.sort((a, b) => {
+    if (isKeyInnovationsGradeA(b) !== isKeyInnovationsGradeA(a)) return isKeyInnovationsGradeA(b) ? 1 : -1;
+    if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) {
+      return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
+    }
+    if (offerIsInStock(b) !== offerIsInStock(a)) return offerIsInStock(b) ? 1 : -1;
+    return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || a.supplier.localeCompare(b.supplier);
+  });
+  group.bestOffer = group.offers[0];
+  group.label = exactPartLabel(group);
+  group.supplierCount = new Set(group.offers.map((offer) => offer.supplier)).size;
+  group.conditions = [...new Set(group.offers.map((offer) => offer.condition && offer.condition !== "Verify" ? offer.condition : conditionBucket(offer.rawProduct)).filter(Boolean))];
+  group.fccs = [...new Set(group.offers.map((offer) => offer.fcc).filter(Boolean))];
+  group.frequencies = [...new Set(group.offers.map((offer) => offer.frequency).filter(Boolean))];
+  group.buttons = [...new Set(group.offers.map((offer) => offer.buttons).filter(Boolean))];
+  group.lowestPrice = group.offers
+    .filter((offer) => offer.priceValue)
+    .sort((a, b) => a.priceValue - b.priceValue)[0];
+  group.inStockCount = group.offers.filter(offerIsInStock).length;
+  group.lane = partLane(group.bestOffer);
+  group.agreementScore = Math.min(100, 35 + group.supplierCount * 15 + group.inStockCount * 5 + (group.fccs.length ? 10 : 0) + (group.buttons.length ? 5 : 0));
+  return group;
+}
+
 function exactPartGroups(offers) {
   const groups = new Map();
   offers.forEach((offer) => {
@@ -997,29 +1011,7 @@ function exactPartGroups(offers) {
   });
 
   return Array.from(groups.values())
-    .map((group) => {
-      group.offers.sort((a, b) => {
-        if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) {
-          return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
-        }
-        if (offerIsInStock(b) !== offerIsInStock(a)) return offerIsInStock(b) ? 1 : -1;
-        return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || a.supplier.localeCompare(b.supplier);
-      });
-      group.bestOffer = group.offers[0];
-      group.label = exactPartLabel(group);
-      group.supplierCount = new Set(group.offers.map((offer) => offer.supplier)).size;
-      group.conditions = [...new Set(group.offers.map((offer) => offer.condition && offer.condition !== "Verify" ? offer.condition : conditionBucket(offer.rawProduct)).filter(Boolean))];
-      group.fccs = [...new Set(group.offers.map((offer) => offer.fcc).filter(Boolean))];
-      group.frequencies = [...new Set(group.offers.map((offer) => offer.frequency).filter(Boolean))];
-      group.buttons = [...new Set(group.offers.map((offer) => offer.buttons).filter(Boolean))];
-      group.lowestPrice = group.offers
-        .filter((offer) => offer.priceValue)
-        .sort((a, b) => a.priceValue - b.priceValue)[0];
-      group.inStockCount = group.offers.filter(offerIsInStock).length;
-      group.lane = partLane(group.bestOffer);
-      group.agreementScore = Math.min(100, 35 + group.supplierCount * 15 + group.inStockCount * 5 + (group.fccs.length ? 10 : 0) + (group.buttons.length ? 5 : 0));
-      return group;
-    })
+    .map((group) => buildExactPartGroup(group.key, group.offers))
     .sort((a, b) => {
       if (selectionRankWeight(b.bestOffer.selectionRank) !== selectionRankWeight(a.bestOffer.selectionRank)) {
         return selectionRankWeight(b.bestOffer.selectionRank) - selectionRankWeight(a.bestOffer.selectionRank);
@@ -1027,6 +1019,37 @@ function exactPartGroups(offers) {
       if ((b.supplierCount > 1) !== (a.supplierCount > 1)) return b.supplierCount > 1 ? 1 : -1;
       if (b.inStockCount !== a.inStockCount) return b.inStockCount - a.inStockCount;
       return (a.lowestPrice?.priceValue ?? Infinity) - (b.lowestPrice?.priceValue ?? Infinity);
+    });
+}
+
+function conditionTextForOffer(offer) {
+  return [offer.condition, offer.partName, offer.rawProduct?.keyInfo?.condition, offer.rawProduct?.condition].filter(Boolean).join(" ").toLowerCase();
+}
+
+function isKeyInnovationsGradeA(offer) {
+  const supplier = String(offer.supplier || "").toLowerCase();
+  const text = conditionTextForOffer(offer);
+  return supplier.includes("key innovations") && /refurbished[\s,/-]*grade\s*a|grade\s*a/.test(text);
+}
+
+function isGradeAEquivalentCondition(offer) {
+  const text = conditionTextForOffer(offer);
+  return /refurbished[\s,/-]*grade\s*a|grade\s*a|refurb|recondition|recase|used|renewed|remanufactured/.test(text);
+}
+
+function gradeABaselineGroups(offers) {
+  return exactPartGroups(offers)
+    .filter((group) => group.offers.some(isKeyInnovationsGradeA))
+    .map((group) => {
+      const focusedOffers = group.offers.filter((offer) => isKeyInnovationsGradeA(offer) || (offer.supplier !== "Key Innovations" && isGradeAEquivalentCondition(offer)));
+      const gradeAOnly = group.offers.filter(isKeyInnovationsGradeA);
+      const summary = buildExactPartGroup(group.key, focusedOffers.length ? focusedOffers : gradeAOnly, {
+        focusMode: "grade-a",
+        focusNote: group.supplierCount > focusedOffers.length ? "Showing KI Grade A plus supplier condition-equivalent offers first." : "Showing KI Grade A as the baseline pick.",
+        originalOfferCount: group.offers.length,
+      });
+      summary.lane = "grade-a";
+      return summary;
     });
 }
 
@@ -1263,14 +1286,23 @@ function renderExactPartGroup(group, allOffers) {
   ].filter(Boolean);
   const identifiers = headerDetails.join(" | ");
   const agreementLabel =
-    group.supplierCount >= 3 ? "Strong supplier agreement" : group.supplierCount === 2 ? "Supplier agreement" : "Single-source match";
+    group.focusMode === "grade-a"
+      ? "KI Grade A baseline"
+      : group.supplierCount >= 3
+        ? "Strong supplier agreement"
+        : group.supplierCount === 2
+          ? "Supplier agreement"
+          : "Single-source match";
+  const className = ["exact-part-group", group.supplierCount > 1 ? "multi-supplier" : "", group.focusMode === "grade-a" ? "grade-a-focus" : ""]
+    .filter(Boolean)
+    .join(" ");
   return `
-    <section class="exact-part-group ${group.supplierCount > 1 ? "multi-supplier" : ""}">
+    <section class="${escapeHtml(className)}">
       <div class="exact-group-head">
         <div>
           <span>${escapeHtml(agreementLabel)}</span>
           <strong>${escapeHtml(identifiers || best.partName)}</strong>
-          <p>${escapeHtml(group.conditions.length ? `Conditions: ${group.conditions.join(" / ")}` : best.partName)}</p>
+          <p>${escapeHtml(group.focusNote || (group.conditions.length ? `Conditions: ${group.conditions.join(" / ")}` : best.partName))}</p>
         </div>
         <div class="exact-group-summary">
           <strong>${escapeHtml(group.lowestPrice?.priceValue ? `$${group.lowestPrice.priceValue.toFixed(2)}` : "Check")}</strong>
@@ -1281,6 +1313,7 @@ function renderExactPartGroup(group, allOffers) {
         <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"} agree`)}</span>
         <span>${escapeHtml(`${group.inStockCount} in stock`)}</span>
         <span>${escapeHtml(group.conditions.length ? group.conditions.join(" / ") : "Condition verify")}</span>
+        ${group.focusMode === "grade-a" ? `<span>${escapeHtml(`${group.offers.length} Grade A/equivalent offers`)}</span>` : ""}
       </div>
       <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} supplier comparison`)}">
         ${group.offers.map((offer) => renderSupplierComparisonTab(offer, allOffers)).join("")}
@@ -1290,9 +1323,8 @@ function renderExactPartGroup(group, allOffers) {
   `;
 }
 
-function renderOfferLanes(offers) {
+function renderLaneGroups(groups, offers) {
   const lanes = ["main", "supporting", "reference"];
-  const groups = exactPartGroups(offers);
   return lanes
     .map((lane) => {
       const laneGroups = groups.filter((group) => group.lane === lane);
@@ -1309,6 +1341,45 @@ function renderOfferLanes(offers) {
       `;
     })
     .join("");
+}
+
+function renderGradeABaseline(offers) {
+  const gradeAGroups = gradeABaselineGroups(offers);
+  if (!gradeAGroups.length) return "";
+  const totalOffers = gradeAGroups.reduce((count, group) => count + group.offers.length, 0);
+  return `
+    <div class="grade-a-baseline">
+      <div class="grade-a-heading">
+        <div>
+          <p class="eyebrow">Initial locksmith pick</p>
+          <strong>Key Innovations Refurbished Grade A</strong>
+          <span>All KI Grade A options are shown first, including out-of-stock parts, with equivalent-condition matches from other suppliers.</span>
+        </div>
+        <small>${escapeHtml(`${gradeAGroups.length} parts / ${totalOffers} offers`)}</small>
+      </div>
+      ${gradeAGroups.map((group) => renderExactPartGroup(group, offers)).join("")}
+    </div>
+  `;
+}
+
+function renderOfferLanes(offers, baselineOffers = offers) {
+  const gradeAGroups = gradeABaselineGroups(baselineOffers);
+  const gradeAKeys = new Set(gradeAGroups.map((group) => group.key));
+  const secondaryGroups = exactPartGroups(offers).filter((group) => !gradeAKeys.has(group.key));
+  const secondaryMarkup = renderLaneGroups(secondaryGroups, offers);
+  const baselineMarkup = renderGradeABaseline(baselineOffers);
+  if (!baselineMarkup) return secondaryMarkup;
+  return `
+    ${baselineMarkup}
+    ${
+      secondaryMarkup
+        ? `<details class="secondary-results" open>
+            <summary>Other filtered matches</summary>
+            ${secondaryMarkup}
+          </details>`
+        : ""
+    }
+  `;
 }
 
 function findOfferByIdentity(identity) {
@@ -1380,6 +1451,8 @@ function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
   const filteredProducts = products.filter(productPassesLiveFilters);
   const offers = sortSupplierOffers(filteredProducts);
+  const baselineOffers = sortSupplierOffers(products);
+  const hasGradeABaseline = gradeABaselineGroups(baselineOffers).length > 0;
   const supplierStatuses = lookup.supplierStatuses || [];
   const visibleSupplierCounts = supplierCounts(filteredProducts);
   const selectedSupplierCounts = supplierCounts(products);
@@ -1452,8 +1525,8 @@ function renderSupplierComparison(lookup, products) {
               : ""
           }
           ${
-            offers.length
-              ? renderOfferLanes(offers)
+            offers.length || hasGradeABaseline
+              ? renderOfferLanes(offers, baselineOffers)
               : `<article class="assistant-card"><strong>No offers match those filters</strong><p>Clear a filter or choose a broader condition/type.</p></article>`
           }
         </div>
@@ -1755,8 +1828,8 @@ function renderKeyPackageScreen(profile) {
     <section class="program-screen key-package-step">
       <div class="workflow-heading">
         <p class="eyebrow">Screen 3</p>
-        <h3>Confirm key package</h3>
-        <p>${escapeHtml(title || "Vehicle")}: choose the field clue that best matches the vehicle before narrowing parts.</p>
+        <h3>Choose ignition type</h3>
+        <p>${escapeHtml(title || "Vehicle")}: choose the customer-visible key style before opening parts.</p>
       </div>
       <div class="key-package-grid">
         ${keyPackageOptions
@@ -1773,12 +1846,12 @@ function renderKeyPackageScreen(profile) {
       ${
         packageOption
           ? `<div class="package-note"><strong>${escapeHtml(packageOption.title)}</strong><span>${escapeHtml(packageOption.note)}</span></div>`
-          : `<div class="package-note"><strong>VIN limits</strong><span>VIN decode usually cannot prove exact FCC, board, or button layout by itself.</span></div>`
+          : `<div class="package-note"><strong>Pick one path</strong><span>VIN decode usually cannot prove prox vs keyed ignition by itself. Use the vehicle and customer key style here.</span></div>`
       }
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
-        `<button class="primary-action" type="button" data-package-continue>${selectedKeyPackage ? "Continue" : "Skip for now"}</button>`,
+        `<button class="primary-action" type="button" data-package-continue ${selectedKeyPackage ? "" : "disabled"}>Continue</button>`,
       ])}
     </section>
   `;
@@ -1803,7 +1876,7 @@ function renderKeyChoicesScreen(profile) {
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="family">Back to key family</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="package">Back to ignition type</button>`,
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
       ])}
@@ -2232,7 +2305,7 @@ document.addEventListener("click", (event) => {
 
   const packageContinue = event.target.closest("[data-package-continue]");
   if (packageContinue && latestVinProfile) {
-    vinWorkflowStep = "family";
+    vinWorkflowStep = "parts";
     renderVinProfile(latestVinProfile);
     return;
   }
