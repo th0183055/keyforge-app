@@ -1021,7 +1021,12 @@ async function readJsonBody(request) {
 }
 
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  response.writeHead(statusCode, {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Content-Type": "application/json; charset=utf-8",
+  });
   response.end(JSON.stringify(payload));
 }
 
@@ -2192,7 +2197,11 @@ async function serveStatic(response, pathname) {
   try {
     const ext = path.extname(filePath);
     const content = await readFile(filePath);
-    response.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream" });
+    const noCache = [".html", ".js", ".css"].includes(ext);
+    response.writeHead(200, {
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      ...(noCache ? { "Cache-Control": "no-store, max-age=0" } : {}),
+    });
     response.end(content);
   } catch {
     sendError(response, 404, "File not found");
@@ -2201,6 +2210,16 @@ async function serveStatic(response, pathname) {
 
 const server = createServer(async (request, response) => {
   try {
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      });
+      response.end();
+      return;
+    }
+
     const { pathname } = new URL(request.url, `http://${request.headers.host}`);
     if (pathname.startsWith("/api/")) {
       await handleApi(request, response, pathname);

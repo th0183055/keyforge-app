@@ -15,6 +15,7 @@ const liveProductFilters = {
   type: new Set(),
   supplier: new Set(),
 };
+const apiFallbackOrigin = "https://keyforge-app.onrender.com";
 
 const chatLog = [
   {
@@ -1465,22 +1466,46 @@ function renderChat() {
     .join("");
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+function apiUrls(path) {
+  const urls = [path];
+  const fallback = window.LOCKFORGE_API_ORIGIN || localStorage.getItem("lockforgeApiOrigin") || apiFallbackOrigin;
+  if (fallback) {
+    const fallbackUrl = `${fallback.replace(/\/$/, "")}${path}`;
+    if (new URL(fallbackUrl).origin !== window.location.origin) urls.push(fallbackUrl);
+  }
+  return urls;
+}
 
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}. On Render, deploy this as a Node web service with npm start, not a static site.`);
+async function api(path, options = {}) {
+  let lastError = null;
+
+  for (const url of apiUrls(path)) {
+    try {
+      const response = await fetch(url, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
+      }
+      if (!response.ok) {
+        throw new Error(payload.error || `Request failed with ${response.status}`);
+      }
+      return payload;
+    } catch (error) {
+      lastError = error;
+      if (!url.startsWith("http")) continue;
+      throw error;
+    }
   }
-  if (!response.ok) {
-    throw new Error(payload.error || "Request failed");
-  }
-  return payload;
+
+  throw new Error(
+    `${lastError?.message || "Request failed"} If this happens only on one device, refresh the page or use the Render Node web-service URL, not a static site URL.`,
+  );
 }
 
 function normalizeVinInput(value) {
