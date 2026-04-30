@@ -31,25 +31,25 @@ const supplierRegistry = [
     id: "uhs",
     name: "UHS Hardware",
     loginUrl: "https://www.uhs-hardware.com/login.php",
-    lookupMode: "planned connector",
+    lookupMode: "live public connector",
   },
   {
     id: "transponder-island",
     name: "Transponder Island",
     loginUrl: "https://transponderisland.com/",
-    lookupMode: "planned connector",
+    lookupMode: "live public connector",
   },
   {
     id: "key4",
     name: "Key4",
     loginUrl: "https://www.key4.com/",
-    lookupMode: "planned connector",
+    lookupMode: "live vehicle connector",
   },
   {
     id: "idn-hoffman",
     name: "IDN-H. Hoffman",
     loginUrl: "https://www.idn-inc.com/",
-    lookupMode: "login/import planned",
+    lookupMode: "live public catalog search",
   },
   {
     id: "golden-supply",
@@ -393,6 +393,29 @@ function normalizeImageUrl(url) {
   const cleanUrl = decodeHtml(url).replace("{:size}", "500x659");
   if (!cleanUrl) return "";
   return cleanUrl.startsWith("//") ? `https:${cleanUrl}` : cleanUrl;
+}
+
+function absoluteUrl(base, url) {
+  const cleanUrl = decodeHtml(url);
+  if (!cleanUrl) return "";
+  if (cleanUrl.startsWith("http")) return cleanUrl;
+  if (cleanUrl.startsWith("//")) return `https:${cleanUrl}`;
+  return `${base}${cleanUrl.startsWith("/") ? "" : "/"}${cleanUrl}`;
+}
+
+function valueFromText(text, pattern) {
+  return cleanString(String(text || "").match(pattern)?.[1] || "");
+}
+
+function keyInfoFromSupplierText(text) {
+  const cleanText = stripHtml(text);
+  return {
+    fcc: valueFromText(cleanText, /\b(?:FCC(?:\s*ID)?|FCCID)\s*[:#-]?\s*([A-Z0-9-]{5,})/i) || valueFromText(cleanText, /\b([A-Z0-9]{3,}-[A-Z0-9]{3,})\b/i),
+    oem: valueFromText(cleanText, /\b((?:\d{3}-R\d{4}R?)|(?:\d{4,}-[A-Z0-9-]{3,}))\b/i),
+    frequency: valueFromText(cleanText, /\b(3(?:15|14|13)|4(?:33|34)|902)\s*MHZ\b/i),
+    chip: valueFromText(cleanText, /\b(HITAG[^,;)]*|ID4[689A-Z]?|4D(?:\d+)?|46 CHIP|80 BIT|128 BIT)\b/i),
+    buttons: valueFromText(cleanText, /\b([2-7])\s*(?:B|BUTTON|BTN)\b/i),
+  };
 }
 
 function parseProductCards(html) {
@@ -876,6 +899,233 @@ async function searchGoldenSupplyProducts(vehicle, vin) {
   };
 }
 
+function supplierHtmlProduct(id, supplier, name, url, image, price, source, matchedQuery, vehicle, extra = {}) {
+  const keyInfo = keyInfoFromSupplierText([name, extra.description, extra.sku].filter(Boolean).join(" "));
+  const product = {
+    id: String(id || url || name),
+    supplier,
+    name: cleanString(name),
+    brand: extra.brand || cleanString(vehicle.make),
+    price: cleanString(price),
+    priceFormatted: cleanString(price),
+    url,
+    image: normalizeImageUrl(image),
+    source,
+    matchedQuery,
+    fitmentLines: extra.fitment ? [extra.fitment] : [],
+    customFields: extra,
+    keyInfo: {
+      sku: extra.sku || "",
+      itemNumber: keyInfo.oem || extra.sku || "",
+      fcc: keyInfo.fcc,
+      oem: keyInfo.oem,
+      chip: keyInfo.chip,
+      frequency: keyInfo.frequency ? `${keyInfo.frequency} MHz` : "",
+      buttons: keyInfo.buttons ? `${keyInfo.buttons} button` : "",
+      battery: "",
+      condition: /aftermarket/i.test(name) ? "Aftermarket" : /oem|original/i.test(name) ? "OEM / new" : "",
+      productType: /smart|prox/i.test(name) ? "Smart Key" : /flip/i.test(name) ? "Flip Key" : /transponder/i.test(name) ? "Transponder Key" : "Key item",
+      stock: extra.stock || "Stock unknown",
+      fitment: extra.fitment || "",
+    },
+  };
+  product.score = productScore(product, vehicle);
+  return product;
+}
+
+async function htmlFetch(url) {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "LockForge Systems supplier connector/0.1",
+    },
+  });
+  if (!response.ok) throw new Error(`Search returned ${response.status}`);
+  return response.text();
+}
+
+function parseUhsProducts(html, vehicle, matchedQuery) {
+  const products = [];
+  for (const match of String(html || "").matchAll(/<div[^>]+class="[^"]*product-item[^"]*"[^>]*data-product-id="([^"]+)"[^>]*data-json-product='([\s\S]*?)'\s*>/gi)) {
+    try {
+      const data = JSON.parse(decodeHtml(match[2]));
+      const variant = data.variants?.[0] || {};
+      const blockStart = match.index || 0;
+      const block = String(html || "").slice(blockStart, blockStart + 2500);
+      const image = data.featured_image || variant.featured_image?.src || block.match(/<img[^>]+(?:data-src|src)="([^"]+)"/i)?.[1] || "";
+      const url = absoluteUrl("https://www.uhs-hardware.com", `/products/${data.handle || ""}`);
+      const price = Number(variant.price || data.price || 0);
+      products.push(
+        supplierHtmlProduct(match[1], "UHS Hardware", data.title || variant.name, url, image, price > 999 ? (price / 100).toFixed(2) : price || "", "UHS storefront search", matchedQuery, vehicle, {
+          sku: variant.sku || "",
+          description: stripHtml(data.description || data.body_html || ""),
+          stock: variant.available === false ? "Out of stock" : "Stock unknown",
+        }),
+      );
+    } catch {
+      // Ignore malformed embedded Shopify product JSON.
+    }
+  }
+  return products;
+}
+
+async function searchUhsProducts(vehicle, vin) {
+  const seen = new Map();
+  const searchAttempts = [];
+  for (const query of searchQueriesForVehicle(vehicle, vin).filter((query) => query !== vin).slice(0, 3)) {
+    const html = await htmlFetch(`https://www.uhs-hardware.com/search?q=${encodeURIComponent(query)}`);
+    const products = parseUhsProducts(html, vehicle, query);
+    searchAttempts.push({ query, resultCount: products.length, returnedCount: products.length });
+    products.forEach((product) => {
+      if (product.score > 0 && !seen.has(product.id)) seen.set(product.id, product);
+    });
+  }
+  return {
+    connected: true,
+    source: "UHS storefront search",
+    searchAttempts,
+    products: Array.from(seen.values()).sort((a, b) => b.score - a.score).slice(0, 40),
+  };
+}
+
+function parseTransponderIslandProducts(html, vehicle, matchedQuery) {
+  const products = [];
+  const blocks = String(html || "").matchAll(/<form[^>]+itemtype="http:\/\/schema\.org\/Product"[\s\S]*?<\/form>/gi);
+  for (const blockMatch of blocks) {
+    const block = blockMatch[0];
+    const titleMatch = block.match(/<a[^>]+itemprop="name"[^>]+title="([^"]+)"[^>]+href="([^"]+)"/i);
+    const name = decodeHtml(titleMatch?.[1]);
+    if (!name) continue;
+    const image = normalizeImageUrl(block.match(/<img[^>]+(?:data-src|src)="([^"]+)"/i)?.[1]);
+    const id = block.match(/name="product_template_id"[^>]+value="([^"]+)"/i)?.[1] || block.match(/name="product_id"[^>]+value="([^"]+)"/i)?.[1];
+    products.push(
+      supplierHtmlProduct(
+        id,
+        "Transponder Island",
+        name,
+        absoluteUrl("https://transponderisland.com", titleMatch?.[2] || ""),
+        absoluteUrl("https://transponderisland.com", image),
+        "",
+        "Transponder Island storefront search",
+        matchedQuery,
+        vehicle,
+        { description: stripHtml(block), stock: /login/i.test(block) ? "Login for price/stock" : "Stock unknown" },
+      ),
+    );
+  }
+  return products;
+}
+
+async function searchTransponderIslandProducts(vehicle, vin) {
+  const query = searchQueriesForVehicle(vehicle, vin).filter((item) => item !== vin)[0];
+  const html = await htmlFetch(`https://transponderisland.com/shop?search=${encodeURIComponent(query)}`);
+  const products = parseTransponderIslandProducts(html, vehicle, query);
+  return {
+    connected: true,
+    source: "Transponder Island storefront search",
+    searchAttempts: [{ query, resultCount: products.length, returnedCount: products.length }],
+    products: products.filter((product) => product.score > 0).sort((a, b) => b.score - a.score).slice(0, 40),
+  };
+}
+
+function parseKey4Products(html, vehicle, matchedQuery) {
+  const products = [];
+  const blocks = String(html || "")
+    .split(/<div class="item"[^>]*>/i)
+    .slice(1)
+    .map((block) => `<div class="item">${block.split(/<div class="item"[^>]*>/i)[0]}`);
+  for (const block of blocks) {
+    const titleMatch = block.match(/<a([^>]*class="title"[^>]*)>\s*([\s\S]*?)\s*<\/a>/i);
+    const href = titleMatch?.[1]?.match(/href="([^"]+)"/i)?.[1] || "";
+    const name = stripHtml(titleMatch?.[2] || "");
+    if (!name) continue;
+    const sku = stripHtml(block.match(/<span class="id[^"]*"[^>]*>#?([\s\S]*?)<\/span>/i)?.[1] || "");
+    const image = block.match(/<img[^>]+(?:data-src|src)="([^"]+)"/i)?.[1] || "";
+    const price = stripHtml(block.match(/<span class="endPrice">\s*([\s\S]*?)\s*<\/span>/i)?.[1] || "");
+    products.push(
+      supplierHtmlProduct(
+        sku || titleMatch?.[1],
+        "Key4",
+        name,
+        absoluteUrl("https://www.key4.com", href),
+        absoluteUrl("https://www.key4.com", image),
+        price,
+        "Key4 vehicle search",
+        matchedQuery,
+        vehicle,
+        { sku, description: stripHtml(block), stock: /out of stock/i.test(block) ? "Out of stock" : "Stock unknown" },
+      ),
+    );
+  }
+  return products;
+}
+
+async function searchKey4Products(vehicle) {
+  const query = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
+  const url =
+    `https://www.key4.com/search-by-vehicle?year=${encodeURIComponent(vehicle.year || "")}&make=${encodeURIComponent(vehicle.make || "")}&model=${encodeURIComponent(vehicle.model || "")}`;
+  const html = await htmlFetch(url);
+  const products = parseKey4Products(html, vehicle, query);
+  return {
+    connected: true,
+    source: "Key4 vehicle search",
+    searchAttempts: [{ query, resultCount: products.length, returnedCount: products.length }],
+    products: products.filter((product) => product.score > 0).sort((a, b) => b.score - a.score).slice(0, 40),
+  };
+}
+
+function parseIdnProducts(html, vehicle, matchedQuery) {
+  const products = [];
+  const make = cleanString(vehicle.make).toUpperCase();
+  const model = cleanString(vehicle.model).toUpperCase();
+  const normalizedModel = model.replace(/[^A-Z0-9]/g, "");
+  for (const match of String(html || "").matchAll(/<li class="item product product-item">[\s\S]*?<\/li>/gi)) {
+    const block = match[0];
+    const titleMatch = block.match(/class="product-item-link" href="([^"]+)">([\s\S]*?)<\/a>/i);
+    const name = stripHtml(titleMatch?.[2] || "");
+    if (!name) continue;
+    const searchText = normalizeVehicleText(`${name} ${stripHtml(block)}`);
+    if (
+      make &&
+      model &&
+      !searchText.includes(make) &&
+      !searchText.includes(model) &&
+      !searchText.replace(/[^A-Z0-9]/g, "").includes(normalizedModel)
+    ) {
+      continue;
+    }
+    const sku = stripHtml(block.match(/<span class="label">Product #<\/span>\s*<a[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
+    const image = block.match(/<img[^>]+(?:data-src|src)="([^"]+)"/i)?.[1] || "";
+    products.push(
+      supplierHtmlProduct(
+        sku || titleMatch?.[1],
+        "IDN-H. Hoffman",
+        name,
+        titleMatch?.[1] || "",
+        image,
+        "",
+        "IDN public catalog search",
+        matchedQuery,
+        vehicle,
+        { sku, description: stripHtml(block), stock: /in stock/i.test(block) ? "In stock" : "Stock unknown" },
+      ),
+    );
+  }
+  return products;
+}
+
+async function searchIdnProducts(vehicle, vin) {
+  const query = searchQueriesForVehicle(vehicle, vin).filter((item) => item !== vin)[0];
+  const html = await htmlFetch(`https://www.idn-inc.com/catalogsearch/result/?q=${encodeURIComponent(query)}`);
+  const products = parseIdnProducts(html, vehicle, query);
+  return {
+    connected: true,
+    source: "IDN public catalog search",
+    searchAttempts: [{ query, resultCount: products.length, returnedCount: products.length }],
+    products: products.filter((product) => product.score > 0).sort((a, b) => b.score - a.score).slice(0, 30),
+  };
+}
+
 async function liveKeyInnovationsLookup(vehicle, vin) {
   const supplierAccounts = await readSupplierAccounts();
   const account = supplierAccounts.accounts.find((item) => item.id === "key-innovations");
@@ -901,10 +1151,54 @@ async function liveGoldenSupplyLookup(vehicle, vin) {
   };
 }
 
+async function liveUhsLookup(vehicle, vin) {
+  const live = await searchUhsProducts(vehicle, vin);
+  return {
+    supplier: "UHS Hardware",
+    loginStatus: "connected",
+    statusMessage: "UHS public storefront search is connected.",
+    vinLookupAvailable: false,
+    ...live,
+  };
+}
+
+async function liveTransponderIslandLookup(vehicle, vin) {
+  const live = await searchTransponderIslandProducts(vehicle, vin);
+  return {
+    supplier: "Transponder Island",
+    loginStatus: "connected",
+    statusMessage: "Transponder Island public storefront search is connected; login may be required for price/stock.",
+    vinLookupAvailable: false,
+    ...live,
+  };
+}
+
+async function liveKey4Lookup(vehicle, vin) {
+  const live = await searchKey4Products(vehicle, vin);
+  return {
+    supplier: "Key4",
+    loginStatus: "connected",
+    statusMessage: "Key4 vehicle search is connected.",
+    vinLookupAvailable: false,
+    ...live,
+  };
+}
+
+async function liveIdnLookup(vehicle, vin) {
+  const live = await searchIdnProducts(vehicle, vin);
+  return {
+    supplier: "IDN-H. Hoffman",
+    loginStatus: "connected",
+    statusMessage: "IDN public catalog search is connected; results may be broad until account/catalog integration is added.",
+    vinLookupAvailable: false,
+    ...live,
+  };
+}
+
 function supplierLookupStatus(account, override = {}) {
   const enabled = Boolean(account?.enabled);
   const configured = Boolean(account?.username && account?.passwordCipher);
-  const connectorLive = account?.id === "key-innovations" || account?.id === "golden-supply";
+  const connectorLive = ["key-innovations", "golden-supply", "uhs", "transponder-island", "key4", "idn-hoffman"].includes(account?.id);
   return {
     id: account?.id || "",
     name: account?.name || "Supplier",
@@ -916,9 +1210,7 @@ function supplierLookupStatus(account, override = {}) {
     message:
       override.message ||
       (connectorLive
-        ? account?.id === "golden-supply"
-          ? "Live Golden Supply item search is wired."
-          : "Live lookup is wired."
+        ? "Live supplier search is wired."
         : enabled
           ? "Login is saved, but this supplier still needs a connector before parts can appear in comparisons."
           : "Disabled in Settings."),
@@ -929,72 +1221,49 @@ function supplierLookupStatus(account, override = {}) {
 async function liveSupplierLookups(vehicle, vin) {
   const supplierAccounts = await readSupplierAccounts();
   const statuses = supplierAccounts.accounts.map((account) => supplierLookupStatus(account));
-  const keyIndex = statuses.findIndex((status) => status.id === "key-innovations");
-  const goldenIndex = statuses.findIndex((status) => status.id === "golden-supply");
   const products = [];
   const searchAttempts = [];
   let loginStatus = "connected";
   let statusMessage = "Supplier lookups completed.";
   let connected = false;
 
-  try {
-    const keyInnovations = await liveKeyInnovationsLookup(vehicle, vin);
-    products.push(...(keyInnovations.products || []));
-    searchAttempts.push(...(keyInnovations.searchAttempts || []));
-    connected = connected || Boolean(keyInnovations.connected);
-    if (keyIndex >= 0) {
-      statuses[keyIndex] = supplierLookupStatus(
-        supplierAccounts.accounts.find((account) => account.id === "key-innovations"),
-        {
-          status: keyInnovations.loginStatus,
-          message: keyInnovations.statusMessage,
-          productCount: keyInnovations.products?.length || 0,
-        },
-      );
-    }
-  } catch (error) {
-    if (keyIndex >= 0) {
-      statuses[keyIndex] = supplierLookupStatus(
-        supplierAccounts.accounts.find((account) => account.id === "key-innovations"),
-        {
-          status: "error",
-          message: error.message || "Key Innovations lookup failed.",
-          productCount: 0,
-        },
-      );
-    }
-    loginStatus = "partial";
-    statusMessage = error.message || "Key Innovations lookup failed.";
-  }
+  const lookupTasks = [
+    ["key-innovations", liveKeyInnovationsLookup],
+    ["golden-supply", liveGoldenSupplyLookup],
+    ["uhs", liveUhsLookup],
+    ["transponder-island", liveTransponderIslandLookup],
+    ["key4", liveKey4Lookup],
+    ["idn-hoffman", liveIdnLookup],
+  ];
 
-  try {
-    const goldenSupply = await liveGoldenSupplyLookup(vehicle, vin);
-    products.push(...(goldenSupply.products || []));
-    searchAttempts.push(...(goldenSupply.searchAttempts || []));
-    connected = connected || Boolean(goldenSupply.connected);
-    if (goldenIndex >= 0) {
-      statuses[goldenIndex] = supplierLookupStatus(
-        supplierAccounts.accounts.find((account) => account.id === "golden-supply"),
-        {
-          status: goldenSupply.loginStatus,
-          message: goldenSupply.statusMessage,
-          productCount: goldenSupply.products?.length || 0,
-        },
-      );
-    }
-  } catch (error) {
-    if (goldenIndex >= 0) {
-      statuses[goldenIndex] = supplierLookupStatus(
-        supplierAccounts.accounts.find((account) => account.id === "golden-supply"),
-        {
+  for (const [supplierId, lookup] of lookupTasks) {
+    const account = supplierAccounts.accounts.find((item) => item.id === supplierId);
+    const statusIndex = statuses.findIndex((status) => status.id === supplierId);
+    try {
+      const result = await lookup(vehicle, vin);
+      products.push(...(result.products || []));
+      searchAttempts.push(...(result.searchAttempts || []));
+      connected = connected || Boolean(result.connected);
+      if (statusIndex >= 0) {
+        statuses[statusIndex] = supplierLookupStatus(account, {
+          status: result.loginStatus,
+          message: result.statusMessage,
+          productCount: result.products?.length || 0,
+        });
+      }
+    } catch (error) {
+      if (statusIndex >= 0) {
+        statuses[statusIndex] = supplierLookupStatus(account, {
           status: "error",
-          message: error.message || "Golden Supply lookup failed.",
+          message: error.message || `${account?.name || supplierId} lookup failed.`,
           productCount: 0,
-        },
-      );
+        });
+      }
+      loginStatus = products.length ? "partial" : "error";
+      statusMessage = products.length
+        ? `${account?.name || supplierId} lookup failed after other supplier results loaded.`
+        : error.message || "Live supplier lookup failed.";
     }
-    loginStatus = products.length ? "partial" : "error";
-    statusMessage = products.length ? "Golden Supply lookup failed after other supplier results loaded." : error.message || "Live supplier lookup failed.";
   }
 
   return {
@@ -1417,7 +1686,7 @@ function modelTokens(model) {
   const base = normalizeVehicleText(model);
   const compact = base.replace(/\s+/g, "");
   const tokens = new Set([base, compact]);
-  if (/F\s?150|F150/.test(base)) tokens.add("F 150").add("F150").add("F-150");
+  if (/F\s?150|F150/.test(base)) tokens.add("F 150").add("F150").add("F-150").add("F SERIES").add("F-SERIES");
   if (/EXPEDITION/.test(base)) tokens.add("EXPEDITION");
   if (/CAMRY/.test(base)) tokens.add("CAMRY");
   if (/ACCORD/.test(base)) tokens.add("ACCORD");
@@ -1465,7 +1734,15 @@ function tokenMatchesProduct(token, product) {
     product.customFields?.itemId,
     product.customFields?.displayName,
   ].filter(Boolean).join(" "));
-  return productText.includes(normalizeVehicleText(token));
+  const normalizedToken = normalizeVehicleText(token);
+  const compactProduct = productText.replace(/[^A-Z0-9]/g, "");
+  const compactToken = normalizedToken.replace(/[^A-Z0-9]/g, "");
+  const trailingNumericToken = compactToken.match(/[A-Z]+(\d{4,})$/)?.[1] || "";
+  return (
+    productText.includes(normalizedToken) ||
+    compactProduct.includes(compactToken) ||
+    (trailingNumericToken.length >= 4 && compactProduct.includes(trailingNumericToken))
+  );
 }
 
 function jobReferenceTokens(job) {
@@ -1591,12 +1868,12 @@ function productText(product) {
 
 function productFamily(product) {
   const text = productText(product);
-  if (/INSERT|BLADE|EMERGENCY/.test(text)) return "insert";
   if (/TOOL|MACHINE|LISHI|PICK|DECODER/.test(text)) return "tool";
   if (/PROX|PROXIMITY|SMART|PUSH|PEPS/.test(text)) return "proximity";
   if (/FLIP|REMOTE HEAD|REMOTEHEAD|SWITCHBLADE/.test(text)) return "remote-head";
   if (/TRANSPONDER|CHIP/.test(text)) return "transponder";
   if (/\bREMOTE\b/.test(text)) return "remote-head";
+  if (/INSERT|BLADE|EMERGENCY/.test(text)) return "insert";
   return "unknown";
 }
 
