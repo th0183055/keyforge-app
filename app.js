@@ -9,6 +9,7 @@ let selectedJobId = null;
 let latestVinProfile = null;
 let vinWorkflowStep = "entry";
 let selectedKeyFamily = "";
+let selectedKeyPackage = "";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -673,6 +674,7 @@ function resetVinWorkflow() {
   vinWorkflowStep = "entry";
   latestVinProfile = null;
   selectedKeyFamily = "";
+  selectedKeyPackage = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   vinForm.classList.remove("is-hidden");
   ymmForm?.classList.remove("is-hidden");
@@ -681,6 +683,54 @@ function resetVinWorkflow() {
     <strong>Catalog source ready</strong>
     <p>Enter a VIN for identity first, or search year/make/model when the VIN cannot prove key package details.</p>
   `;
+}
+
+const keyPackageOptions = [
+  {
+    id: "push-start",
+    title: "Push button start",
+    family: "proximity",
+    note: "Prioritize smart/proximity keys and emergency inserts.",
+  },
+  {
+    id: "turn-key",
+    title: "Turn key ignition",
+    family: "keyed",
+    note: "Prioritize flip, remote-head, and transponder keys.",
+  },
+  {
+    id: "remote-start",
+    title: "Remote start button",
+    family: "",
+    buttonFilter: "Remote start",
+    note: "Keep remote-start button layouts near the top.",
+  },
+  {
+    id: "tailgate-cargo",
+    title: "Tailgate / cargo button",
+    family: "",
+    note: "Use button layout and photo verification before ordering.",
+  },
+  {
+    id: "no-key",
+    title: "No key to compare",
+    family: "",
+    note: "Keep both main families visible and rely on supplier agreement.",
+  },
+];
+
+function selectedPackageOption() {
+  return keyPackageOptions.find((option) => option.id === selectedKeyPackage) || null;
+}
+
+function applyKeyPackage(option) {
+  if (!option) return;
+  selectedKeyPackage = option.id;
+  if (option.family) selectedKeyFamily = option.family;
+  if (option.buttonFilter) {
+    liveProductFilters.buttons.clear();
+    liveProductFilters.buttons.add(option.buttonFilter);
+  }
 }
 
 function renderLiveFilterGroup(label, group, products) {
@@ -929,11 +979,16 @@ function exactPartGroups(offers) {
       group.bestOffer = group.offers[0];
       group.label = exactPartLabel(group);
       group.supplierCount = new Set(group.offers.map((offer) => offer.supplier)).size;
+      group.conditions = [...new Set(group.offers.map((offer) => offer.condition && offer.condition !== "Verify" ? offer.condition : conditionBucket(offer.rawProduct)).filter(Boolean))];
+      group.fccs = [...new Set(group.offers.map((offer) => offer.fcc).filter(Boolean))];
+      group.frequencies = [...new Set(group.offers.map((offer) => offer.frequency).filter(Boolean))];
+      group.buttons = [...new Set(group.offers.map((offer) => offer.buttons).filter(Boolean))];
       group.lowestPrice = group.offers
         .filter((offer) => offer.priceValue)
         .sort((a, b) => a.priceValue - b.priceValue)[0];
       group.inStockCount = group.offers.filter(offerIsInStock).length;
       group.lane = partLane(group.bestOffer);
+      group.agreementScore = Math.min(100, 35 + group.supplierCount * 15 + group.inStockCount * 5 + (group.fccs.length ? 10 : 0) + (group.buttons.length ? 5 : 0));
       return group;
     })
     .sort((a, b) => {
@@ -1168,19 +1223,33 @@ function renderSupplierComparisonTab(offer, groupOffers) {
 function renderExactPartGroup(group, allOffers) {
   const best = group.bestOffer;
   const suppliers = group.offers.map((offer) => offer.supplier).join(" / ");
-  const identifiers = [best.oem, best.fcc, best.buttons].filter(Boolean).join(" - ");
+  const headerDetails = [
+    group.label,
+    group.fccs[0],
+    group.buttons[0],
+    group.frequencies[0],
+    best.productType,
+  ].filter(Boolean);
+  const identifiers = headerDetails.join(" | ");
+  const agreementLabel =
+    group.supplierCount >= 3 ? "Strong supplier agreement" : group.supplierCount === 2 ? "Supplier agreement" : "Single-source match";
   return `
     <section class="exact-part-group ${group.supplierCount > 1 ? "multi-supplier" : ""}">
       <div class="exact-group-head">
         <div>
-          <span>${group.supplierCount > 1 ? "Exact match comparison" : "Single supplier match"}</span>
-          <strong>${escapeHtml(group.label)}</strong>
-          <p>${escapeHtml(identifiers || best.partName)}</p>
+          <span>${escapeHtml(agreementLabel)}</span>
+          <strong>${escapeHtml(identifiers || best.partName)}</strong>
+          <p>${escapeHtml(group.conditions.length ? `Conditions: ${group.conditions.join(" / ")}` : best.partName)}</p>
         </div>
         <div class="exact-group-summary">
           <strong>${escapeHtml(group.lowestPrice?.priceValue ? `$${group.lowestPrice.priceValue.toFixed(2)}` : "Check")}</strong>
-          <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"}`)}</span>
+          <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"} | ${group.agreementScore}%`)}</span>
         </div>
+      </div>
+      <div class="agreement-strip">
+        <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"} agree`)}</span>
+        <span>${escapeHtml(`${group.inStockCount} in stock`)}</span>
+        <span>${escapeHtml(group.conditions.length ? group.conditions.join(" / ") : "Condition verify")}</span>
       </div>
       <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} supplier comparison`)}">
         ${group.offers.map((offer) => renderSupplierComparisonTab(offer, allOffers)).join("")}
@@ -1646,10 +1715,48 @@ function renderKeyFamilyScreen(profile) {
   `;
 }
 
+function renderKeyPackageScreen(profile) {
+  const vehicle = profile.vehicle || {};
+  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
+  const packageOption = selectedPackageOption();
+  return `
+    <section class="program-screen key-package-step">
+      <div class="workflow-heading">
+        <p class="eyebrow">Screen 3</p>
+        <h3>Confirm key package</h3>
+        <p>${escapeHtml(title || "Vehicle")}: choose the field clue that best matches the vehicle before narrowing parts.</p>
+      </div>
+      <div class="key-package-grid">
+        ${keyPackageOptions
+          .map(
+            (option) => `
+              <button class="key-package-option ${selectedKeyPackage === option.id ? "active" : ""}" type="button" data-key-package="${escapeHtml(option.id)}">
+                <span>${escapeHtml(option.title)}</span>
+                <small>${escapeHtml(option.note)}</small>
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+      ${
+        packageOption
+          ? `<div class="package-note"><strong>${escapeHtml(packageOption.title)}</strong><span>${escapeHtml(packageOption.note)}</span></div>`
+          : `<div class="package-note"><strong>VIN limits</strong><span>VIN decode usually cannot prove exact FCC, board, or button layout by itself.</span></div>`
+      }
+      ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
+        `<button class="primary-action" type="button" data-package-continue>${selectedKeyPackage ? "Continue" : "Skip for now"}</button>`,
+      ])}
+    </section>
+  `;
+}
+
 function renderKeyChoicesScreen(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   ensureSelectedKeyFamily(products);
   const selectedProducts = productsForFamily(products, selectedKeyFamily);
+  const packageOption = selectedPackageOption();
   const decisionNote = profile.vin
     ? "VIN identified the vehicle, but FCC, buttons, board, and package still need supplier/vehicle verification."
     : "Year/make/model search broadens the results. Use buttons, FCC, keyway, trim, and customer key style to narrow the exact part.";
@@ -1658,7 +1765,7 @@ function renderKeyChoicesScreen(profile) {
       <div class="workflow-heading">
         <p class="eyebrow">Screen 4</p>
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
-        <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${decisionNote}`)}</p>
+        <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
@@ -1801,7 +1908,9 @@ function renderVinProfile(profile) {
         : "Needs verification";
 
   const context = { vehicle, title, quick, bestSupplier, sourceBadge };
-  if (vinWorkflowStep === "family") {
+  if (vinWorkflowStep === "package") {
+    vinResult.innerHTML = renderKeyPackageScreen(profile);
+  } else if (vinWorkflowStep === "family") {
     vinResult.innerHTML = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
     vinResult.innerHTML = renderKeyChoicesScreen(profile);
@@ -2075,6 +2184,21 @@ document.addEventListener("click", (event) => {
 
   const approveButton = event.target.closest("[data-approve-vehicle]");
   if (approveButton && latestVinProfile) {
+    vinWorkflowStep = "package";
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const packageButton = event.target.closest("[data-key-package]");
+  if (packageButton && latestVinProfile) {
+    const option = keyPackageOptions.find((item) => item.id === packageButton.dataset.keyPackage);
+    applyKeyPackage(option);
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const packageContinue = event.target.closest("[data-package-continue]");
+  if (packageContinue && latestVinProfile) {
     vinWorkflowStep = "family";
     renderVinProfile(latestVinProfile);
     return;
@@ -2266,6 +2390,7 @@ vinForm.addEventListener("submit", async (event) => {
     submitButton.disabled = true;
     vinWorkflowStep = "vehicle";
     selectedKeyFamily = "";
+    selectedKeyPackage = "";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     vinResult.innerHTML = `
       <div class="lookup-loading">
@@ -2298,6 +2423,7 @@ if (ymmForm) {
       submitButton.disabled = true;
       vinWorkflowStep = "vehicle";
       selectedKeyFamily = "";
+      selectedKeyPackage = "";
       Object.values(liveProductFilters).forEach((selected) => selected.clear());
       vinResult.innerHTML = `
         <div class="lookup-loading">

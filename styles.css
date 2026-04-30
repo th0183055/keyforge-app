@@ -727,6 +727,7 @@ textarea {
 }
 
 .key-family-step,
+.key-package-step,
 .selected-parts-step {
   display: grid;
   gap: 14px;
@@ -736,13 +737,15 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.key-family-grid {
+.key-family-grid,
+.key-package-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.key-family-option {
+.key-family-option,
+.key-package-option {
   min-height: 190px;
   border: 1px solid #e1c7bf;
   border-radius: 14px;
@@ -752,12 +755,14 @@ textarea {
   text-align: left;
 }
 
-.key-family-option.active {
+.key-family-option.active,
+.key-package-option.active {
   border: 2px solid var(--accent);
   box-shadow: 0 12px 24px rgba(208, 22, 38, 0.14);
 }
 
 .key-family-option span,
+.key-package-option span,
 .selected-family-strip span {
   display: block;
   color: var(--accent-dark);
@@ -779,6 +784,39 @@ textarea {
   color: var(--muted);
   font-size: 0.95rem;
   line-height: 1.4;
+}
+
+.key-package-option {
+  min-height: 116px;
+  padding: 14px;
+}
+
+.key-package-option small {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.package-note {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-left: 5px solid var(--accent);
+  border-radius: 10px;
+  background: #fff5ef;
+}
+
+.package-note strong {
+  color: var(--accent-dark);
+}
+
+.package-note span {
+  color: var(--muted);
+  line-height: 1.35;
+  text-align: right;
 }
 
 .selected-family-strip {
@@ -1495,6 +1533,22 @@ textarea {
 .exact-group-summary strong {
   color: var(--accent-dark);
   font-size: 1.05rem;
+}
+
+.agreement-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agreement-strip span {
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: #fff3eb;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .exact-supplier-tabs {
@@ -2315,16 +2369,28 @@ textarea {
   }
 
   .key-family-step,
+  .key-package-step,
   .selected-parts-step {
     padding: 12px;
   }
 
-  .key-family-grid {
+  .key-family-grid,
+  .key-package-grid {
     grid-template-columns: 1fr;
   }
 
-  .key-family-option {
+  .key-family-option,
+  .key-package-option {
     min-height: 134px;
+  }
+
+  .package-note {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .package-note span {
+    text-align: left;
   }
 
   .selected-family-strip {
