@@ -1392,6 +1392,7 @@ function cleanJob(input) {
 function cleanPartOutcome(input) {
   const vehicle = input.vehicle || {};
   const part = input.part || {};
+  const jobInput = input.job || {};
   const outcome = cleanString(input.outcome || "worked").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "worked";
   const outcomeLabels = {
     worked: "Worked",
@@ -1424,16 +1425,23 @@ function cleanPartOutcome(input) {
   return {
     id: randomUUID(),
     title: `${outcome === "worked" ? "Verified part" : "Part feedback"} - ${year} ${make} ${model}`,
-    customer: "Shop evidence",
+    customer: cleanString(jobInput.customer) || "Shop evidence",
     vehicle: [year, make, model, cleanString(vehicle.trim)].filter(Boolean).join(" "),
     service: outcome === "worked" ? "Verified key part" : "Part selection feedback",
     verification: "Part marked worked in LockForge",
     status: outcome === "worked" ? "Completed" : "Review",
     vin: cleanString(input.vin).toUpperCase(),
-    programmer: [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
+    programmer: cleanString(jobInput.programmer) || [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
     sequence: partName,
     tags: ["part-outcome", `outcome-${outcome}`, supplier, make].filter(Boolean),
-    notes: [`Outcome ${outcomeLabels[outcome] || outcome}`, supplier ? `Supplier ${supplier}` : "", partName, ...refs].filter(Boolean),
+    notes: [
+      `Outcome ${outcomeLabels[outcome] || outcome}`,
+      supplier ? `Supplier ${supplier}` : "",
+      partName,
+      cleanString(jobInput.tool) ? `Tool ${cleanString(jobInput.tool)}` : "",
+      cleanString(jobInput.notes),
+      ...refs,
+    ].filter(Boolean),
     createdAt: new Date().toISOString(),
   };
 }

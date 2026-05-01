@@ -11,6 +11,8 @@ let vinWorkflowStep = "entry";
 let selectedKeyFamily = "";
 let selectedKeyPackage = "";
 let supplierLookupRequestId = 0;
+let activeVinScan = null;
+let pendingJobOfferId = "";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -46,6 +48,7 @@ const supplierAccountList = document.querySelector("#supplierAccountList");
 const supplierSelect = document.querySelector("#supplierSelect");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
+const scanButton = document.querySelector(".scan-action");
 const vinResult = document.querySelector("#vinResult");
 const vinRecommendation = document.querySelector("#vinRecommendation");
 const aiForm = document.querySelector("#aiForm");
@@ -1305,6 +1308,7 @@ function renderSupplierComparisonTab(offer, groupOffers) {
         <button class="secondary-action small good" type="button" data-part-feedback="worked" data-part-id="${escapeHtml(offerIdentityKey(offer))}">
           ${offer.profileMatch ? "Worked again" : "Mark worked"}
         </button>
+        <button class="secondary-action small" type="button" data-save-job-part="${escapeHtml(offerIdentityKey(offer))}">Save job</button>
         ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open supplier</a>` : ""}
       </div>
       <details class="supplier-tab-detail">
@@ -1517,6 +1521,35 @@ function renderOfferLanes(offers, baselineOffers = offers) {
 function findOfferByIdentity(identity) {
   const products = latestVinProfile?.liveSupplierLookup?.products || [];
   return products.map(normalizedSupplierOffer).find((offer) => offerIdentityKey(offer) === identity) || null;
+}
+
+function partPayloadFromOffer(offer) {
+  return {
+    name: offer.partName,
+    supplier: offer.supplier,
+    sku: offer.sku,
+    oem: offer.oem,
+    fcc: offer.fcc,
+    frequency: offer.frequency,
+    chip: offer.chip,
+    buttons: offer.buttons,
+    price: offer.priceFormatted || offer.price,
+    stock: offer.stock,
+    family: offer.selectionFamily,
+  };
+}
+
+function savePartOutcome(outcome, offer, extra = {}) {
+  return api("/api/part-outcomes", {
+    method: "POST",
+    body: JSON.stringify({
+      outcome,
+      vin: latestVinProfile.vin,
+      vehicle: latestVinProfile.vehicle,
+      part: partPayloadFromOffer(offer),
+      ...extra,
+    }),
+  });
 }
 
 function feedbackLabel(outcome) {
@@ -2280,6 +2313,62 @@ function renderVinProfile(profile) {
   `;
 }
 
+function ensureJobSaveModal() {
+  let modal = document.querySelector("#jobSaveModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "jobSaveModal";
+  modal.className = "job-save-modal";
+  modal.innerHTML = `
+    <form class="job-save-sheet" id="jobSaveForm">
+      <div class="scanner-head">
+        <div>
+          <p class="eyebrow">Save job result</p>
+          <strong id="jobSaveTitle">Selected part</strong>
+        </div>
+        <button class="secondary-action small" type="button" data-close-job-save>Close</button>
+      </div>
+      <label>
+        Customer / reference
+        <input name="customer" value="Shop job" autocomplete="off" />
+      </label>
+      <label>
+        Programmer used
+        <input name="programmer" autocomplete="off" />
+      </label>
+      <label>
+        Tool / blade / code source
+        <input name="tool" autocomplete="off" />
+      </label>
+      <label>
+        Notes
+        <textarea name="notes" rows="3"></textarea>
+      </label>
+      <button class="primary-action" type="submit">Save worked job</button>
+    </form>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function openJobSaveModal(offer) {
+  const modal = ensureJobSaveModal();
+  const form = modal.querySelector("form");
+  const vehicleTitle = latestVinProfile?.vehicle ? [latestVinProfile.vehicle.year, latestVinProfile.vehicle.make, latestVinProfile.vehicle.model].filter(Boolean).join(" ") : "Vehicle";
+  pendingJobOfferId = offerIdentityKey(offer);
+  modal.querySelector("#jobSaveTitle").textContent = offer.partName;
+  form.elements.customer.value = "Shop job";
+  form.elements.programmer.value = latestVinProfile?.programmingReference?.programmer || latestVinProfile?.programmers?.[0]?.name || "";
+  form.elements.tool.value = latestVinProfile?.tools?.[0]?.name || "";
+  form.elements.notes.value = `${vehicleTitle}\n${[offer.supplier, offer.sku, offer.oem, offer.fcc, offer.buttons].filter(Boolean).join(" | ")}`;
+  modal.classList.add("active");
+}
+
+function closeJobSaveModal() {
+  pendingJobOfferId = "";
+  document.querySelector("#jobSaveModal")?.classList.remove("active");
+}
+
 function supplierLookupParams(profile) {
   const vehicle = profile.vehicle || {};
   const params = new URLSearchParams();
@@ -2299,6 +2388,101 @@ function supplierLookupParams(profile) {
     if (value) params.set(key, value);
   });
   return params.toString();
+}
+
+function vinInput() {
+  return vinForm.querySelector("input[name='vin']");
+}
+
+function submitCurrentVin() {
+  vinForm.requestSubmit ? vinForm.requestSubmit() : vinForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+}
+
+function ensureVinScannerModal() {
+  let modal = document.querySelector("#vinScannerModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "vinScannerModal";
+  modal.className = "scanner-modal";
+  modal.innerHTML = `
+    <div class="scanner-sheet">
+      <div class="scanner-head">
+        <div>
+          <p class="eyebrow">VIN scanner</p>
+          <strong>Scan door label barcode</strong>
+        </div>
+        <button class="secondary-action small" type="button" data-close-scanner>Close</button>
+      </div>
+      <video class="scanner-video" playsinline muted></video>
+      <div class="scanner-frame" aria-hidden="true"></div>
+      <p class="scanner-status">Point the camera at the VIN barcode. Manual entry still works below.</p>
+      <div class="scanner-manual">
+        <input name="manualVinScan" maxlength="17" autocomplete="off" placeholder="Enter VIN manually" />
+        <button class="primary-action small" type="button" data-use-scanned-vin>Use VIN</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function stopVinScanner() {
+  if (activeVinScan?.stream) {
+    activeVinScan.stream.getTracks().forEach((track) => track.stop());
+  }
+  if (activeVinScan?.frameId) cancelAnimationFrame(activeVinScan.frameId);
+  activeVinScan = null;
+  document.querySelector("#vinScannerModal")?.classList.remove("active");
+}
+
+function acceptScannedVin(value) {
+  const vin = normalizeVinInput(value);
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return false;
+  vinInput().value = vin;
+  stopVinScanner();
+  submitCurrentVin();
+  return true;
+}
+
+async function startVinScanner() {
+  const modal = ensureVinScannerModal();
+  const video = modal.querySelector("video");
+  const status = modal.querySelector(".scanner-status");
+  const manual = modal.querySelector("input[name='manualVinScan']");
+  manual.value = vinInput().value || "";
+  modal.classList.add("active");
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    status.textContent = "Camera access is not available in this browser. Enter the VIN manually.";
+    return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    status.textContent = "Barcode scanning is not supported in this browser yet. Enter the VIN manually below.";
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
+    video.srcObject = stream;
+    await video.play();
+    const detector = new BarcodeDetector({ formats: ["code_39", "code_128", "data_matrix", "qr_code"] });
+    activeVinScan = { stream, detector, frameId: null };
+    const scan = async () => {
+      if (!activeVinScan) return;
+      try {
+        const codes = await detector.detect(video);
+        const found = codes.map((code) => code.rawValue).find((value) => /^[A-HJ-NPR-Z0-9]{17}$/.test(normalizeVinInput(value)));
+        if (found && acceptScannedVin(found)) return;
+        status.textContent = "Scanning... hold steady on the VIN barcode.";
+      } catch {
+        status.textContent = "Scanner had trouble reading. Try better light or manual entry.";
+      }
+      if (activeVinScan) activeVinScan.frameId = requestAnimationFrame(scan);
+    };
+    scan();
+  } catch (error) {
+    status.textContent = `Camera unavailable: ${error.message}`;
+  }
 }
 
 async function startSupplierLookup(profile) {
@@ -2461,6 +2645,27 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const scannerCloseButton = event.target.closest("[data-close-scanner]");
+  if (scannerCloseButton) {
+    stopVinScanner();
+    return;
+  }
+
+  const scannedVinButton = event.target.closest("[data-use-scanned-vin]");
+  if (scannedVinButton) {
+    const value = document.querySelector("#vinScannerModal input[name='manualVinScan']")?.value || "";
+    if (!acceptScannedVin(value)) {
+      document.querySelector("#vinScannerModal .scanner-status").textContent = "Enter a valid 17-character VIN.";
+    }
+    return;
+  }
+
+  const jobSaveCloseButton = event.target.closest("[data-close-job-save]");
+  if (jobSaveCloseButton) {
+    closeJobSaveModal();
+    return;
+  }
+
   const resetButton = event.target.closest("[data-vin-reset]");
   if (resetButton) {
     resetVinWorkflow();
@@ -2516,27 +2721,7 @@ document.addEventListener("click", (event) => {
       button.disabled = true;
     });
     feedbackButton.textContent = "Saving...";
-    api("/api/part-outcomes", {
-      method: "POST",
-      body: JSON.stringify({
-        outcome,
-        vin: latestVinProfile.vin,
-        vehicle: latestVinProfile.vehicle,
-        part: {
-          name: offer.partName,
-          supplier: offer.supplier,
-          sku: offer.sku,
-          oem: offer.oem,
-          fcc: offer.fcc,
-          frequency: offer.frequency,
-          chip: offer.chip,
-          buttons: offer.buttons,
-          price: offer.priceFormatted || offer.price,
-          stock: offer.stock,
-          family: offer.selectionFamily,
-        },
-      }),
-    })
+    savePartOutcome(outcome, offer)
       .then((result) => {
         if (result.profile && latestVinProfile) {
           latestVinProfile.verifiedProfile = result.profile;
@@ -2555,6 +2740,13 @@ document.addEventListener("click", (event) => {
         feedbackButton.textContent = feedbackLabel(outcome);
         alert(error.message);
       });
+    return;
+  }
+
+  const saveJobButton = event.target.closest("[data-save-job-part]");
+  if (saveJobButton && latestVinProfile) {
+    const offer = findOfferByIdentity(saveJobButton.dataset.saveJobPart);
+    if (offer) openJobSaveModal(offer);
     return;
   }
 
@@ -2597,6 +2789,41 @@ jobForm.addEventListener("submit", async (event) => {
     alert(error.message);
   } finally {
     submitButton.disabled = false;
+  }
+});
+
+scanButton?.addEventListener("click", startVinScanner);
+
+document.addEventListener("submit", async (event) => {
+  if (event.target?.id !== "jobSaveForm") return;
+  event.preventDefault();
+  const offer = findOfferByIdentity(pendingJobOfferId);
+  if (!offer || !latestVinProfile) return;
+  const form = event.target;
+  const submitButton = form.querySelector("button[type='submit']");
+  const data = new FormData(form);
+  try {
+    submitButton.disabled = true;
+    submitButton.textContent = "Saving...";
+    const result = await savePartOutcome("worked", offer, {
+      job: {
+        customer: data.get("customer"),
+        programmer: data.get("programmer"),
+        tool: data.get("tool"),
+        notes: data.get("notes"),
+      },
+    });
+    if (result.profile) latestVinProfile.verifiedProfile = result.profile;
+    jobs.unshift(result.job);
+    selectedJobId = result.job.id;
+    renderJobs();
+    closeJobSaveModal();
+    startSupplierLookup(latestVinProfile);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Save worked job";
   }
 });
 
