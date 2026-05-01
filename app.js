@@ -609,12 +609,18 @@ function productPassesLiveFilters(product) {
 }
 
 function productKeyFamily(product) {
-  const text = [product.name, product.keyInfo?.productType, product.keyInfo?.buttons, product.keyInfo?.chip, product.selection?.family]
+  const serverFamily = product.selection?.family || product.keyInfo?.selectionFamily || "";
+  if (serverFamily === "proximity") return "proximity";
+  if (["remote-head", "transponder"].includes(serverFamily)) return "keyed";
+  if (["insert", "tool", "supporting"].includes(serverFamily)) return "supporting";
+
+  const text = [product.name, product.keyInfo?.productType, product.keyInfo?.buttons, product.keyInfo?.chip]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  if (text.includes("tool") || text.includes("lishi") || text.includes("decoder") || text.includes("insert") || text.includes("blade")) return "supporting";
   if (text.includes("prox") || text.includes("smart") || text.includes("peps") || text.includes("proximity")) return "proximity";
+  if (text.includes("flip") || text.includes("remote head") || text.includes("switchblade") || text.includes("transponder") || text.includes("chip")) return "keyed";
+  if (text.includes("tool") || text.includes("lishi") || text.includes("decoder") || text.includes("insert") || text.includes("blade")) return "supporting";
   return "keyed";
 }
 
