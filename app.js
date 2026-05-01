@@ -682,6 +682,37 @@ function renderShopEvidenceCard(evidence) {
   `;
 }
 
+function renderVehicleMemoryCard(profile) {
+  const evidence = profile.shopEvidence || {};
+  const jobs = evidence.jobs || [];
+  const workedJobs = jobs.filter((job) => !job.outcome || job.outcome === "worked");
+  const failedJobs = jobs.filter((job) => job.outcome && job.outcome !== "worked");
+  const prices = jobs.map((job) => Number(job.price)).filter((price) => Number.isFinite(price) && price > 0);
+  const average = prices.length ? prices.reduce((sum, price) => sum + price, 0) / prices.length : null;
+  const baseline = profile.verifiedProfile?.baselinePart || profile.verifiedProfile?.verifiedParts?.[0] || null;
+  if (!jobs.length && !baseline) return "";
+  const mostUsedProgrammer = evidence.programmers?.[0] || "Not recorded";
+  return `
+    <section class="vehicle-memory-card">
+      <div>
+        <span>Vehicle memory</span>
+        <strong>${escapeHtml(baseline?.name || `${jobs.length} saved job${jobs.length === 1 ? "" : "s"}`)}</strong>
+        <p>${escapeHtml(
+          [
+            `${workedJobs.length} worked`,
+            failedJobs.length ? `${failedJobs.length} issue${failedJobs.length === 1 ? "" : "s"}` : "",
+            average ? `Avg charge $${average.toFixed(0)}` : "",
+            `Programmer: ${mostUsedProgrammer}`,
+          ]
+            .filter(Boolean)
+            .join(" | "),
+        )}</p>
+      </div>
+      <small>${escapeHtml(profile.verifiedProfile?.confidence || evidence.confidence || "learning")}</small>
+    </section>
+  `;
+}
+
 function renderVerifiedProfileCard(profile) {
   if (!profile) return "";
   const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
@@ -1933,6 +1964,7 @@ function renderVehicleApprovalScreen(profile, context) {
           <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence - FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
         </article>
       </div>
+      ${renderVehicleMemoryCard(profile)}
       ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderWorkflowActions([
@@ -2050,6 +2082,7 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
+      ${renderVehicleMemoryCard(profile)}
       ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
@@ -2341,6 +2374,40 @@ function ensureJobSaveModal() {
         <input name="tool" autocomplete="off" />
       </label>
       <label>
+        Final outcome
+        <select name="outcome">
+          <option value="worked">Programmed successfully</option>
+          <option value="failed-program">Did not program</option>
+          <option value="wrong-fcc">Wrong FCC</option>
+          <option value="wrong-buttons">Wrong buttons</option>
+          <option value="different-key-style">Different key style</option>
+        </select>
+      </label>
+      <label>
+        Key type
+        <select name="keyType">
+          <option value="proximity">Proximity / smart</option>
+          <option value="keyed">Flip / transponder</option>
+        </select>
+      </label>
+      <label>
+        Customer charge
+        <input name="price" inputmode="decimal" placeholder="240" autocomplete="off" />
+      </label>
+      <label>
+        Payment
+        <select name="payment">
+          <option value="cr">Card</option>
+          <option value="ch">Cash</option>
+          <option value="inv">Invoice</option>
+          <option value="">Not recorded</option>
+        </select>
+      </label>
+      <label>
+        Failure reason
+        <input name="failureReason" autocomplete="off" />
+      </label>
+      <label>
         Notes
         <textarea name="notes" rows="3"></textarea>
       </label>
@@ -2360,6 +2427,11 @@ function openJobSaveModal(offer) {
   form.elements.customer.value = "Shop job";
   form.elements.programmer.value = latestVinProfile?.programmingReference?.programmer || latestVinProfile?.programmers?.[0]?.name || "";
   form.elements.tool.value = latestVinProfile?.tools?.[0]?.name || "";
+  form.elements.outcome.value = "worked";
+  form.elements.keyType.value = selectedKeyFamily === "proximity" ? "proximity" : "keyed";
+  form.elements.price.value = "";
+  form.elements.payment.value = "cr";
+  form.elements.failureReason.value = "";
   form.elements.notes.value = `${vehicleTitle}\n${[offer.supplier, offer.sku, offer.oem, offer.fcc, offer.buttons].filter(Boolean).join(" | ")}`;
   modal.classList.add("active");
 }
@@ -2805,11 +2877,16 @@ document.addEventListener("submit", async (event) => {
   try {
     submitButton.disabled = true;
     submitButton.textContent = "Saving...";
-    const result = await savePartOutcome("worked", offer, {
+    const outcome = data.get("outcome") || "worked";
+    const result = await savePartOutcome(outcome, offer, {
       job: {
         customer: data.get("customer"),
         programmer: data.get("programmer"),
         tool: data.get("tool"),
+        keyType: data.get("keyType"),
+        price: data.get("price"),
+        payment: data.get("payment"),
+        failureReason: data.get("failureReason"),
         notes: data.get("notes"),
       },
     });
@@ -2818,7 +2895,8 @@ document.addEventListener("submit", async (event) => {
     selectedJobId = result.job.id;
     renderJobs();
     closeJobSaveModal();
-    startSupplierLookup(latestVinProfile);
+    if (outcome === "worked") startSupplierLookup(latestVinProfile);
+    else renderVinProfile(latestVinProfile);
   } catch (error) {
     alert(error.message);
   } finally {
