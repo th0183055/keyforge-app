@@ -1328,6 +1328,7 @@ function offerRiskFlags(offer) {
 
 function groupDecision(group) {
   const verified = group.offers.find((offer) => offer.profileMatch);
+  const gradeA = group.offers.find(isKeyInnovationsGradeA);
   const inStock = group.offers.filter(offerIsInStock);
   const priced = group.offers.filter((offer) => offer.priceValue);
   const acceptable = group.offers.filter((offer) => offer.selectionRank !== "Reference only" && !offer.profileWarning && !offer.shopWarning);
@@ -1336,15 +1337,17 @@ function groupDecision(group) {
     if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
     return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity);
   })[0];
-  const bestFieldPick = verified || bestInStock || group.bestOffer;
-  const gradeA = group.offers.find(isKeyInnovationsGradeA);
+  const bestFieldPick = group.focusMode === "grade-a" ? gradeA || group.bestOffer : verified || gradeA || bestInStock || group.bestOffer;
+  const valueOption = group.focusMode === "grade-a" ? gradeA || cheapestAcceptable || group.bestOffer : cheapestAcceptable || gradeA || group.bestOffer;
+  const supplierCheck = group.offers.find((offer) => offer !== valueOption && offerIsInStock(offer)) || group.offers.find((offer) => offer !== valueOption) || bestInStock;
   const conditions = group.conditions.length ? group.conditions.join(" / ") : "condition verify";
   const why = [
-    verified ? `shop verified ${verified.profileWorkedCount || 1}x` : "",
+    group.focusMode === "grade-a" ? "KI Refurbished Grade A baseline" : "",
+    verified && group.focusMode !== "grade-a" ? `shop verified ${verified.profileWorkedCount || 1}x` : "",
     group.supplierCount > 1 ? `${group.supplierCount} suppliers match` : "single supplier match",
     group.fccs.length ? `FCC ${group.fccs[0]}` : "",
     group.buttons.length ? `${group.buttons[0]} button` : "",
-    gradeA ? "KI Grade A available" : "",
+    gradeA && group.focusMode !== "grade-a" ? "KI Grade A available" : "",
   ].filter(Boolean);
   const verify = [
     group.fccs.length ? "" : "FCC",
@@ -1356,7 +1359,8 @@ function groupDecision(group) {
   const risks = [...new Set(group.offers.flatMap(offerRiskFlags))].slice(0, 4);
   return {
     bestFieldPick,
-    cheapestAcceptable,
+    valueOption,
+    supplierCheck,
     bestInStock,
     conditions,
     why,
@@ -1367,16 +1371,17 @@ function groupDecision(group) {
 
 function renderDecisionCard(group) {
   const decision = groupDecision(group);
+  const gradeAFocus = group.focusMode === "grade-a";
   return `
     <div class="part-decision-card">
       <div class="decision-main">
-        <span>Best field pick</span>
+        <span>${gradeAFocus ? "Start here" : "Best field pick"}</span>
         <strong>${escapeHtml(decision.bestFieldPick?.partName || group.bestOffer.partName)}</strong>
         <p>${escapeHtml(decision.why.join(" + ") || "Best available supplier/ranking match.")}</p>
       </div>
       <div class="decision-grid">
-        <span><small>Cheapest acceptable</small><strong>${escapeHtml(supplierLabel(decision.cheapestAcceptable))}</strong></span>
-        <span><small>Best in stock</small><strong>${escapeHtml(supplierLabel(decision.bestInStock))}</strong></span>
+        <span><small>${gradeAFocus ? "KI Grade A option" : "Value option"}</small><strong>${escapeHtml(supplierLabel(decision.valueOption))}</strong></span>
+        <span><small>${gradeAFocus ? "Other supplier check" : "Best in stock"}</small><strong>${escapeHtml(supplierLabel(gradeAFocus ? decision.supplierCheck : decision.bestInStock))}</strong></span>
         <span><small>Condition spread</small><strong>${escapeHtml(decision.conditions)}</strong></span>
         <span><small>Verify</small><strong>${escapeHtml(decision.verify.length ? decision.verify.join(", ") : "photo + blade before ordering")}</strong></span>
       </div>
@@ -1488,11 +1493,11 @@ function renderOfferLanes(offers, baselineOffers = offers) {
   const baselineMarkup = renderGradeABaseline(baselineOffers);
   if (!baselineMarkup && !verifiedMarkup) return secondaryMarkup;
   return `
-    ${verifiedMarkup}
     ${baselineMarkup}
+    ${verifiedMarkup}
     ${
       secondaryMarkup
-        ? `<details class="secondary-results" open>
+        ? `<details class="secondary-results">
             <summary>Other filtered matches</summary>
             ${secondaryMarkup}
           </details>`
