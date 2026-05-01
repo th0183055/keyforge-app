@@ -1309,6 +1309,82 @@ function renderSupplierComparisonTab(offer, groupOffers) {
   `;
 }
 
+function supplierLabel(offer) {
+  if (!offer) return "None";
+  return [offer.supplier, offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : offer.priceFormatted || "", offer.stock].filter(Boolean).join(" - ");
+}
+
+function offerRiskFlags(offer) {
+  return [
+    offer.stock === "Out of stock" ? "out of stock" : "",
+    !offer.fcc ? "FCC missing" : "",
+    !offer.buttons ? "buttons missing" : "",
+    offer.profileWarning ? `profile warning: ${offer.profileWarning}` : "",
+    offer.shopWarning ? `shop warning: ${offer.shopWarning}` : "",
+    ...(offer.selectionWarnings || []),
+    ...(offer.selectionMissing || []).map((item) => `verify ${item}`),
+  ].filter(Boolean);
+}
+
+function groupDecision(group) {
+  const verified = group.offers.find((offer) => offer.profileMatch);
+  const inStock = group.offers.filter(offerIsInStock);
+  const priced = group.offers.filter((offer) => offer.priceValue);
+  const acceptable = group.offers.filter((offer) => offer.selectionRank !== "Reference only" && !offer.profileWarning && !offer.shopWarning);
+  const cheapestAcceptable = (acceptable.length ? acceptable : priced).filter((offer) => offer.priceValue).sort((a, b) => a.priceValue - b.priceValue)[0];
+  const bestInStock = (inStock.length ? inStock : group.offers).sort((a, b) => {
+    if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
+    return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity);
+  })[0];
+  const bestFieldPick = verified || bestInStock || group.bestOffer;
+  const gradeA = group.offers.find(isKeyInnovationsGradeA);
+  const conditions = group.conditions.length ? group.conditions.join(" / ") : "condition verify";
+  const why = [
+    verified ? `shop verified ${verified.profileWorkedCount || 1}x` : "",
+    group.supplierCount > 1 ? `${group.supplierCount} suppliers match` : "single supplier match",
+    group.fccs.length ? `FCC ${group.fccs[0]}` : "",
+    group.buttons.length ? `${group.buttons[0]} button` : "",
+    gradeA ? "KI Grade A available" : "",
+  ].filter(Boolean);
+  const verify = [
+    group.fccs.length ? "" : "FCC",
+    group.buttons.length ? "" : "button layout",
+    group.frequencies.length ? "" : "frequency",
+    conditions.toLowerCase().includes("verify") ? "condition" : "",
+    group.inStockCount ? "" : "availability",
+  ].filter(Boolean);
+  const risks = [...new Set(group.offers.flatMap(offerRiskFlags))].slice(0, 4);
+  return {
+    bestFieldPick,
+    cheapestAcceptable,
+    bestInStock,
+    conditions,
+    why,
+    verify,
+    risks,
+  };
+}
+
+function renderDecisionCard(group) {
+  const decision = groupDecision(group);
+  return `
+    <div class="part-decision-card">
+      <div class="decision-main">
+        <span>Best field pick</span>
+        <strong>${escapeHtml(decision.bestFieldPick?.partName || group.bestOffer.partName)}</strong>
+        <p>${escapeHtml(decision.why.join(" + ") || "Best available supplier/ranking match.")}</p>
+      </div>
+      <div class="decision-grid">
+        <span><small>Cheapest acceptable</small><strong>${escapeHtml(supplierLabel(decision.cheapestAcceptable))}</strong></span>
+        <span><small>Best in stock</small><strong>${escapeHtml(supplierLabel(decision.bestInStock))}</strong></span>
+        <span><small>Condition spread</small><strong>${escapeHtml(decision.conditions)}</strong></span>
+        <span><small>Verify</small><strong>${escapeHtml(decision.verify.length ? decision.verify.join(", ") : "photo + blade before ordering")}</strong></span>
+      </div>
+      ${decision.risks.length ? `<p class="decision-risks">${escapeHtml(`Risk flags: ${decision.risks.join(" | ")}`)}</p>` : ""}
+    </div>
+  `;
+}
+
 function renderExactPartGroup(group, allOffers) {
   const best = group.bestOffer;
   const suppliers = group.offers.map((offer) => offer.supplier).join(" / ");
@@ -1353,6 +1429,7 @@ function renderExactPartGroup(group, allOffers) {
         ${group.focusMode === "verified" ? `<span>${escapeHtml(`${group.offers.reduce((count, offer) => count + (offer.profileWorkedCount || 0), 0) || group.offers.length} worked`)}</span>` : ""}
         ${group.focusMode === "grade-a" ? `<span>${escapeHtml(`${group.offers.length} Grade A/equivalent offers`)}</span>` : ""}
       </div>
+      ${renderDecisionCard(group)}
       <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} supplier comparison`)}">
         ${group.offers.map((offer) => renderSupplierComparisonTab(offer, allOffers)).join("")}
       </div>

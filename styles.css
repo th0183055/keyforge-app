@@ -1703,6 +1703,64 @@ textarea {
   text-transform: uppercase;
 }
 
+.part-decision-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #ead5cc;
+  border-radius: 8px;
+  background: white;
+}
+
+.decision-main span,
+.decision-grid small {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.decision-main strong {
+  display: block;
+  margin-top: 3px;
+  line-height: 1.15;
+}
+
+.decision-main p,
+.decision-risks {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.decision-grid span {
+  min-width: 0;
+  padding: 7px;
+  border-radius: 7px;
+  background: #fff3eb;
+}
+
+.decision-grid strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+.decision-risks {
+  padding-top: 7px;
+  border-top: 1px solid #ead5cc;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .exact-supplier-tabs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2797,6 +2855,10 @@ textarea {
   }
 
   .part-reference-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .decision-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
