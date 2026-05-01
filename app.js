@@ -10,6 +10,7 @@ let latestVinProfile = null;
 let vinWorkflowStep = "entry";
 let selectedKeyFamily = "";
 let selectedKeyPackage = "";
+let supplierLookupRequestId = 0;
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -698,6 +699,7 @@ function renderVerifiedProfileCard(profile) {
 }
 
 function resetVinWorkflow() {
+  supplierLookupRequestId += 1;
   vinWorkflowStep = "entry";
   latestVinProfile = null;
   selectedKeyFamily = "";
@@ -1452,6 +1454,16 @@ function renderOfferReference(offer) {
 
 function renderSupplierComparison(lookup, products) {
   if (!lookup) return "";
+  if (!products.length && lookup.loginStatus === "searching") {
+    return `
+      <section class="supplier-compare">
+        <article class="assistant-card">
+          <strong>Supplier search running</strong>
+          <p>${escapeHtml(lookup.statusMessage || "Parts are loading in the background. You can stay on this screen.")}</p>
+        </article>
+      </section>
+    `;
+  }
   const filteredProducts = products.filter(productPassesLiveFilters);
   const offers = sortSupplierOffers(filteredProducts);
   const baselineOffers = sortSupplierOffers(products);
@@ -2138,6 +2150,48 @@ function renderVinProfile(profile) {
   `;
 }
 
+function supplierLookupParams(profile) {
+  const vehicle = profile.vehicle || {};
+  const params = new URLSearchParams();
+  [
+    ["vin", profile.vin || ""],
+    ["year", vehicle.year || ""],
+    ["make", vehicle.make || ""],
+    ["model", vehicle.model || ""],
+    ["trim", vehicle.trim || ""],
+    ["bodyClass", vehicle.bodyClass || ""],
+    ["engine", vehicle.engine || ""],
+    ["driveType", vehicle.driveType || ""],
+    ["plantCity", vehicle.plantCity || ""],
+    ["plantCountry", vehicle.plantCountry || ""],
+    ["identitySource", vehicle.identitySource || ""],
+  ].forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  return params.toString();
+}
+
+async function startSupplierLookup(profile) {
+  const vehicle = profile.vehicle || {};
+  if (!vehicle.year || !vehicle.make || !vehicle.model) return;
+  const requestId = ++supplierLookupRequestId;
+  try {
+    const lookup = await api(`/api/supplier-lookup?${supplierLookupParams(profile)}`);
+    if (requestId !== supplierLookupRequestId || latestVinProfile !== profile) return;
+    latestVinProfile.liveSupplierLookup = lookup;
+    renderVinProfile(latestVinProfile);
+  } catch (error) {
+    if (requestId !== supplierLookupRequestId || latestVinProfile !== profile) return;
+    latestVinProfile.liveSupplierLookup = {
+      ...(latestVinProfile.liveSupplierLookup || {}),
+      loginStatus: "error",
+      statusMessage: error.message || "Supplier lookup failed.",
+      products: latestVinProfile.liveSupplierLookup?.products || [],
+    };
+    renderVinProfile(latestVinProfile);
+  }
+}
+
 function renderVinError(message) {
   vinResult.innerHTML = `<div class="assistant-card"><strong>VIN decode failed</strong><p>${escapeHtml(message)}</p></div>`;
   vinRecommendation.innerHTML = `<strong>Check VIN</strong><p>Confirm the 17-character VIN from the dash tag, door sticker, registration, or RO.</p>`;
@@ -2507,11 +2561,12 @@ vinForm.addEventListener("submit", async (event) => {
     vinResult.innerHTML = `
       <div class="lookup-loading">
         <article><strong>1. Decoding VIN</strong><p>Reading vehicle identity.</p></article>
-        <article><strong>2. Searching keys</strong><p>Checking Key Innovations catalog candidates.</p></article>
+        <article><strong>2. Preparing supplier search</strong><p>Parts will load after the vehicle is shown.</p></article>
       </div>
     `;
     const profile = await api(`/api/vin/${encodeURIComponent(vin)}`);
     renderVinProfile(profile);
+    startSupplierLookup(profile);
   } catch (error) {
     renderVinError(error.message);
   } finally {
@@ -2540,13 +2595,14 @@ if (ymmForm) {
       vinResult.innerHTML = `
         <div class="lookup-loading">
           <article><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
-          <article><strong>2. Searching supplier fitment</strong><p>Returning possible key families, buttons, FCCs, and stock.</p></article>
+          <article><strong>2. Preparing supplier search</strong><p>Parts will load after the vehicle is shown.</p></article>
         </div>
       `;
       const profile = await api(
         `/api/vehicle-lookup?year=${encodeURIComponent(year)}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`,
       );
       renderVinProfile(profile);
+      startSupplierLookup(profile);
     } catch (error) {
       renderVinError(error.message);
     } finally {

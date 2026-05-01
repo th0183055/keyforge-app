@@ -1311,6 +1311,33 @@ async function liveSupplierLookups(vehicle, vin) {
   };
 }
 
+async function pendingSupplierLookup(statusMessage = "Supplier search is running in the background.") {
+  const supplierAccounts = await readSupplierAccounts();
+  return {
+    supplier: "Supplier comparison",
+    loginStatus: "searching",
+    statusMessage,
+    connected: false,
+    source: "Multi-supplier live search",
+    products: [],
+    searchAttempts: [],
+    supplierStatuses: supplierAccounts.accounts.map((account) =>
+      supplierLookupStatus(account, {
+        status: "searching",
+        message: "Waiting to search.",
+        productCount: 0,
+      }),
+    ),
+  };
+}
+
+async function buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence) {
+  const rawSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
+  const evidenceSupplierLookup = applyShopEvidenceToProducts(rawSupplierLookup, shopEvidence);
+  const profiledSupplierLookup = applyVehicleProfileToProducts(evidenceSupplierLookup, verifiedProfile);
+  return applyPartSelectionEngine(profiledSupplierLookup, vehicle, shopEvidence, programmingReference, verifiedProfile);
+}
+
 async function readJsonBody(request) {
   let body = "";
   for await (const chunk of request) {
@@ -2875,6 +2902,7 @@ async function buildLocksmithProfile(vin, decode, store) {
     source: "Vehicle details from NHTSA vPIC; key/programmer/tool guidance from local verified key intelligence database.",
     fallbackSource: "Vehicle details from NHTSA vPIC; locksmith workflow guidance from local brand fallback model.",
     sourceReadinessIdentity: { status: "connected", result: "Used for VIN decode" },
+    skipSupplierLookup: true,
   });
 }
 
@@ -2893,10 +2921,9 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
-  const rawSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
-  const evidenceSupplierLookup = applyShopEvidenceToProducts(rawSupplierLookup, shopEvidence);
-  const profiledSupplierLookup = applyVehicleProfileToProducts(evidenceSupplierLookup, verifiedProfile);
-  const liveSupplierLookup = applyPartSelectionEngine(profiledSupplierLookup, vehicle, shopEvidence, programmingReference, verifiedProfile);
+  const liveSupplierLookup = options.skipSupplierLookup
+    ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
+    : await buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence);
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -3252,8 +3279,38 @@ async function handleApi(request, response, pathname) {
           status: "manual",
           result: "VIN not used; supplier parts are broad fitment candidates",
         },
+        skipSupplierLookup: true,
       }),
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/supplier-lookup") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const vehicle = {
+      year: cleanString(url.searchParams.get("year")),
+      make: cleanString(url.searchParams.get("make")),
+      model: cleanString(url.searchParams.get("model")),
+      trim: cleanString(url.searchParams.get("trim")),
+      bodyClass: cleanString(url.searchParams.get("bodyClass")),
+      engine: cleanString(url.searchParams.get("engine")),
+      driveType: cleanString(url.searchParams.get("driveType")),
+      plantCity: cleanString(url.searchParams.get("plantCity")),
+      plantCountry: cleanString(url.searchParams.get("plantCountry")),
+      identitySource: cleanString(url.searchParams.get("identitySource")) || "Vehicle profile supplier lookup",
+    };
+    const vin = cleanString(url.searchParams.get("vin")).toUpperCase();
+
+    if (!/^(19|20)\d{2}$/.test(vehicle.year) || !vehicle.make || !vehicle.model) {
+      sendError(response, 400, "Supplier lookup needs year, make, and model.");
+      return;
+    }
+
+    vehicle.make = vehicle.make.toUpperCase();
+    const programmingReference = await findProgrammingReference(vehicle);
+    const verifiedProfile = await findVerifiedVehicleProfile(vehicle);
+    const shopEvidence = buildShopEvidence(vehicle, vin, store.jobs);
+    sendJson(response, 200, await buildProfileSupplierLookup(vehicle, store, { vin }, programmingReference, verifiedProfile, shopEvidence));
     return;
   }
 
