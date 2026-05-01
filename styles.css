@@ -1521,6 +1521,16 @@ textarea {
   background: #fff8e8;
 }
 
+.shop-verified-picks {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #a8d2b5;
+  border-radius: 10px;
+  background: #f4fbf6;
+}
+
+.shop-verified-heading,
 .grade-a-heading {
   display: flex;
   align-items: start;
@@ -1529,23 +1539,29 @@ textarea {
   padding: 4px 2px;
 }
 
+.shop-verified-heading strong,
+.shop-verified-heading span,
+.shop-verified-heading small,
 .grade-a-heading strong,
 .grade-a-heading span,
 .grade-a-heading small {
   display: block;
 }
 
+.shop-verified-heading strong,
 .grade-a-heading strong {
   color: var(--charcoal);
   line-height: 1.15;
 }
 
+.shop-verified-heading span,
 .grade-a-heading span {
   margin-top: 4px;
   color: var(--muted);
   line-height: 1.35;
 }
 
+.shop-verified-heading small,
 .grade-a-heading small {
   flex: 0 0 auto;
   padding: 6px 8px;
@@ -1555,6 +1571,11 @@ textarea {
   font-size: 0.68rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.shop-verified-heading small {
+  background: #0d6234;
+  color: #f4fbf6;
 }
 
 .secondary-results {
@@ -1611,8 +1632,19 @@ textarea {
   background: #fffdf7;
 }
 
+.exact-part-group.verified-focus {
+  border-color: #a8d2b5;
+  border-left: 5px solid #127c45;
+  background: #fbfffc;
+}
+
 .exact-part-group.grade-a-focus .agreement-strip span {
   background: #fff2c9;
+}
+
+.exact-part-group.verified-focus .agreement-strip span {
+  background: #e6f6eb;
+  color: #0d6234;
 }
 
 .exact-group-head {
@@ -1768,6 +1800,19 @@ textarea {
 
 .supplier-tab-link {
   justify-self: start;
+}
+
+.supplier-tab-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.supplier-tab-actions .secondary-action {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 0.72rem;
 }
 
 .decision-summary {

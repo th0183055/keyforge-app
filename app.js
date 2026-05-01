@@ -675,6 +675,7 @@ function renderVerifiedProfileCard(profile) {
   if (!profile) return "";
   const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
   const title = [profile.year, profile.make, profile.model, profile.trim].filter(Boolean).join(" ");
+  const supplierList = baseline?.supplierOutcomes ? Object.values(baseline.supplierOutcomes) : [];
   return `
     <section class="verified-profile-card">
       <div>
@@ -686,7 +687,9 @@ function renderVerifiedProfileCard(profile) {
                 baseline.name,
                 baseline.frequency,
                 baseline.chip,
-                baseline.suppliers?.length ? `Suppliers: ${baseline.suppliers.join(", ")}` : "",
+                supplierList.length
+                  ? `Worked suppliers: ${supplierList.map((item) => `${item.supplier} x${item.workedCount}`).join(", ")}`
+                  : baseline.suppliers?.length ? `Suppliers: ${baseline.suppliers.join(", ")}` : "",
               ]
                 .filter(Boolean)
                 .join(" | ")
@@ -695,6 +698,26 @@ function renderVerifiedProfileCard(profile) {
       </div>
       <small>${escapeHtml(`${profile.confidence || "learning"} | ${profile.verifiedParts?.length || 0} part${profile.verifiedParts?.length === 1 ? "" : "s"}`)}</small>
     </section>
+  `;
+}
+
+function renderShopVerifiedPicks(offers) {
+  const verifiedOffers = offers.filter((offer) => offer.profileMatch);
+  if (!verifiedOffers.length) return "";
+  const groups = exactPartGroups(verifiedOffers);
+  const totalWorked = verifiedOffers.reduce((count, offer) => count + (offer.profileWorkedCount || 0), 0);
+  return `
+    <div class="shop-verified-picks">
+      <div class="shop-verified-heading">
+        <div>
+          <p class="eyebrow">Shop verified first</p>
+          <strong>Previously worked on this vehicle profile</strong>
+          <span>These matches are boosted above supplier guesses because someone marked the part worked.</span>
+        </div>
+        <small>${escapeHtml(`${groups.length} parts / ${totalWorked || verifiedOffers.length} worked`)}</small>
+      </div>
+      ${groups.map((group) => renderExactPartGroup({ ...group, focusMode: "verified", focusNote: "Shop-confirmed part. Compare supplier price, stock, and condition before ordering." }, offers)).join("")}
+    </div>
   `;
 }
 
@@ -833,6 +856,8 @@ function normalizedSupplierOffer(product) {
     shopMatch: product.keyInfo?.shopMatch || "",
     shopWarning: product.keyInfo?.shopWarning || "",
     profileMatch: product.keyInfo?.profileMatch || "",
+    profileWorkedCount: Number(product.keyInfo?.profileWorkedCount || 0),
+    profileSuppliers: Array.isArray(product.keyInfo?.profileSuppliers) ? product.keyInfo.profileSuppliers : [],
     profileWarning: product.keyInfo?.profileWarning || "",
     selectionRank: product.selection?.rank || product.keyInfo?.selectionRank || "",
     selectionScore: Number.isFinite(Number(product.selection?.score ?? product.keyInfo?.selectionScore))
@@ -1266,7 +1291,13 @@ function renderSupplierComparisonTab(offer, groupOffers) {
         <span><small>Condition</small><strong>${escapeHtml(condition || "Verify")}</strong></span>
         <span><small>Stock</small><strong>${escapeHtml(offer.stock || stock || "Verify")}</strong></span>
         <span><small>Price</small><strong>${escapeHtml(offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : offer.priceFormatted || "Check")}</strong></span>
-        <span><small>Score</small><strong>${escapeHtml(offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Pending")}</strong></span>
+        <span><small>${offer.profileMatch ? "Worked" : "Score"}</small><strong>${escapeHtml(offer.profileMatch ? `${offer.profileWorkedCount || 1}x` : offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Pending")}</strong></span>
+      </div>
+      <div class="supplier-tab-actions" data-feedback-group="${escapeHtml(offerIdentityKey(offer))}">
+        <button class="secondary-action small good" type="button" data-part-feedback="worked" data-part-id="${escapeHtml(offerIdentityKey(offer))}">
+          ${offer.profileMatch ? "Worked again" : "Mark worked"}
+        </button>
+        ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open supplier</a>` : ""}
       </div>
       <details class="supplier-tab-detail">
         <summary>Details</summary>
@@ -1274,7 +1305,6 @@ function renderSupplierComparisonTab(offer, groupOffers) {
         ${renderOfferReference(offer)}
         ${renderPartDetail(offer, alternates)}
       </details>
-      ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open supplier</a>` : ""}
     </article>
   `;
 }
@@ -1291,14 +1321,16 @@ function renderExactPartGroup(group, allOffers) {
   ].filter(Boolean);
   const identifiers = headerDetails.join(" | ");
   const agreementLabel =
-    group.focusMode === "grade-a"
-      ? "KI Grade A baseline"
-      : group.supplierCount >= 3
+    group.focusMode === "verified"
+      ? "Shop verified pick"
+      : group.focusMode === "grade-a"
+        ? "KI Grade A baseline"
+        : group.supplierCount >= 3
         ? "Strong supplier agreement"
         : group.supplierCount === 2
           ? "Supplier agreement"
           : "Single-source match";
-  const className = ["exact-part-group", group.supplierCount > 1 ? "multi-supplier" : "", group.focusMode === "grade-a" ? "grade-a-focus" : ""]
+  const className = ["exact-part-group", group.supplierCount > 1 ? "multi-supplier" : "", group.focusMode === "grade-a" ? "grade-a-focus" : "", group.focusMode === "verified" ? "verified-focus" : ""]
     .filter(Boolean)
     .join(" ");
   return `
@@ -1318,6 +1350,7 @@ function renderExactPartGroup(group, allOffers) {
         <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"} agree`)}</span>
         <span>${escapeHtml(`${group.inStockCount} in stock`)}</span>
         <span>${escapeHtml(group.conditions.length ? group.conditions.join(" / ") : "Condition verify")}</span>
+        ${group.focusMode === "verified" ? `<span>${escapeHtml(`${group.offers.reduce((count, offer) => count + (offer.profileWorkedCount || 0), 0) || group.offers.length} worked`)}</span>` : ""}
         ${group.focusMode === "grade-a" ? `<span>${escapeHtml(`${group.offers.length} Grade A/equivalent offers`)}</span>` : ""}
       </div>
       <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} supplier comparison`)}">
@@ -1370,11 +1403,15 @@ function renderGradeABaseline(offers) {
 function renderOfferLanes(offers, baselineOffers = offers) {
   const gradeAGroups = gradeABaselineGroups(baselineOffers);
   const gradeAKeys = new Set(gradeAGroups.map((group) => group.key));
-  const secondaryGroups = exactPartGroups(offers).filter((group) => !gradeAKeys.has(group.key));
+  const verifiedGroups = exactPartGroups(offers.filter((offer) => offer.profileMatch));
+  const verifiedKeys = new Set(verifiedGroups.map((group) => group.key));
+  const secondaryGroups = exactPartGroups(offers).filter((group) => !gradeAKeys.has(group.key) && !verifiedKeys.has(group.key));
   const secondaryMarkup = renderLaneGroups(secondaryGroups, offers);
+  const verifiedMarkup = renderShopVerifiedPicks(offers);
   const baselineMarkup = renderGradeABaseline(baselineOffers);
-  if (!baselineMarkup) return secondaryMarkup;
+  if (!baselineMarkup && !verifiedMarkup) return secondaryMarkup;
   return `
+    ${verifiedMarkup}
     ${baselineMarkup}
     ${
       secondaryMarkup
@@ -2412,6 +2449,11 @@ document.addEventListener("click", (event) => {
           latestVinProfile.verifiedProfile = result.profile;
         }
         feedbackButton.textContent = `Saved: ${feedbackLabel(outcome)}`;
+        if (outcome === "worked" && latestVinProfile) {
+          startSupplierLookup(latestVinProfile);
+        } else if (latestVinProfile) {
+          renderVinProfile(latestVinProfile);
+        }
       })
       .catch((error) => {
         group?.querySelectorAll("button").forEach((button) => {

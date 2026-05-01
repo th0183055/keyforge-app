@@ -1474,11 +1474,23 @@ function profilePartKey(part = {}) {
 
 function mergeWorkedPart(existing = {}, nextPart = {}, supplier = "") {
   const suppliers = new Set([...(existing.suppliers || []), supplier || nextPart.supplier].filter(Boolean));
+  const supplierOutcomes = { ...(existing.supplierOutcomes || {}) };
+  const supplierName = supplier || nextPart.supplier;
+  if (supplierName) {
+    supplierOutcomes[supplierName] = {
+      supplier: supplierName,
+      workedCount: (supplierOutcomes[supplierName]?.workedCount || 0) + 1,
+      lastWorkedAt: new Date().toISOString(),
+      price: nextPart.price || supplierOutcomes[supplierName]?.price || "",
+      stock: nextPart.stock || supplierOutcomes[supplierName]?.stock || "",
+    };
+  }
   return {
     ...existing,
     ...nextPart,
     count: (existing.count || 0) + 1,
     suppliers: Array.from(suppliers),
+    supplierOutcomes,
     lastWorkedAt: new Date().toISOString(),
   };
 }
@@ -2149,10 +2161,12 @@ function applyVehicleProfileToProducts(liveSupplierLookup, verifiedProfile) {
       if (!matchedParts.length && !warnedParts.length) return product;
       return {
         ...product,
-        score: (product.score || 0) + (matchedParts.length ? 45 : 0) - (warnedParts.length ? 35 : 0),
+        score: (product.score || 0) + (matchedParts.length ? 65 : 0) - (warnedParts.length ? 35 : 0),
         keyInfo: {
           ...(product.keyInfo || {}),
           profileMatch: matchedParts[0] ? [matchedParts[0].oem, matchedParts[0].fcc, matchedParts[0].sku].filter(Boolean).join(" / ") : "",
+          profileWorkedCount: matchedParts[0]?.count || 0,
+          profileSuppliers: matchedParts[0]?.suppliers || [],
           profileWarning: warnedParts[0]?.outcome || "",
         },
       };
