@@ -644,8 +644,10 @@ function familyCounts(products) {
 
 function ensureSelectedKeyFamily(products) {
   const counts = familyCounts(products);
-  if (selectedKeyFamily && counts[selectedKeyFamily]) return;
-  selectedKeyFamily = counts.proximity ? "proximity" : counts.keyed ? "keyed" : "supporting";
+  if (selectedKeyFamily && selectedKeyFamily !== "supporting" && counts[selectedKeyFamily]) return;
+  if (counts.proximity) selectedKeyFamily = "proximity";
+  else if (counts.keyed) selectedKeyFamily = "keyed";
+  else if (!selectedKeyFamily) selectedKeyFamily = "keyed";
 }
 
 function renderWorkflowActions(actions) {
@@ -2000,7 +2002,10 @@ function renderKeyPackageScreen(profile) {
 function renderKeyChoicesScreen(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   ensureSelectedKeyFamily(products);
-  const selectedProducts = productsForFamily(products, selectedKeyFamily);
+  let selectedProducts = productsForFamily(products, selectedKeyFamily);
+  if (!selectedProducts.length && products.length) {
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+  }
   const packageOption = selectedPackageOption();
   const decisionNote = profile.vin
     ? "VIN identified the vehicle, but FCC, buttons, board, and package still need supplier/vehicle verification."
