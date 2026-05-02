@@ -10,6 +10,7 @@ let latestVinProfile = null;
 let vinWorkflowStep = "entry";
 let selectedKeyFamily = "";
 let selectedKeyPackage = "";
+let selectedPartChoiceKey = "";
 let supplierLookupRequestId = 0;
 let activeVinScan = null;
 let pendingJobOfferId = "";
@@ -881,6 +882,7 @@ function resetVinWorkflow() {
   latestVinProfile = null;
   selectedKeyFamily = "";
   selectedKeyPackage = "";
+  selectedPartChoiceKey = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   vinForm.classList.remove("is-hidden");
   ymmForm?.classList.remove("is-hidden");
@@ -914,6 +916,7 @@ function applyKeyPackage(option) {
   if (!option) return;
   selectedKeyPackage = option.id;
   if (option.family) selectedKeyFamily = option.family;
+  selectedPartChoiceKey = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   if (option.buttonFilter) {
     liveProductFilters.buttons.clear();
@@ -1661,6 +1664,78 @@ function renderOfferLanes(offers, baselineOffers = offers) {
   `;
 }
 
+function renderPartChoiceCard(group) {
+  const offer = group.bestOffer;
+  const chosen = selectedPartChoiceKey === group.key;
+  const meta = [
+    group.fccs[0] ? `FCC ${group.fccs[0]}` : "",
+    group.buttons[0] ? `${group.buttons[0]} button` : "",
+    group.conditions[0] || "",
+  ].filter(Boolean);
+  return `
+    <button class="part-choice-card ${chosen ? "active" : ""}" type="button" data-select-part-choice="${escapeHtml(group.key)}">
+      <div class="part-choice-image">
+        ${renderOfferThumb(offer, group.label)}
+      </div>
+      <div class="part-choice-copy">
+        <span>${escapeHtml(partTypeBucket(offer.rawProduct))}</span>
+        <strong>${escapeHtml(group.label || offer.partName)}</strong>
+        <small>${escapeHtml(meta.join(" | ") || "Tap to compare suppliers")}</small>
+      </div>
+      <div class="part-choice-footer">
+        <span>${escapeHtml(`${group.offers.length} offer${group.offers.length === 1 ? "" : "s"}`)}</span>
+        <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"}`)}</span>
+      </div>
+    </button>
+  `;
+}
+
+function renderPartChoiceBoard(lookup, products) {
+  if (!lookup) return "";
+  if (!products.length) return renderLiveSupplierProducts(lookup, products);
+  const offers = sortSupplierOffers(products.filter(productPassesLiveFilters));
+  const baselineOffers = sortSupplierOffers(products);
+  const groups = exactPartGroups(offers);
+  const baselineGroups = exactPartGroups(baselineOffers);
+  const selectedGroup = groups.find((group) => group.key === selectedPartChoiceKey);
+  const selectedBaselineGroup = baselineGroups.find((group) => group.key === selectedPartChoiceKey);
+  if (selectedPartChoiceKey && !selectedGroup) selectedPartChoiceKey = "";
+
+  return `
+    <section class="part-choice-flow">
+      <div class="part-choice-toolbar">
+        <div>
+          <p class="eyebrow">Part choices</p>
+          <h3>${escapeHtml(`${groups.length} visual choices`)}</h3>
+          <p>${escapeHtml("Pick the key, remote, or blade style first. Supplier pricing appears after a choice is selected.")}</p>
+        </div>
+        ${selectedPartChoiceKey ? `<button class="secondary-action small" type="button" data-clear-part-choice>Change choice</button>` : ""}
+      </div>
+      <div class="part-choice-grid">
+        ${
+          groups.length
+            ? groups.map(renderPartChoiceCard).join("")
+            : `<article class="assistant-card"><strong>No part choices match those filters</strong><p>Clear a filter or go back to choose a broader key family.</p></article>`
+        }
+      </div>
+      ${
+        selectedGroup
+          ? `<div class="selected-supplier-options">
+              <div class="selected-supplier-head">
+                <p class="eyebrow">Supplier options</p>
+                <h3>${escapeHtml(selectedGroup.label || selectedGroup.bestOffer.partName)}</h3>
+                <p>${escapeHtml(`${selectedGroup.offers.length} exact supplier option${selectedGroup.offers.length === 1 ? "" : "s"} shown for the selected part choice.`)}</p>
+              </div>
+              ${renderExactPartGroup(selectedGroup, offers)}
+            </div>`
+          : selectedPartChoiceKey && selectedBaselineGroup
+            ? `<div class="selected-supplier-options">${renderExactPartGroup(selectedBaselineGroup, baselineOffers)}</div>`
+            : `<article class="assistant-card part-choice-hint"><strong>Select a picture</strong><p>After selecting a part style, this screen will show the supplier tabs, prices, stock, condition, and open links.</p></article>`
+      }
+    </section>
+  `;
+}
+
 function findOfferByIdentity(identity) {
   const products = latestVinProfile?.liveSupplierLookup?.products || [];
   return products.map(normalizedSupplierOffer).find((offer) => offerIdentityKey(offer) === identity) || null;
@@ -2170,7 +2245,7 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
-      ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
+      ${renderPartChoiceBoard(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="package">Back to ignition type</button>`,
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
@@ -2832,6 +2907,7 @@ document.addEventListener("click", (event) => {
   const backButton = event.target.closest("[data-vin-back]");
   if (backButton && latestVinProfile) {
     vinWorkflowStep = backButton.dataset.vinBack;
+    if (vinWorkflowStep !== "parts") selectedPartChoiceKey = "";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     renderVinProfile(latestVinProfile);
     return;
@@ -2862,8 +2938,23 @@ document.addEventListener("click", (event) => {
   const familyButton = event.target.closest("[data-key-family]");
   if (familyButton && latestVinProfile) {
     selectedKeyFamily = familyButton.dataset.keyFamily;
+    selectedPartChoiceKey = "";
     vinWorkflowStep = "parts";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const partChoiceButton = event.target.closest("[data-select-part-choice]");
+  if (partChoiceButton && latestVinProfile) {
+    selectedPartChoiceKey = partChoiceButton.dataset.selectPartChoice;
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const clearPartChoiceButton = event.target.closest("[data-clear-part-choice]");
+  if (clearPartChoiceButton && latestVinProfile) {
+    selectedPartChoiceKey = "";
     renderVinProfile(latestVinProfile);
     return;
   }

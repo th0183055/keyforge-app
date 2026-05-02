@@ -1803,8 +1803,54 @@ function decodedFact(result, label, key) {
   return value ? { label, value } : null;
 }
 
+function decodeLabelFromKey(key) {
+  return String(key || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/\bID\b/g, "ID")
+    .replace(/\bVIN\b/g, "VIN")
+    .trim();
+}
+
 function decodedVehicleGroups(decode) {
   if (!decode) return [];
+  const groupedKeys = new Set([
+    "ModelYear",
+    "Make",
+    "Model",
+    "Trim",
+    "Trim2",
+    "Series",
+    "VehicleType",
+    "Manufacturer",
+    "BodyClass",
+    "CabType",
+    "Doors",
+    "DriveType",
+    "GVWR",
+    "BrakeSystemType",
+    "EngineModel",
+    "DisplacementL",
+    "EngineConfiguration",
+    "EngineCylinders",
+    "FuelTypePrimary",
+    "TransmissionStyle",
+    "PlantCompanyName",
+    "PlantCity",
+    "PlantState",
+    "PlantCountry",
+    "DestinationMarket",
+    "SeatBeltsAll",
+    "Pretensioner",
+    "AirBagLocFront",
+    "AirBagLocSide",
+    "AirBagLocCurtain",
+    "TPMS",
+    "ErrorCode",
+    "ErrorText",
+    "SuggestedVIN",
+    "AdditionalErrorText",
+  ]);
   const groups = [
     {
       title: "Identity",
@@ -1872,6 +1918,20 @@ function decodedVehicleGroups(decode) {
       ],
     },
   ];
+
+  const additionalFacts = Object.keys(decode)
+    .filter((key) => !groupedKeys.has(key))
+    .map((key) => decodedFact(decode, decodeLabelFromKey(key), key))
+    .filter(Boolean)
+    .filter((fact) => !/^\d+$/.test(String(fact.value)))
+    .slice(0, 36);
+
+  if (additionalFacts.length) {
+    groups.push({
+      title: "Additional decoded fields",
+      facts: additionalFacts,
+    });
+  }
 
   return groups
     .map((group) => ({ ...group, facts: group.facts.filter(Boolean) }))

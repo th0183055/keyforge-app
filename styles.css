@@ -1599,6 +1599,118 @@ textarea {
   gap: 12px;
 }
 
+.part-choice-flow {
+  display: grid;
+  gap: 12px;
+}
+
+.part-choice-toolbar,
+.selected-supplier-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.part-choice-toolbar h3,
+.selected-supplier-head h3 {
+  margin: 0;
+}
+
+.part-choice-toolbar p,
+.selected-supplier-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.part-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.part-choice-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.part-choice-card.active {
+  border: 3px solid var(--accent);
+  background: #fff6f1;
+}
+
+.part-choice-image {
+  display: grid;
+  place-items: center;
+  min-height: 142px;
+  border-radius: 10px;
+  background: #f7eee9;
+}
+
+.part-choice-image .offer-thumb {
+  width: 100%;
+  max-width: 150px;
+  height: 138px;
+  object-fit: contain;
+}
+
+.part-choice-copy span,
+.part-choice-footer span {
+  color: var(--accent-dark);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.part-choice-copy strong {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.15;
+}
+
+.part-choice-copy small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.part-choice-footer {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.part-choice-footer span {
+  border-radius: 999px;
+  padding: 5px 7px;
+  background: #f4dfdc;
+}
+
+.part-choice-hint {
+  border-style: dashed;
+}
+
+.selected-supplier-options {
+  display: grid;
+  gap: 10px;
+}
+
 .compare-board {
   display: grid;
   gap: 12px;
@@ -2965,7 +3077,13 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .part-choice-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .compare-summary,
+  .part-choice-toolbar,
+  .selected-supplier-head,
   .compare-card-head {
     align-items: stretch;
     flex-direction: column;
@@ -3064,6 +3182,10 @@ textarea {
   }
 
   .answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .part-choice-grid {
     grid-template-columns: 1fr;
   }
 
