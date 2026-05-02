@@ -242,8 +242,12 @@ main {
 }
 
 .secondary-action {
-  background: #f1dedb;
-  color: var(--accent-dark);
+  background: var(--accent);
+  color: white;
+}
+
+.secondary-action:hover {
+  background: var(--accent-dark);
 }
 
 .view {
@@ -774,18 +778,19 @@ textarea {
 
 .key-family-option,
 .key-package-option {
-  min-height: 190px;
-  border: 1px solid #e1c7bf;
+  min-height: 96px;
+  border: 1px solid var(--accent);
   border-radius: 14px;
   padding: 18px;
-  background: white;
-  color: var(--ink);
-  text-align: left;
+  background: var(--accent);
+  color: white;
+  text-align: center;
 }
 
 .key-family-option.active,
 .key-package-option.active {
-  border: 2px solid var(--accent);
+  border: 2px solid var(--accent-dark);
+  background: var(--accent-dark);
   box-shadow: 0 12px 24px rgba(208, 22, 38, 0.14);
 }
 
@@ -797,6 +802,17 @@ textarea {
   font-size: 0.78rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.key-package-option span {
+  color: white;
+  font-size: 0.95rem;
+}
+
+.key-family-option span,
+.key-family-option strong,
+.key-family-option small {
+  color: white;
 }
 
 .key-family-option strong {
@@ -1709,6 +1725,98 @@ textarea {
 .selected-supplier-options {
   display: grid;
   gap: 10px;
+}
+
+.selected-key-reference {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.selected-key-photo {
+  display: grid;
+  place-items: center;
+  min-height: 190px;
+  border-radius: 10px;
+  background: #f7eee9;
+}
+
+.selected-key-photo .offer-thumb {
+  width: 150px;
+  height: 180px;
+  object-fit: contain;
+}
+
+.selected-key-info span {
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.selected-key-info strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.selected-key-info p {
+  color: var(--muted);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.selected-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.selected-reference-grid span {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff1e8;
+}
+
+.selected-reference-grid small {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.64rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.selected-reference-grid strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.supplier-options-drawer,
+.reference-drawer {
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.supplier-options-drawer summary,
+.reference-drawer summary {
+  padding: 13px;
+  color: var(--accent-dark);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.supplier-options-drawer > .selected-supplier-options,
+.reference-drawer > .vehicle-reference-card {
+  margin: 0 12px 12px;
 }
 
 .compare-board {
@@ -3081,6 +3189,10 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .selected-key-reference {
+    grid-template-columns: 1fr;
+  }
+
   .compare-summary,
   .part-choice-toolbar,
   .selected-supplier-head,
@@ -3186,6 +3298,10 @@ textarea {
   }
 
   .part-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .selected-reference-grid {
     grid-template-columns: 1fr;
   }
 

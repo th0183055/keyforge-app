@@ -1296,10 +1296,7 @@ function renderOfferBadges(offer) {
   return [
     offer.selectionRank,
     offer.fitmentConfidence,
-    offer.profileMatch ? "Verified profile" : "",
     stock !== "Stock unknown" ? stock : "",
-    offer.shopMatch ? "Shop match" : "",
-    offer.shopWarning ? "Feedback warning" : "",
     condition !== "Unlisted" ? condition : "",
     type !== "Other key item" ? type : "",
     offer.fcc ? "FCC" : "",
@@ -1332,15 +1329,13 @@ function renderSelectionEngine(offer) {
   const reasons = offer.selectionReasons.length ? offer.selectionReasons : ["No strong part evidence yet"];
   const missing = offer.selectionMissing.length ? offer.selectionMissing : [];
   const warnings = offer.selectionWarnings.length ? offer.selectionWarnings : [];
-  if (offer.shopWarning) warnings.unshift(`past feedback warned on ${offer.shopWarning}`);
-  if (offer.profileWarning) warnings.unshift(`verified profile warned on ${offer.profileWarning}`);
   return `
     <div class="selection-engine ${escapeHtml(selectionClassName(rank))}">
       <div>
         <span>${escapeHtml(confidenceLabel(rank))}</span>
         <strong>${offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Score pending"}</strong>
       </div>
-      <p>${escapeHtml([offer.profileMatch ? `verified profile ${offer.profileMatch}` : "", ...reasons].filter(Boolean).slice(0, 3).join(" + "))}</p>
+      <p>${escapeHtml(reasons.filter(Boolean).slice(0, 3).join(" + "))}</p>
       ${
         missing.length || warnings.length
           ? `<small>${escapeHtml(
@@ -1489,7 +1484,7 @@ function renderSupplierComparisonTab(offer, groupOffers) {
         <span><small>Condition</small><strong>${escapeHtml(condition || "Verify")}</strong></span>
         <span><small>Stock</small><strong>${escapeHtml(offer.stock || stock || "Verify")}</strong></span>
         <span><small>Price</small><strong>${escapeHtml(offer.priceValue ? `$${offer.priceValue.toFixed(2)}` : offer.priceFormatted || "Check")}</strong></span>
-        <span><small>${offer.profileMatch ? "Worked" : "Score"}</small><strong>${escapeHtml(offer.profileMatch ? `${offer.profileWorkedCount || 1}x` : offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Pending")}</strong></span>
+        <span><small>Score</small><strong>${escapeHtml(offer.selectionScore !== null ? `${offer.selectionScore}/100` : "Pending")}</strong></span>
       </div>
       <div class="supplier-tab-actions" data-feedback-group="${escapeHtml(offerIdentityKey(offer))}">
         <button class="secondary-action small good" type="button" data-part-feedback="worked" data-part-id="${escapeHtml(offerIdentityKey(offer))}">
@@ -1518,15 +1513,12 @@ function offerRiskFlags(offer) {
     offer.stock === "Out of stock" ? "out of stock" : "",
     !offer.fcc ? "FCC missing" : "",
     !offer.buttons ? "buttons missing" : "",
-    offer.profileWarning ? `profile warning: ${offer.profileWarning}` : "",
-    offer.shopWarning ? `shop warning: ${offer.shopWarning}` : "",
     ...(offer.selectionWarnings || []),
     ...(offer.selectionMissing || []).map((item) => `verify ${item}`),
   ].filter(Boolean);
 }
 
 function groupDecision(group) {
-  const verified = group.offers.find((offer) => offer.profileMatch);
   const gradeA = group.offers.find(isKeyInnovationsGradeA);
   const inStock = group.offers.filter(offerIsInStock);
   const priced = group.offers.filter((offer) => offer.priceValue);
@@ -1536,13 +1528,12 @@ function groupDecision(group) {
     if (selectionRankWeight(b.selectionRank) !== selectionRankWeight(a.selectionRank)) return selectionRankWeight(b.selectionRank) - selectionRankWeight(a.selectionRank);
     return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity);
   })[0];
-  const bestFieldPick = group.focusMode === "grade-a" ? gradeA || group.bestOffer : verified || gradeA || bestInStock || group.bestOffer;
+  const bestFieldPick = group.focusMode === "grade-a" ? gradeA || group.bestOffer : gradeA || bestInStock || group.bestOffer;
   const valueOption = group.focusMode === "grade-a" ? gradeA || cheapestAcceptable || group.bestOffer : cheapestAcceptable || gradeA || group.bestOffer;
   const supplierCheck = group.offers.find((offer) => offer !== valueOption && offerIsInStock(offer)) || group.offers.find((offer) => offer !== valueOption) || bestInStock;
   const conditions = group.conditions.length ? group.conditions.join(" / ") : "condition verify";
   const why = [
     group.focusMode === "grade-a" ? "KI Refurbished Grade A baseline" : "",
-    verified && group.focusMode !== "grade-a" ? `shop verified ${verified.profileWorkedCount || 1}x` : "",
     group.supplierCount > 1 ? `${group.supplierCount} suppliers match` : "single supplier match",
     group.fccs.length ? `FCC ${group.fccs[0]}` : "",
     group.buttons.length ? `${group.buttons[0]} button` : "",
@@ -1601,9 +1592,7 @@ function renderExactPartGroup(group, allOffers) {
   ].filter(Boolean);
   const identifiers = headerDetails.join(" | ");
   const agreementLabel =
-    group.focusMode === "verified"
-      ? "Shop verified pick"
-      : group.focusMode === "grade-a"
+    group.focusMode === "grade-a"
         ? "KI Grade A baseline"
         : group.supplierCount >= 3
         ? "Strong supplier agreement"
@@ -1708,24 +1697,24 @@ function renderOfferLanes(offers, baselineOffers = offers) {
 function renderPartChoiceCard(group) {
   const offer = group.bestOffer;
   const chosen = selectedPartChoiceKey === group.key;
-  const meta = [
-    group.fccs[0] ? `FCC ${group.fccs[0]}` : "",
-    group.buttons[0] ? `${group.buttons[0]} button` : "",
-    group.conditions[0] || "",
-  ].filter(Boolean);
+  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(offer.rawProduct);
+  const typeLabel = partTypeBucket(offer.rawProduct);
   return `
     <button class="part-choice-card ${chosen ? "active" : ""}" type="button" data-select-part-choice="${escapeHtml(group.key)}">
       <div class="part-choice-image">
-        ${renderOfferThumb(offer, group.label)}
+        ${
+          offer.image
+            ? renderOfferThumb(offer, group.label)
+            : `<div class="offer-thumb empty" aria-hidden="true">No photo</div>`
+        }
       </div>
       <div class="part-choice-copy">
-        <span>${escapeHtml(partTypeBucket(offer.rawProduct))}</span>
-        <strong>${escapeHtml(group.label || offer.partName)}</strong>
-        <small>${escapeHtml(meta.join(" | ") || "Tap to compare suppliers")}</small>
+        <span>${escapeHtml(typeLabel)}</span>
+        <strong>${escapeHtml(buttonLabel || "Button layout verify")}</strong>
+        <small>${escapeHtml("Select if the picture/buttons match")}</small>
       </div>
       <div class="part-choice-footer">
-        <span>${escapeHtml(`${group.offers.length} offer${group.offers.length === 1 ? "" : "s"}`)}</span>
-        <span>${escapeHtml(`${group.supplierCount} supplier${group.supplierCount === 1 ? "" : "s"}`)}</span>
+        <span>${escapeHtml(typeLabel)}</span>
       </div>
     </button>
   `;
@@ -1785,20 +1774,58 @@ function renderSelectedSupplierScreen(profile) {
       </section>
     `;
   }
+  const best = group.bestOffer;
+  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct);
+  const typeLabel = partTypeBucket(best.rawProduct);
+  const referenceRows = [
+    ["Style", typeLabel],
+    ["Buttons", buttonLabel],
+    ["FCC", group.fccs.join(" / ")],
+    ["Frequency", group.frequencies.join(" / ")],
+    ["Condition", group.conditions.join(" / ")],
+    ["Stock", `${group.inStockCount} in stock`],
+  ].filter(([, value]) => value && value !== "Button layout unknown");
 
   return `
     <section class="program-screen selected-parts-step">
       <div class="workflow-heading">
         <p class="eyebrow">Screen 5</p>
-        <h3>${escapeHtml(group.label || group.bestOffer.partName)}</h3>
-        <p>${escapeHtml(`${group.offers.length} supplier option${group.offers.length === 1 ? "" : "s"} for the selected part choice. Compare condition, stock, and price before ordering.`)}</p>
+        <h3>${escapeHtml(buttonLabel || typeLabel || "Selected key")}</h3>
+        <p>${escapeHtml("Use this as the reference for the selected button configuration. Supplier shopping is optional below.")}</p>
       </div>
-      <div class="selected-supplier-options">
-        ${renderExactPartGroup(group, offers.length ? offers : baselineOffers)}
-      </div>
+      <section class="selected-key-reference">
+        <div class="selected-key-photo">${
+          best.image
+            ? renderOfferThumb(best, buttonLabel || typeLabel)
+            : `<div class="offer-thumb empty" aria-hidden="true">No photo</div>`
+        }</div>
+        <div class="selected-key-info">
+          <span>${escapeHtml(typeLabel)}</span>
+          <strong>${escapeHtml(buttonLabel || "Button layout verify")}</strong>
+          <p>${escapeHtml("Confirm the physical buttons and emergency insert/keyway against the vehicle before ordering or programming.")}</p>
+          <div class="selected-reference-grid">
+            ${referenceRows
+              .map(
+                ([label, value]) => `
+                  <span>
+                    <small>${escapeHtml(label)}</small>
+                    <strong>${escapeHtml(value)}</strong>
+                  </span>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+      </section>
+      <details class="supplier-options-drawer">
+        <summary>Compare supplier options</summary>
+        <div class="selected-supplier-options">
+          ${renderExactPartGroup(group, offers.length ? offers : baselineOffers)}
+        </div>
+      </details>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
       ])}
     </section>
   `;
@@ -1869,7 +1896,6 @@ function renderOfferPrice(offer) {
 
 function renderOfferReference(offer) {
   const details = [
-    ["Shop", offer.shopMatch],
     ["FCC", offer.fcc],
     ["Freq", offer.frequency],
     ["Chip", offer.chip],
@@ -2192,10 +2218,27 @@ function renderVehicleApprovalScreen(profile, context) {
           <span>${escapeHtml(sourceBadge)}</span>
         </div>
       </div>
+      ${renderWorkflowActions([
+        `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
+        `<button class="secondary-action" type="button" data-view-vehicle-details>View details</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
+      ])}
+    </section>
+  `;
+}
+
+function renderVehicleDetailsScreen(profile, context) {
+  const { title } = context;
+  return `
+    <section class="program-screen quick-guide">
+      <div class="quick-vehicle">
+        <p class="eyebrow">Vehicle details</p>
+        <h3>${escapeHtml(title || "Vehicle details")}</h3>
+      </div>
       ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
       ])}
     </section>
@@ -2261,27 +2304,22 @@ function renderKeyPackageScreen(profile) {
       <div class="workflow-heading">
         <p class="eyebrow">Screen 3</p>
         <h3>Choose ignition type</h3>
-        <p>${escapeHtml(title || "Vehicle")}: choose the customer-visible key style before opening parts.</p>
       </div>
-      ${renderVehicleReferenceCard(profile.vehicleReference)}
-      ${renderVerifiedProfileCard(profile.verifiedProfile)}
       <div class="key-package-grid">
         ${keyPackageOptions
           .map(
             (option) => `
               <button class="key-package-option ${selectedKeyPackage === option.id ? "active" : ""}" type="button" data-key-package="${escapeHtml(option.id)}">
                 <span>${escapeHtml(option.title)}</span>
-                <small>${escapeHtml(option.note)}</small>
               </button>
             `,
           )
           .join("")}
       </div>
-      ${
-        packageOption
-          ? `<div class="package-note"><strong>${escapeHtml(packageOption.title)}</strong><span>${escapeHtml(packageOption.note)}</span></div>`
-          : `<div class="package-note"><strong>Pick one path</strong><span>VIN decode usually cannot prove prox vs keyed ignition by itself. Use the vehicle and customer key style here.</span></div>`
-      }
+      <details class="reference-drawer">
+        <summary>Vehicle reference</summary>
+        ${renderVehicleReferenceCard(profile.vehicleReference)}
+      </details>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
       ])}
@@ -2447,6 +2485,8 @@ function renderVinProfile(profile) {
   const context = { vehicle, title, quick, bestSupplier, sourceBadge };
   if (vinWorkflowStep === "package") {
     vinResult.innerHTML = renderKeyPackageScreen(profile);
+  } else if (vinWorkflowStep === "vehicle-details") {
+    vinResult.innerHTML = renderVehicleDetailsScreen(profile, context);
   } else if (vinWorkflowStep === "family") {
     vinResult.innerHTML = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
@@ -2978,6 +3018,13 @@ document.addEventListener("click", (event) => {
   const approveButton = event.target.closest("[data-approve-vehicle]");
   if (approveButton && latestVinProfile) {
     vinWorkflowStep = "package";
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const detailsButton = event.target.closest("[data-view-vehicle-details]");
+  if (detailsButton && latestVinProfile) {
+    vinWorkflowStep = "vehicle-details";
     renderVinProfile(latestVinProfile);
     return;
   }

@@ -3036,14 +3036,6 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.warnings.push("Some trims in the same year can be non-immobilizer, transponder, or prox");
   }
 
-  if (shopEvidence?.tools?.length) {
-    reference.origination.unshift(`Shop history tools/refs: ${shopEvidence.tools.slice(0, 4).join(", ")}`);
-    reference.source = "Shop history + brand/year reference";
-  }
-  if (shopEvidence?.programmers?.length) {
-    reference.programming.unshift(`Shop history programmer: ${shopEvidence.programmers[0]}`);
-  }
-
   return reference;
 }
 
