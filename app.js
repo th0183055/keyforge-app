@@ -1735,12 +1735,7 @@ function renderPartChoiceBoard(lookup, products) {
   if (!lookup) return "";
   if (!products.length) return renderLiveSupplierProducts(lookup, products);
   const offers = sortSupplierOffers(products.filter(productPassesLiveFilters));
-  const baselineOffers = sortSupplierOffers(products);
   const groups = visualPartChoiceGroups(offers);
-  const baselineGroups = visualPartChoiceGroups(baselineOffers);
-  const selectedGroup = groups.find((group) => group.key === selectedPartChoiceKey);
-  const selectedBaselineGroup = baselineGroups.find((group) => group.key === selectedPartChoiceKey);
-  if (selectedPartChoiceKey && !selectedGroup) selectedPartChoiceKey = "";
 
   return `
     <section class="part-choice-flow">
@@ -1748,9 +1743,8 @@ function renderPartChoiceBoard(lookup, products) {
         <div>
           <p class="eyebrow">Part choices</p>
           <h3>${escapeHtml(`${groups.length} visual choices`)}</h3>
-          <p>${escapeHtml("Pick the key, remote, or blade style first. Supplier pricing appears after a choice is selected.")}</p>
+          <p>${escapeHtml("Pick the key, remote, or blade style first. The next screen opens supplier pricing for that choice.")}</p>
         </div>
-        ${selectedPartChoiceKey ? `<button class="secondary-action small" type="button" data-clear-part-choice>Change choice</button>` : ""}
       </div>
       <div class="part-choice-grid">
         ${
@@ -1759,20 +1753,53 @@ function renderPartChoiceBoard(lookup, products) {
             : `<article class="assistant-card"><strong>No part choices match those filters</strong><p>Clear a filter or go back to choose a broader key family.</p></article>`
         }
       </div>
-      ${
-        selectedGroup
-          ? `<div class="selected-supplier-options">
-              <div class="selected-supplier-head">
-                <p class="eyebrow">Supplier options</p>
-                <h3>${escapeHtml(selectedGroup.label || selectedGroup.bestOffer.partName)}</h3>
-                <p>${escapeHtml(`${selectedGroup.offers.length} exact supplier option${selectedGroup.offers.length === 1 ? "" : "s"} shown for the selected part choice.`)}</p>
-              </div>
-              ${renderExactPartGroup(selectedGroup, offers)}
-            </div>`
-          : selectedPartChoiceKey && selectedBaselineGroup
-            ? `<div class="selected-supplier-options">${renderExactPartGroup(selectedBaselineGroup, baselineOffers)}</div>`
-            : `<article class="assistant-card part-choice-hint"><strong>Select a picture</strong><p>After selecting a part style, this screen will show the supplier tabs, prices, stock, condition, and open links.</p></article>`
-      }
+    </section>
+  `;
+}
+
+function renderSelectedSupplierScreen(profile) {
+  const products = profile.liveSupplierLookup?.products || [];
+  let selectedProducts = productsForFamily(products, selectedKeyFamily);
+  if (!selectedProducts.length && products.length) {
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+  }
+  const offers = sortSupplierOffers(selectedProducts.filter(productPassesLiveFilters));
+  const baselineOffers = sortSupplierOffers(selectedProducts);
+  const groups = visualPartChoiceGroups(offers);
+  const baselineGroups = visualPartChoiceGroups(baselineOffers);
+  const selectedGroup = groups.find((group) => group.key === selectedPartChoiceKey);
+  const selectedBaselineGroup = baselineGroups.find((group) => group.key === selectedPartChoiceKey);
+  const group = selectedGroup || selectedBaselineGroup;
+
+  if (!group) {
+    return `
+      <section class="program-screen selected-parts-step">
+        <div class="workflow-heading">
+          <p class="eyebrow">Screen 5</p>
+          <h3>Select a part first</h3>
+          <p>Go back one screen and choose the picture that matches the vehicle/customer key.</p>
+        </div>
+        ${renderWorkflowActions([
+          `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
+        ])}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="program-screen selected-parts-step">
+      <div class="workflow-heading">
+        <p class="eyebrow">Screen 5</p>
+        <h3>${escapeHtml(group.label || group.bestOffer.partName)}</h3>
+        <p>${escapeHtml(`${group.offers.length} supplier option${group.offers.length === 1 ? "" : "s"} for the selected part choice. Compare condition, stock, and price before ordering.`)}</p>
+      </div>
+      <div class="selected-supplier-options">
+        ${renderExactPartGroup(group, offers.length ? offers : baselineOffers)}
+      </div>
+      ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Back</button>`,
+      ])}
     </section>
   `;
 }
@@ -2187,8 +2214,7 @@ function renderKeyFamilyScreen(profile) {
           <p>Go back and verify the vehicle, supplier login, or catalog source.</p>
         </div>
         ${renderWorkflowActions([
-          `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
-          `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
+          `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
         ])}
       </section>
     `;
@@ -2220,8 +2246,7 @@ function renderKeyFamilyScreen(profile) {
         </button>
       </div>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
       ])}
     </section>
   `;
@@ -2258,9 +2283,7 @@ function renderKeyPackageScreen(profile) {
           : `<div class="package-note"><strong>Pick one path</strong><span>VIN decode usually cannot prove prox vs keyed ignition by itself. Use the vehicle and customer key style here.</span></div>`
       }
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
-        `<button class="primary-action" type="button" data-package-continue ${selectedKeyPackage ? "" : "disabled"}>Continue</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
       ])}
     </section>
   `;
@@ -2286,9 +2309,7 @@ function renderKeyChoicesScreen(profile) {
       </div>
       ${renderPartChoiceBoard(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="package">Back to ignition type</button>`,
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="package">Back</button>`,
       ])}
     </section>
   `;
@@ -2430,6 +2451,8 @@ function renderVinProfile(profile) {
     vinResult.innerHTML = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
     vinResult.innerHTML = renderKeyChoicesScreen(profile);
+  } else if (vinWorkflowStep === "suppliers") {
+    vinResult.innerHTML = renderSelectedSupplierScreen(profile);
   } else {
     vinWorkflowStep = "vehicle";
     vinResult.innerHTML = renderVehicleApprovalScreen(profile, context);
@@ -2963,12 +2986,6 @@ document.addEventListener("click", (event) => {
   if (packageButton && latestVinProfile) {
     const option = keyPackageOptions.find((item) => item.id === packageButton.dataset.keyPackage);
     applyKeyPackage(option);
-    renderVinProfile(latestVinProfile);
-    return;
-  }
-
-  const packageContinue = event.target.closest("[data-package-continue]");
-  if (packageContinue && latestVinProfile) {
     vinWorkflowStep = "parts";
     renderVinProfile(latestVinProfile);
     return;
@@ -2987,6 +3004,7 @@ document.addEventListener("click", (event) => {
   const partChoiceButton = event.target.closest("[data-select-part-choice]");
   if (partChoiceButton && latestVinProfile) {
     selectedPartChoiceKey = partChoiceButton.dataset.selectPartChoice;
+    vinWorkflowStep = "suppliers";
     renderVinProfile(latestVinProfile);
     return;
   }
