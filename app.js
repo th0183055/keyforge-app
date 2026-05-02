@@ -776,6 +776,16 @@ function renderVehicleReferenceCard(reference) {
   `;
 }
 
+function renderVehicleDetailCard(label, value, detail = "") {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "Not decoded")}</strong>
+      <p>${escapeHtml(detail || "Verify on vehicle")}</p>
+    </article>
+  `;
+}
+
 function renderVerifiedProfileCard(profile) {
   if (!profile) return "";
   const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
@@ -1982,13 +1992,18 @@ function renderSelectedPartsStep(lookup) {
 }
 
 function renderVehicleApprovalScreen(profile, context) {
-  const { vehicle, title, quick, bestSupplier, sourceBadge } = context;
+  const { vehicle, title, sourceBadge } = context;
   const identifier = profile.vin || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
   const identityStatus = profile.vin
     ? profile.vinDetails?.checkDigitValid
       ? "VIN OK"
       : "Check VIN"
     : "Y/M/M lookup";
+  const engineSummary = [vehicle.engine, vehicle.engineModel ? `Model ${vehicle.engineModel}` : "", vehicle.engineCylinders ? `${vehicle.engineCylinders} cyl` : ""]
+    .filter(Boolean)
+    .join(" / ");
+  const trimSummary = [vehicle.trim, vehicle.trim2, vehicle.series].filter(Boolean).join(" / ");
+  const plantSummary = [vehicle.plantCity, vehicle.plantCountry].filter(Boolean).join(", ");
   return `
     <section class="program-screen quick-guide">
       <div class="quick-vehicle">
@@ -2001,36 +2016,14 @@ function renderVehicleApprovalScreen(profile, context) {
         </div>
       </div>
       <div class="answer-grid">
-        <article>
-          <span>Body</span>
-          <strong>${escapeHtml(vehicle.bodyClass || "Verify")}</strong>
-          <p>${escapeHtml(vehicle.driveType || "Drive not decoded")}</p>
-        </article>
-        <article>
-          <span>Engine</span>
-          <strong>${escapeHtml(vehicle.engine || "Verify")}</strong>
-          <p>${escapeHtml([vehicle.plantCity, vehicle.plantCountry].filter(Boolean).join(", ") || "Plant not decoded")}</p>
-        </article>
-        <article>
-          <span>Likely key style</span>
-          <strong>${escapeHtml(quick.keyType)}</strong>
-          <p>${escapeHtml(profile.programmingReference?.immobilizerSystem || "Immobilizer not verified")}</p>
-        </article>
-        <article>
-          <span>Live supplier</span>
-          <strong>${escapeHtml(`${profile.liveSupplierLookup?.products?.length || 0} parts`)}</strong>
-          <p>${escapeHtml(profile.liveSupplierLookup?.loginStatus || "Supplier search")}</p>
-        </article>
-        <article class="wide-answer">
-          <span>Best catalog clue</span>
-          <strong>${escapeHtml(bestSupplier?.hlPartNumber || bestSupplier?.supplierSku || "Needs match")}</strong>
-          <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence - FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
-        </article>
+        ${renderVehicleDetailCard("Year / make / model", [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), vehicle.identitySource || "Decoded identity")}
+        ${renderVehicleDetailCard("Trim / series", trimSummary, "Package naming from VIN decode when available")}
+        ${renderVehicleDetailCard("Body", vehicle.bodyClass, [vehicle.vehicleType, vehicle.cabType, vehicle.doors ? `${vehicle.doors} doors` : ""].filter(Boolean).join(" / "))}
+        ${renderVehicleDetailCard("Engine", engineSummary || vehicle.engine, [vehicle.fuelType, vehicle.transmission].filter(Boolean).join(" / "))}
+        ${renderVehicleDetailCard("Drive / weight", vehicle.driveType, vehicle.gvwr || "GVWR not decoded")}
+        ${renderVehicleDetailCard("Build plant", plantSummary, vehicle.manufacturer || "Manufacturer not decoded")}
       </div>
-      ${renderVehicleReferenceCard(profile.vehicleReference)}
-      ${renderVehicleMemoryCard(profile)}
-      ${renderVerifiedProfileCard(profile.verifiedProfile)}
-      ${renderShopEvidenceCard(profile.shopEvidence)}
+      ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
@@ -2102,6 +2095,10 @@ function renderKeyPackageScreen(profile) {
         <h3>Choose ignition type</h3>
         <p>${escapeHtml(title || "Vehicle")}: choose the customer-visible key style before opening parts.</p>
       </div>
+      ${renderVehicleReferenceCard(profile.vehicleReference)}
+      ${renderVehicleMemoryCard(profile)}
+      ${renderVerifiedProfileCard(profile.verifiedProfile)}
+      ${renderShopEvidenceCard(profile.shopEvidence)}
       <div class="key-package-grid">
         ${keyPackageOptions
           .map(
@@ -2146,10 +2143,6 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
-      ${renderVehicleReferenceCard(profile.vehicleReference)}
-      ${renderVehicleMemoryCard(profile)}
-      ${renderVerifiedProfileCard(profile.verifiedProfile)}
-      ${renderShopEvidenceCard(profile.shopEvidence)}
       ${renderSupplierComparison(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="package">Back to ignition type</button>`,
