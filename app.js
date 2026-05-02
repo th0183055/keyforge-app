@@ -776,16 +776,6 @@ function renderVehicleReferenceCard(reference) {
   `;
 }
 
-function renderVehicleDetailCard(label, value, detail = "") {
-  return `
-    <article>
-      <span>${escapeHtml(label)}</span>
-      <strong>${escapeHtml(value || "Not decoded")}</strong>
-      <p>${escapeHtml(detail || "Verify on vehicle")}</p>
-    </article>
-  `;
-}
-
 function renderVehicleDossier(profile) {
   const vehicle = profile.vehicle || {};
   const groups = profile.vehicleDecodeGroups || [];
@@ -2048,11 +2038,6 @@ function renderVehicleApprovalScreen(profile, context) {
       ? "VIN OK"
       : "Check VIN"
     : "Y/M/M lookup";
-  const engineSummary = [vehicle.engine, vehicle.engineModel ? `Model ${vehicle.engineModel}` : "", vehicle.engineCylinders ? `${vehicle.engineCylinders} cyl` : ""]
-    .filter(Boolean)
-    .join(" / ");
-  const trimSummary = [vehicle.trim, vehicle.trim2, vehicle.series].filter(Boolean).join(" / ");
-  const plantSummary = [vehicle.plantCity, vehicle.plantCountry].filter(Boolean).join(", ");
   return `
     <section class="program-screen quick-guide">
       <div class="quick-vehicle">
@@ -2063,14 +2048,6 @@ function renderVehicleApprovalScreen(profile, context) {
           <span>${escapeHtml(identityStatus)}</span>
           <span>${escapeHtml(sourceBadge)}</span>
         </div>
-      </div>
-      <div class="answer-grid">
-        ${renderVehicleDetailCard("Year / make / model", [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), vehicle.identitySource || "Decoded identity")}
-        ${renderVehicleDetailCard("Trim / series", trimSummary, "Package naming from VIN decode when available")}
-        ${renderVehicleDetailCard("Body", vehicle.bodyClass, [vehicle.vehicleType, vehicle.cabType, vehicle.doors ? `${vehicle.doors} doors` : ""].filter(Boolean).join(" / "))}
-        ${renderVehicleDetailCard("Engine", engineSummary || vehicle.engine, [vehicle.fuelType, vehicle.transmission].filter(Boolean).join(" / "))}
-        ${renderVehicleDetailCard("Drive / weight", vehicle.driveType, vehicle.gvwr || "GVWR not decoded")}
-        ${renderVehicleDetailCard("Build plant", plantSummary, vehicle.manufacturer || "Manufacturer not decoded")}
       </div>
       ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
