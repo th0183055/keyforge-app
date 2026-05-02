@@ -1803,6 +1803,47 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.reference-job-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.reference-job-card,
+.reference-checklist {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.reference-job-card span,
+.reference-checklist span {
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reference-job-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.reference-job-card strong {
+  color: var(--ink);
+}
+
+.reference-checklist ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.38;
+}
+
 .supplier-options-drawer,
 .reference-drawer {
   border: 1px solid #e1c7bf;
@@ -3306,6 +3347,10 @@ textarea {
   }
 
   .selected-reference-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reference-job-grid {
     grid-template-columns: 1fr;
   }
 

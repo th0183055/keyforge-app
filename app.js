@@ -1803,21 +1803,45 @@ function renderSelectedSupplierScreen(profile) {
   const best = group.bestOffer;
   const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct);
   const typeLabel = partTypeBucket(best.rawProduct);
+  const reference = profile.vehicleReference || {};
   const referenceRows = [
     ["Style", typeLabel],
     ["Buttons", buttonLabel],
     ["FCC", group.fccs.join(" / ")],
     ["Frequency", group.frequencies.join(" / ")],
-    ["Condition", group.conditions.join(" / ")],
-    ["Stock", `${group.inStockCount} in stock`],
+    ["Chip", best.chip],
+    ["Fitment", best.fitment],
   ].filter(([, value]) => value && value !== "Button layout unknown");
+  const checklist = [
+    ...(reference.partVerification || []),
+    ...(reference.decodePlan || []).slice(0, 2),
+    "Match the on-screen button layout to the customer's key/vehicle equipment",
+    "Confirm FCC/frequency before ordering or programming",
+  ];
+  const jobSections = [
+    {
+      title: "Mechanical",
+      rows: [
+        ["Keyway", reference.keyway?.primary],
+        ["Lishi / decode", reference.lishi?.primary],
+        ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
+      ],
+    },
+    {
+      title: "Programming",
+      rows: [
+        ["Method", (reference.programming || []).slice(0, 3).join(" | ")],
+        ["Warnings", (reference.warnings || []).slice(0, 3).join(" | ")],
+      ],
+    },
+  ];
 
   return `
     <section class="program-screen selected-parts-step">
       <div class="workflow-heading">
         <p class="eyebrow">Screen 5</p>
         <h3>${escapeHtml(buttonLabel || typeLabel || "Selected key")}</h3>
-        <p>${escapeHtml("Use this as the reference for the selected button configuration. Supplier shopping is optional below.")}</p>
+        <p>${escapeHtml("Reference the selected button configuration, identifiers, mechanical path, and programming notes before cutting or programming.")}</p>
       </div>
       <section class="selected-key-reference">
         <div class="selected-key-photo">${
@@ -1843,12 +1867,31 @@ function renderSelectedSupplierScreen(profile) {
           </div>
         </div>
       </section>
-      <details class="supplier-options-drawer">
-        <summary>Compare supplier options</summary>
-        <div class="selected-supplier-options">
-          ${renderExactPartGroup(group, offers.length ? offers : baselineOffers)}
-        </div>
-      </details>
+      <section class="reference-job-grid">
+        ${jobSections
+          .map(
+            (section) => `
+              <article class="reference-job-card">
+                <span>${escapeHtml(section.title)}</span>
+                ${section.rows
+                  .filter(([, value]) => value)
+                  .map(
+                    ([label, value]) => `
+                      <p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>
+                    `,
+                  )
+                  .join("")}
+              </article>
+            `,
+          )
+          .join("")}
+      </section>
+      <section class="reference-checklist">
+        <span>Confirm before job</span>
+        <ul>
+          ${[...new Set(checklist.filter(Boolean))].slice(0, 8).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </section>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
         `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
@@ -2527,14 +2570,10 @@ function renderVinProfile(profile) {
   vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}${screenMarkup}`;
 
   vinRecommendation.innerHTML = `
-    <strong>${escapeHtml(profile.liveSupplierLookup?.loginStatus === "connected" ? "Live supplier connected" : "Supplier search fallback")}</strong>
-    <p>${escapeHtml(profile.liveSupplierLookup?.statusMessage || "Current matches use imported Key Innovations labels until live supplier lookup is connected.")}</p>
+    <strong>Reference mode</strong>
+    <p>${escapeHtml("Decode the vehicle, choose the visible key style, then use the final screen as a field reference for identifiers, keyway, tools, and programming checks.")}</p>
     <div class="tag-row">
-      ${(profile.liveSupplierLookup?.supplierStatuses || [])
-        .filter((status) => status.enabled || status.productCount)
-        .map((status) => `<span>${escapeHtml(`${status.name}: ${status.productCount ? `${status.productCount} offers` : status.status}`)}</span>`)
-        .join("")}
-      <span>Verify before ordering</span>
+      <span>Vehicle</span><span>Keyway</span><span>Buttons</span><span>FCC</span><span>Programming</span>
     </div>
   `;
   return;
