@@ -734,7 +734,14 @@ function renderVehicleMemoryCard(profile) {
 
 function renderVehicleReferenceCard(reference) {
   if (!reference) return "";
-  const renderList = (items) => (items || []).filter(Boolean).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const renderList = (items) => (items || []).filter(Boolean).slice(0, 8).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const renderReferenceArticle = (label, items) =>
+    items?.length
+      ? `<article>
+          <small>${escapeHtml(label)}</small>
+          <ul>${renderList(items)}</ul>
+        </article>`
+      : "";
   return `
     <section class="vehicle-reference-card">
       <div class="reference-head">
@@ -768,6 +775,10 @@ function renderVehicleReferenceCard(reference) {
           <small>Programming</small>
           <ul>${renderList(reference.programming)}</ul>
         </article>
+        ${renderReferenceArticle("Access / proof", reference.access)}
+        ${renderReferenceArticle("Decode plan", reference.decodePlan)}
+        ${renderReferenceArticle("Cutting setup", reference.cutting)}
+        ${renderReferenceArticle("Part verification", reference.partVerification)}
         <article>
           <small>Watch outs</small>
           <ul>${renderList(reference.warnings)}</ul>
@@ -1203,6 +1214,36 @@ function exactPartGroups(offers) {
         return selectionRankWeight(b.bestOffer.selectionRank) - selectionRankWeight(a.bestOffer.selectionRank);
       }
       if ((b.supplierCount > 1) !== (a.supplierCount > 1)) return b.supplierCount > 1 ? 1 : -1;
+      if (b.inStockCount !== a.inStockCount) return b.inStockCount - a.inStockCount;
+      return (a.lowestPrice?.priceValue ?? Infinity) - (b.lowestPrice?.priceValue ?? Infinity);
+    });
+}
+
+function visualPartChoiceKey(group) {
+  const label = exactPartLabel(group);
+  const normalizedLabel = String(label || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+  if (normalizedLabel && normalizedLabel.length >= 4) return `part:${normalizedLabel}`;
+  const best = group.bestOffer || group.offers[0];
+  const fallback = partNumberTokens([best.oem, best.sku, best.partName, best.fcc].filter(Boolean).join(" "))[0];
+  return fallback ? `part:${fallback}` : group.key;
+}
+
+function visualPartChoiceGroups(offers) {
+  const merged = new Map();
+  exactPartGroups(offers).forEach((group) => {
+    const key = visualPartChoiceKey(group);
+    if (!merged.has(key)) merged.set(key, []);
+    merged.get(key).push(...group.offers);
+  });
+
+  return Array.from(merged.entries())
+    .map(([key, groupOffers]) => buildExactPartGroup(key, groupOffers))
+    .sort((a, b) => {
+      if (selectionRankWeight(b.bestOffer.selectionRank) !== selectionRankWeight(a.bestOffer.selectionRank)) {
+        return selectionRankWeight(b.bestOffer.selectionRank) - selectionRankWeight(a.bestOffer.selectionRank);
+      }
       if (b.inStockCount !== a.inStockCount) return b.inStockCount - a.inStockCount;
       return (a.lowestPrice?.priceValue ?? Infinity) - (b.lowestPrice?.priceValue ?? Infinity);
     });
@@ -1695,8 +1736,8 @@ function renderPartChoiceBoard(lookup, products) {
   if (!products.length) return renderLiveSupplierProducts(lookup, products);
   const offers = sortSupplierOffers(products.filter(productPassesLiveFilters));
   const baselineOffers = sortSupplierOffers(products);
-  const groups = exactPartGroups(offers);
-  const baselineGroups = exactPartGroups(baselineOffers);
+  const groups = visualPartChoiceGroups(offers);
+  const baselineGroups = visualPartChoiceGroups(baselineOffers);
   const selectedGroup = groups.find((group) => group.key === selectedPartChoiceKey);
   const selectedBaselineGroup = baselineGroups.find((group) => group.key === selectedPartChoiceKey);
   if (selectedPartChoiceKey && !selectedGroup) selectedPartChoiceKey = "";
@@ -2198,9 +2239,7 @@ function renderKeyPackageScreen(profile) {
         <p>${escapeHtml(title || "Vehicle")}: choose the customer-visible key style before opening parts.</p>
       </div>
       ${renderVehicleReferenceCard(profile.vehicleReference)}
-      ${renderVehicleMemoryCard(profile)}
       ${renderVerifiedProfileCard(profile.verifiedProfile)}
-      ${renderShopEvidenceCard(profile.shopEvidence)}
       <div class="key-package-grid">
         ${keyPackageOptions
           .map(
