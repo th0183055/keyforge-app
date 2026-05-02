@@ -1798,6 +1798,86 @@ function valueFromDecode(result, key) {
   return result?.[key] && result[key] !== "Not Applicable" ? result[key] : "";
 }
 
+function decodedFact(result, label, key) {
+  const value = valueFromDecode(result, key);
+  return value ? { label, value } : null;
+}
+
+function decodedVehicleGroups(decode) {
+  if (!decode) return [];
+  const groups = [
+    {
+      title: "Identity",
+      facts: [
+        decodedFact(decode, "Model year", "ModelYear"),
+        decodedFact(decode, "Make", "Make"),
+        decodedFact(decode, "Model", "Model"),
+        decodedFact(decode, "Trim", "Trim"),
+        decodedFact(decode, "Trim 2", "Trim2"),
+        decodedFact(decode, "Series", "Series"),
+        decodedFact(decode, "Vehicle type", "VehicleType"),
+        decodedFact(decode, "Manufacturer", "Manufacturer"),
+      ],
+    },
+    {
+      title: "Body",
+      facts: [
+        decodedFact(decode, "Body class", "BodyClass"),
+        decodedFact(decode, "Cab type", "CabType"),
+        decodedFact(decode, "Doors", "Doors"),
+        decodedFact(decode, "Drive type", "DriveType"),
+        decodedFact(decode, "GVWR", "GVWR"),
+        decodedFact(decode, "Brake system", "BrakeSystemType"),
+      ],
+    },
+    {
+      title: "Powertrain",
+      facts: [
+        decodedFact(decode, "Engine", "EngineModel"),
+        decodedFact(decode, "Displacement", "DisplacementL"),
+        decodedFact(decode, "Engine configuration", "EngineConfiguration"),
+        decodedFact(decode, "Cylinders", "EngineCylinders"),
+        decodedFact(decode, "Fuel", "FuelTypePrimary"),
+        decodedFact(decode, "Transmission", "TransmissionStyle"),
+      ],
+    },
+    {
+      title: "Build",
+      facts: [
+        decodedFact(decode, "Plant company", "PlantCompanyName"),
+        decodedFact(decode, "Plant city", "PlantCity"),
+        decodedFact(decode, "Plant state", "PlantState"),
+        decodedFact(decode, "Plant country", "PlantCountry"),
+        decodedFact(decode, "Destination market", "DestinationMarket"),
+      ],
+    },
+    {
+      title: "Safety and equipment",
+      facts: [
+        decodedFact(decode, "Seat belts", "SeatBeltsAll"),
+        decodedFact(decode, "Pretensioner", "Pretensioner"),
+        decodedFact(decode, "Front airbags", "AirBagLocFront"),
+        decodedFact(decode, "Side airbags", "AirBagLocSide"),
+        decodedFact(decode, "Curtain airbags", "AirBagLocCurtain"),
+        decodedFact(decode, "TPMS", "TPMS"),
+      ],
+    },
+    {
+      title: "Decode status",
+      facts: [
+        decodedFact(decode, "Error code", "ErrorCode"),
+        decodedFact(decode, "Error text", "ErrorText"),
+        decodedFact(decode, "Suggested VIN", "SuggestedVIN"),
+        decodedFact(decode, "Additional error text", "AdditionalErrorText"),
+      ],
+    },
+  ];
+
+  return groups
+    .map((group) => ({ ...group, facts: group.facts.filter(Boolean) }))
+    .filter((group) => group.facts.length);
+}
+
 function vehicleFamily(make, model) {
   const text = `${make} ${model}`.toLowerCase();
   if (text.includes("ford") || text.includes("lincoln")) return "ford";
@@ -3038,6 +3118,7 @@ async function buildLocksmithProfile(vin, decode, store) {
     source: "Vehicle details from NHTSA vPIC; key/programmer/tool guidance from local verified key intelligence database.",
     fallbackSource: "Vehicle details from NHTSA vPIC; locksmith workflow guidance from local brand fallback model.",
     sourceReadinessIdentity: { status: "connected", result: "Used for VIN decode" },
+    vehicleDecodeGroups: decodedVehicleGroups(decode),
     skipSupplierLookup: true,
   });
 }
@@ -3082,6 +3163,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     lookupMode: options.lookupMode || "ymm",
     vehicle,
     vinDetails: options.vinDetails || null,
+    vehicleDecodeGroups: options.vehicleDecodeGroups || [],
     confidence: options.confidence || "Year/make/model lookup - verify trim and key package",
     keys: selected.keys,
     programmers: selected.programmers,

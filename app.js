@@ -786,6 +786,55 @@ function renderVehicleDetailCard(label, value, detail = "") {
   `;
 }
 
+function renderVehicleDossier(profile) {
+  const vehicle = profile.vehicle || {};
+  const groups = profile.vehicleDecodeGroups || [];
+  const fallbackGroups = [
+    {
+      title: "Vehicle details",
+      facts: [
+        { label: "Year", value: vehicle.year },
+        { label: "Make", value: vehicle.make },
+        { label: "Model", value: vehicle.model },
+        { label: "Trim", value: vehicle.trim },
+        { label: "Body", value: vehicle.bodyClass },
+        { label: "Engine", value: vehicle.engine },
+        { label: "Drive", value: vehicle.driveType },
+        { label: "Plant", value: [vehicle.plantCity, vehicle.plantCountry].filter(Boolean).join(", ") },
+      ].filter((fact) => fact.value),
+    },
+  ].filter((group) => group.facts.length);
+  const usableGroups = groups.length ? groups : fallbackGroups;
+  return `
+    <div class="vehicle-dossier">
+      ${usableGroups
+        .map(
+          (group) => `
+            <section class="dossier-group">
+              <div class="dossier-group-head">
+                <span>${escapeHtml(group.title)}</span>
+                <small>${escapeHtml(`${group.facts.length} fields`)}</small>
+              </div>
+              <div class="dossier-facts">
+                ${group.facts
+                  .map(
+                    (fact) => `
+                      <div class="dossier-fact">
+                        <small>${escapeHtml(fact.label)}</small>
+                        <strong>${escapeHtml(fact.value)}</strong>
+                      </div>
+                    `,
+                  )
+                  .join("")}
+              </div>
+            </section>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderVerifiedProfileCard(profile) {
   if (!profile) return "";
   const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
@@ -2023,6 +2072,7 @@ function renderVehicleApprovalScreen(profile, context) {
         ${renderVehicleDetailCard("Drive / weight", vehicle.driveType, vehicle.gvwr || "GVWR not decoded")}
         ${renderVehicleDetailCard("Build plant", plantSummary, vehicle.manufacturer || "Manufacturer not decoded")}
       </div>
+      ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-reset>New VIN</button>`,
