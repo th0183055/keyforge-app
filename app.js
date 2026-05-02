@@ -676,6 +676,32 @@ function renderWorkflowActions(actions) {
   return `<div class="workflow-actions">${actions.join("")}</div>`;
 }
 
+function stepLabel(step) {
+  return {
+    vehicle: "Vehicle",
+    "vehicle-details": "Details",
+    package: "Key type",
+    parts: "Pictures",
+    suppliers: "Reference",
+  }[step] || "VIN";
+}
+
+function renderMobileContextHeader(profile, step) {
+  if (!profile?.vehicle || step === "vehicle") return "";
+  const vehicle = profile.vehicle;
+  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
+  const vin = profile.vin ? `${profile.vin.slice(0, 5)}...${profile.vin.slice(-4)}` : "Y/M/M";
+  return `
+    <div class="mobile-context-header">
+      <div>
+        <span>${escapeHtml(stepLabel(step))}</span>
+        <strong>${escapeHtml(title || "Vehicle lookup")}</strong>
+      </div>
+      <small>${escapeHtml(vin)}</small>
+    </div>
+  `;
+}
+
 function renderShopEvidenceCard(evidence) {
   if (!evidence) return "";
   const hasEvidence = evidence.totalMatches > 0;
@@ -2483,20 +2509,22 @@ function renderVinProfile(profile) {
         : "Needs verification";
 
   const context = { vehicle, title, quick, bestSupplier, sourceBadge };
+  let screenMarkup = "";
   if (vinWorkflowStep === "package") {
-    vinResult.innerHTML = renderKeyPackageScreen(profile);
+    screenMarkup = renderKeyPackageScreen(profile);
   } else if (vinWorkflowStep === "vehicle-details") {
-    vinResult.innerHTML = renderVehicleDetailsScreen(profile, context);
+    screenMarkup = renderVehicleDetailsScreen(profile, context);
   } else if (vinWorkflowStep === "family") {
-    vinResult.innerHTML = renderKeyFamilyScreen(profile);
+    screenMarkup = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
-    vinResult.innerHTML = renderKeyChoicesScreen(profile);
+    screenMarkup = renderKeyChoicesScreen(profile);
   } else if (vinWorkflowStep === "suppliers") {
-    vinResult.innerHTML = renderSelectedSupplierScreen(profile);
+    screenMarkup = renderSelectedSupplierScreen(profile);
   } else {
     vinWorkflowStep = "vehicle";
-    vinResult.innerHTML = renderVehicleApprovalScreen(profile, context);
+    screenMarkup = renderVehicleApprovalScreen(profile, context);
   }
+  vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}${screenMarkup}`;
 
   vinRecommendation.innerHTML = `
     <strong>${escapeHtml(profile.liveSupplierLookup?.loginStatus === "connected" ? "Live supplier connected" : "Supplier search fallback")}</strong>
