@@ -1,0 +1,20 @@
+{
+  "name": "LockForge Systems",
+  "short_name": "LockForge",
+  "description": "Fast locksmith VIN-to-key lookup with supplier comparison and vehicle memory.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#a90f1b",
+  "theme_color": "#d01626",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

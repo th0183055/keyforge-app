@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#d01626" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="LockForge" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>LockForge Systems</title>
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -38,6 +43,10 @@
           </div>
           <button class="primary-action" data-view-target="settings">Supplier Setup</button>
         </header>
+        <section class="app-status-banner" id="appStatusBanner">
+          <span id="connectionStatus">Online</span>
+          <button class="secondary-action small" type="button" id="installAppButton">Install app</button>
+        </section>
 
         <section class="view active" id="vin">
           <div class="vin-layout">

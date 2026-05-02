@@ -13,6 +13,7 @@ let selectedKeyPackage = "";
 let supplierLookupRequestId = 0;
 let activeVinScan = null;
 let pendingJobOfferId = "";
+let deferredInstallPrompt = null;
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -51,12 +52,29 @@ const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
 const vinResult = document.querySelector("#vinResult");
 const vinRecommendation = document.querySelector("#vinRecommendation");
+const appStatusBanner = document.querySelector("#appStatusBanner");
+const connectionStatus = document.querySelector("#connectionStatus");
+const installAppButton = document.querySelector("#installAppButton");
 const aiForm = document.querySelector("#aiForm");
 const chatLogElement = document.querySelector("#chatLog");
 
 function showView(id) {
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
+}
+
+function updateConnectionStatus() {
+  const online = navigator.onLine !== false;
+  if (connectionStatus) connectionStatus.textContent = online ? "Online" : "Offline shell";
+  appStatusBanner?.classList.toggle("offline", !online);
+}
+
+function updateInstallButton() {
+  if (!installAppButton) return;
+  const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone;
+  installAppButton.hidden = standalone;
+  installAppButton.disabled = !deferredInstallPrompt;
+  installAppButton.textContent = deferredInstallPrompt ? "Install app" : "Install ready";
 }
 
 function statusClass(status) {
@@ -3051,6 +3069,30 @@ if (ymmForm) {
   });
 }
 
+window.addEventListener("online", updateConnectionStatus);
+window.addEventListener("offline", updateConnectionStatus);
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateInstallButton();
+});
+
+installAppButton?.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  installAppButton.disabled = true;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice.catch(() => null);
+  deferredInstallPrompt = null;
+  updateInstallButton();
+});
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
+
 renderChat();
 renderJobs();
 renderVehicles();
@@ -3064,3 +3106,5 @@ loadInsights();
 loadKeyIntelligence();
 loadSources();
 loadSupplierAccounts();
+updateConnectionStatus();
+updateInstallButton();
