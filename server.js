@@ -1806,6 +1806,9 @@ function vehicleFamily(make, model) {
   if (text.includes("chevrolet") || text.includes("gmc") || text.includes("cadillac") || text.includes("buick")) {
     return "gm";
   }
+  if (text.includes("chrysler") || text.includes("dodge") || text.includes("jeep") || text.includes("ram")) return "chrysler";
+  if (text.includes("nissan") || text.includes("infiniti")) return "nissan";
+  if (text.includes("hyundai") || text.includes("kia") || text.includes("genesis")) return "hyundai";
   return "general";
 }
 
@@ -2779,6 +2782,99 @@ function fallbackRecommendations(family) {
   return recommendations[family] || recommendations.general;
 }
 
+function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
+  const family = vehicleFamily(vehicle.make, vehicle.model);
+  const year = Number(vehicle.year);
+  const text = normalizeVehicleText(`${vehicle.make} ${vehicle.model} ${vehicle.trim} ${vehicle.bodyClass}`);
+  const lateFord = ["ford", "lincoln"].includes(family) && year >= 2015;
+  const fordTruck = lateFord && /F150|F 150|EXPEDITION|NAVIGATOR|SUPER DUTY|F250|F350/.test(text);
+  const hondaOlder = family === "honda" && year <= 2005;
+  const toyotaLate = ["toyota", "lexus"].includes(family) && year >= 2018;
+  const gmLate = family === "gm" && year >= 2015;
+  const chryslerLate = family === "chrysler" && year >= 2011;
+  const nissanLate = family === "nissan" && year >= 2013;
+  const hyundaiLate = family === "hyundai" && year >= 2015;
+
+  const reference = {
+    keyway: {
+      primary: "Verify by door/ignition/insert blade before cutting",
+      alternates: [],
+      confidence: "verify",
+    },
+    lishi: {
+      primary: "Use keyway-confirmed Lishi/decoder only after authorization",
+      alternates: [],
+      confidence: "verify",
+    },
+    origination: [
+      "Confirm ownership/authorization",
+      "Confirm keyway from lock or emergency insert",
+      "Use code source or decode path",
+      "Cut test/mechanical blade before programming",
+    ],
+    unlock: [
+      "Use non-destructive automotive entry kit",
+      "Air wedge/pump wedge, long reach, protective sleeve",
+      "Verify lockout authorization before entry",
+    ],
+    programming: [
+      programmingReference?.programMethod || "Verify programmer coverage by exact year/model/key system",
+      programmingReference?.requiresOnline ? "Online/OEM path may be required" : "",
+      programmingReference?.requiresPin ? "PIN/passcode/security access may be required" : "",
+    ].filter(Boolean),
+    warnings: ["VIN alone does not prove keyway, FCC, button layout, or lock cylinder changes"],
+    source: "Brand/year reference; verify on vehicle",
+  };
+
+  if (fordTruck) {
+    reference.keyway = { primary: "HU101 / HU198 family likely", alternates: ["Confirm center mill profile", "Emergency insert may differ by package"], confidence: "medium" };
+    reference.lishi = { primary: "HU101 or HU198 Lishi/decoder by confirmed keyway", alternates: ["Confirm 4-depth/10-cut vs newer profile before use"], confidence: "medium" };
+    reference.origination.push("Common Ford truck path: decode/source code, cut HU101/HU198 blade, then program remote/prox");
+    reference.unlock.push("Ford truck long-reach entry setup; protect weatherstrip and wiring");
+    reference.warnings.push("Late Ford prox/flip can vary by trim, remote start, tailgate, and FCC");
+  } else if (hondaOlder) {
+    reference.keyway = { primary: "Honda high-security keyway likely", alternates: ["Verify door/ignition wear", "Older ignition/door mismatch is possible"], confidence: "medium" };
+    reference.lishi = { primary: "Honda-compatible high-security Lishi by confirmed keyway", alternates: [], confidence: "medium" };
+    reference.unlock.push("Honda inside-handle/lock layout varies; use damage-free reach method");
+    reference.warnings.push("Older Honda locks may be worn or replaced; verify mechanical operation first");
+  } else if (toyotaLate) {
+    reference.keyway = { primary: "Toyota/Lexus emergency insert keyway must be confirmed", alternates: ["Hybrid/prox trims vary"], confidence: "low-medium" };
+    reference.lishi = { primary: "Toyota/Lexus keyway-specific Lishi after insert verification", alternates: [], confidence: "verify" };
+    reference.programming.push("Techstream/TIS path may be preferred for late Toyota/Lexus risk");
+    reference.warnings.push("Hybrid/prox and trim package can change FCC, board, and emergency insert");
+  } else if (gmLate) {
+    reference.keyway = { primary: "GM side-mill/emergency insert keyway must be confirmed", alternates: ["Blade/prox varies by platform"], confidence: "verify" };
+    reference.lishi = { primary: "GM keyway-specific Lishi after lock/insert verification", alternates: [], confidence: "verify" };
+    reference.programming.push("SPS/OEM or security wait may apply depending on platform");
+  } else if (chryslerLate) {
+    reference.keyway = { primary: "Chrysler/Dodge/Jeep/Ram emergency blade keyway must be confirmed", alternates: ["Remote head and prox packages vary by trim"], confidence: "verify" };
+    reference.lishi = { primary: "Chrysler-family keyway-specific Lishi after door/insert verification", alternates: [], confidence: "verify" };
+    reference.origination.push("Check whether vehicle uses WIN/Fobik, prox, or conventional transponder path");
+    reference.programming.push("Confirm PIN/security access and module coverage before dispatch");
+    reference.warnings.push("Fobik/prox style, button layout, hatch, and remote start can change the correct part");
+  } else if (nissanLate) {
+    reference.keyway = { primary: "Nissan/Infiniti emergency insert keyway must be confirmed", alternates: ["Prox blade and transponder blade can differ"], confidence: "verify" };
+    reference.lishi = { primary: "Nissan/Infiniti keyway-specific Lishi after insert/door verification", alternates: [], confidence: "verify" };
+    reference.programming.push("Confirm BCM/security coverage and slot/prox behavior before programming");
+    reference.warnings.push("Nissan prox FCC and button configuration often varies inside the same model year");
+  } else if (hyundaiLate) {
+    reference.keyway = { primary: "Hyundai/Kia/Genesis keyway must be confirmed from lock or insert", alternates: ["Flip, remote head, and prox variants may share vehicle fitment"], confidence: "verify" };
+    reference.lishi = { primary: "Hyundai/Kia keyway-specific Lishi after lock/insert verification", alternates: [], confidence: "verify" };
+    reference.programming.push("Confirm immobilizer presence and programmer coverage by exact trim/key system");
+    reference.warnings.push("Some trims in the same year can be non-immobilizer, transponder, or prox");
+  }
+
+  if (shopEvidence?.tools?.length) {
+    reference.origination.unshift(`Shop history tools/refs: ${shopEvidence.tools.slice(0, 4).join(", ")}`);
+    reference.source = "Shop history + brand/year reference";
+  }
+  if (shopEvidence?.programmers?.length) {
+    reference.programming.unshift(`Shop history programmer: ${shopEvidence.programmers[0]}`);
+  }
+
+  return reference;
+}
+
 function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference) {
   const family = vehicleFamily(vehicle.make, vehicle.model);
   const year = Number(vehicle.year);
@@ -2988,6 +3084,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     verifiedProfile,
     shopEvidence,
     liveSupplierLookup,
+    vehicleReference: vehicleReferenceFor(vehicle, programmingReference, shopEvidence),
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,

@@ -951,6 +951,75 @@ textarea {
   white-space: nowrap;
 }
 
+.vehicle-reference-card {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #c9d5df;
+  border-left: 5px solid #3f6177;
+  border-radius: 12px;
+  background: #f4f8fb;
+}
+
+.reference-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.reference-head span,
+.reference-head small,
+.reference-grid small {
+  color: #28495d;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reference-head strong,
+.reference-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  line-height: 1.18;
+}
+
+.reference-head p,
+.reference-grid p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.reference-head small {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: white;
+  white-space: nowrap;
+}
+
+.reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reference-grid article {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 9px;
+  background: white;
+}
+
+.reference-grid ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .verified-profile-card {
   display: flex;
   gap: 12px;
@@ -3018,6 +3087,10 @@ textarea {
 
   .part-reference-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reference-grid {
+    grid-template-columns: 1fr;
   }
 
   .decision-grid {

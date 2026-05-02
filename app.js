@@ -731,6 +731,51 @@ function renderVehicleMemoryCard(profile) {
   `;
 }
 
+function renderVehicleReferenceCard(reference) {
+  if (!reference) return "";
+  const renderList = (items) => (items || []).filter(Boolean).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return `
+    <section class="vehicle-reference-card">
+      <div class="reference-head">
+        <div>
+          <span>Vehicle reference</span>
+          <strong>${escapeHtml(reference.keyway?.primary || "Verify keyway")}</strong>
+          <p>${escapeHtml(reference.source || "Reference data must be verified on the vehicle.")}</p>
+        </div>
+        <small>${escapeHtml(reference.keyway?.confidence || "verify")}</small>
+      </div>
+      <div class="reference-grid">
+        <article>
+          <small>Keyway</small>
+          <strong>${escapeHtml(reference.keyway?.primary || "Verify")}</strong>
+          <p>${escapeHtml((reference.keyway?.alternates || []).join(" | ") || "Confirm from lock or emergency insert.")}</p>
+        </article>
+        <article>
+          <small>Lishi / decode</small>
+          <strong>${escapeHtml(reference.lishi?.primary || "Verify")}</strong>
+          <p>${escapeHtml((reference.lishi?.alternates || []).join(" | ") || "Use keyway-confirmed tool only.")}</p>
+        </article>
+        <article>
+          <small>Unlock kit</small>
+          <ul>${renderList(reference.unlock)}</ul>
+        </article>
+        <article>
+          <small>Originate key</small>
+          <ul>${renderList(reference.origination)}</ul>
+        </article>
+        <article>
+          <small>Programming</small>
+          <ul>${renderList(reference.programming)}</ul>
+        </article>
+        <article>
+          <small>Watch outs</small>
+          <ul>${renderList(reference.warnings)}</ul>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderVerifiedProfileCard(profile) {
   if (!profile) return "";
   const baseline = profile.baselinePart || profile.verifiedParts?.[0] || null;
@@ -1982,6 +2027,7 @@ function renderVehicleApprovalScreen(profile, context) {
           <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence - FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
         </article>
       </div>
+      ${renderVehicleReferenceCard(profile.vehicleReference)}
       ${renderVehicleMemoryCard(profile)}
       ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
@@ -2100,6 +2146,7 @@ function renderKeyChoicesScreen(profile) {
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
         <p>${escapeHtml(`${selectedProducts.length} selected options shown. ${packageOption ? `Package clue: ${packageOption.title}. ` : ""}${decisionNote}`)}</p>
       </div>
+      ${renderVehicleReferenceCard(profile.vehicleReference)}
       ${renderVehicleMemoryCard(profile)}
       ${renderVerifiedProfileCard(profile.verifiedProfile)}
       ${renderShopEvidenceCard(profile.shopEvidence)}
