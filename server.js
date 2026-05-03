@@ -2967,6 +2967,26 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
       "Confirm lockout vs lost key vs duplicate key request",
       "Document VIN plate, door jamb label, and customer approval",
     ],
+    fieldPhotos: [
+      "VIN plate",
+      "Door jamb label",
+      "Ignition/slot or push button area",
+      "Customer key or visible button layout when available",
+      "Emergency insert blade/profile when available",
+    ],
+    fieldTools: [
+      "Battery maintainer before module communication",
+      "OBD access check and stable connection",
+      "Key machine jaw/adapter by confirmed blade profile",
+      "Non-destructive entry tools with trim protection",
+    ],
+    jobFlow: [
+      "Verify vehicle identity and authorization",
+      "Confirm key system from visible hardware and customer request",
+      "Confirm keyway or insert before cutting",
+      "Confirm programmer coverage before opening security functions",
+      "Cut/test mechanical function before programming electronics",
+    ],
     decodePlan: [
       "Confirm mechanical keyway before choosing a Lishi",
       "Prefer code/source when available and authorized",
@@ -2979,11 +2999,14 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     ],
     partVerification: [
       "Match FCC, frequency, board, button count, and emergency insert",
-      "Compare customer-visible buttons against supplier photos",
+      "Compare customer-visible buttons against reference photos",
       "Check remote start, tailgate/hatch, panic, and trunk options",
-      "Avoid ordering from VIN alone when trim/package is unclear",
+      "Avoid choosing a final key from VIN alone when trim/package is unclear",
     ],
-    warnings: ["VIN alone does not prove keyway, FCC, button layout, or lock cylinder changes"],
+    warnings: [
+      "VIN alone does not prove keyway, FCC, button layout, or lock cylinder changes",
+      "Low voltage, replaced locks, or swapped modules can turn a normal job into a diagnostic job",
+    ],
     source: "Brand/year reference; verify on vehicle",
   };
 
@@ -2997,6 +3020,9 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.cutting.push("Verify center-mill profile and depth system before final blade");
     reference.partVerification.push("Ford truck tailgate, remote start, panic, and button count can split otherwise similar remotes");
     reference.warnings.push("Late Ford prox/flip can vary by trim, remote start, tailgate, and FCC");
+    reference.fieldPhotos.push("Tailgate/hatch buttons and remote-start button if equipped");
+    reference.fieldTools.push("FDRS/OEM path readiness check for newer module-sensitive jobs");
+    reference.jobFlow.push("For late Ford trucks, decide FDRS/OEM path vs verified aftermarket coverage before programming");
   } else if (hondaOlder) {
     reference.keyway = { primary: "Honda high-security keyway likely", alternates: ["Verify door/ignition wear", "Older ignition/door mismatch is possible"], confidence: "medium" };
     reference.lishi = { primary: "Honda-compatible high-security Lishi by confirmed keyway", alternates: [], confidence: "medium" };
@@ -3004,17 +3030,21 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.decodePlan.push("Check for worn/replaced door locks before trusting a decode");
     reference.cutting.push("High-security Honda cuts need clean calibration and lock-wear verification");
     reference.warnings.push("Older Honda locks may be worn or replaced; verify mechanical operation first");
+    reference.fieldPhotos.push("Ignition wear and door lock condition");
   } else if (toyotaLate) {
     reference.keyway = { primary: "Toyota/Lexus emergency insert keyway must be confirmed", alternates: ["Hybrid/prox trims vary"], confidence: "low-medium" };
     reference.lishi = { primary: "Toyota/Lexus keyway-specific Lishi after insert verification", alternates: [], confidence: "verify" };
     reference.programming.push("Techstream/TIS path may be preferred for late Toyota/Lexus risk");
     reference.partVerification.push("Hybrid/prox package, FCC, and emergency insert must match exactly");
     reference.warnings.push("Hybrid/prox and trim package can change FCC, board, and emergency insert");
+    reference.fieldPhotos.push("Hybrid badge/trim clue and push-button area");
+    reference.fieldTools.push("TIS/Techstream or equivalent coverage check");
   } else if (gmLate) {
     reference.keyway = { primary: "GM side-mill/emergency insert keyway must be confirmed", alternates: ["Blade/prox varies by platform"], confidence: "verify" };
     reference.lishi = { primary: "GM keyway-specific Lishi after lock/insert verification", alternates: [], confidence: "verify" };
     reference.programming.push("SPS/OEM or security wait may apply depending on platform");
     reference.partVerification.push("Compare PEPS/prox, remote head, blade, and FCC before selecting supplier part");
+    reference.fieldTools.push("Battery support and SPS/GM security path readiness");
   } else if (chryslerLate) {
     reference.keyway = { primary: "Chrysler/Dodge/Jeep/Ram emergency blade keyway must be confirmed", alternates: ["Remote head and prox packages vary by trim"], confidence: "verify" };
     reference.lishi = { primary: "Chrysler-family keyway-specific Lishi after door/insert verification", alternates: [], confidence: "verify" };
@@ -3022,18 +3052,21 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.programming.push("Confirm PIN/security access and module coverage before dispatch");
     reference.partVerification.push("Fobik/prox case style and button layout matter as much as model year");
     reference.warnings.push("Fobik/prox style, button layout, hatch, and remote start can change the correct part");
+    reference.fieldPhotos.push("WIN/Fobik slot, prox push button, or keyed ignition style");
   } else if (nissanLate) {
     reference.keyway = { primary: "Nissan/Infiniti emergency insert keyway must be confirmed", alternates: ["Prox blade and transponder blade can differ"], confidence: "verify" };
     reference.lishi = { primary: "Nissan/Infiniti keyway-specific Lishi after insert/door verification", alternates: [], confidence: "verify" };
     reference.programming.push("Confirm BCM/security coverage and slot/prox behavior before programming");
     reference.partVerification.push("Slot/prox behavior, FCC, and hatch/trunk buttons can split catalog matches");
     reference.warnings.push("Nissan prox FCC and button configuration often varies inside the same model year");
+    reference.fieldPhotos.push("Slot/prox behavior and hatch/trunk button layout");
   } else if (hyundaiLate) {
     reference.keyway = { primary: "Hyundai/Kia/Genesis keyway must be confirmed from lock or insert", alternates: ["Flip, remote head, and prox variants may share vehicle fitment"], confidence: "verify" };
     reference.lishi = { primary: "Hyundai/Kia keyway-specific Lishi after lock/insert verification", alternates: [], confidence: "verify" };
     reference.programming.push("Confirm immobilizer presence and programmer coverage by exact trim/key system");
     reference.partVerification.push("Confirm immobilizer/prox equipment before assuming a chip key is required");
     reference.warnings.push("Some trims in the same year can be non-immobilizer, transponder, or prox");
+    reference.fieldPhotos.push("Ignition style, prox button, or flip key evidence");
   }
 
   return reference;

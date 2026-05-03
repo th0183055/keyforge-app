@@ -977,6 +977,35 @@ textarea {
   background: #f4f8fb;
 }
 
+.field-reference-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.field-reference-strip article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #c9d5df;
+  border-radius: 10px;
+  background: #f4f8fb;
+}
+
+.field-reference-strip span {
+  color: #28495d;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.field-reference-strip strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.22;
+}
+
 .reference-head {
   display: flex;
   gap: 12px;
@@ -3521,6 +3550,10 @@ textarea {
 
   .reference-grid {
     grid-template-columns: 1fr;
+  }
+
+  .field-reference-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .decision-grid {

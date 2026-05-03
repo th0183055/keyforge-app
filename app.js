@@ -802,6 +802,9 @@ function renderVehicleReferenceCard(reference) {
           <ul>${renderList(reference.programming)}</ul>
         </article>
         ${renderReferenceArticle("Access / proof", reference.access)}
+        ${renderReferenceArticle("Photos to capture", reference.fieldPhotos)}
+        ${renderReferenceArticle("Field tools", reference.fieldTools)}
+        ${renderReferenceArticle("Job flow", reference.jobFlow)}
         ${renderReferenceArticle("Decode plan", reference.decodePlan)}
         ${renderReferenceArticle("Cutting setup", reference.cutting)}
         ${renderReferenceArticle("Part verification", reference.partVerification)}
@@ -810,6 +813,30 @@ function renderVehicleReferenceCard(reference) {
           <ul>${renderList(reference.warnings)}</ul>
         </article>
       </div>
+    </section>
+  `;
+}
+
+function renderFieldReferencePreview(reference) {
+  if (!reference) return "";
+  const items = [
+    ["Keyway", reference.keyway?.primary || "Verify by insert/lock"],
+    ["Decode", (reference.decodePlan || [])[0] || "Confirm code/decode path"],
+    ["Tools", (reference.fieldTools || [])[0] || reference.lishi?.primary || "Verify field tools"],
+    ["Watch", (reference.warnings || [])[0] || "VIN alone is not enough"],
+  ];
+  return `
+    <section class="field-reference-strip">
+      ${items
+        .map(
+          ([label, value]) => `
+            <article>
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </article>
+          `,
+        )
+        .join("")}
     </section>
   `;
 }
@@ -1758,7 +1785,7 @@ function renderPartChoiceBoard(lookup, products) {
         <div>
           <p class="eyebrow">Part choices</p>
           <h3>${escapeHtml(`${groups.length} visual choices`)}</h3>
-          <p>${escapeHtml("Pick the key, remote, or blade style first. The next screen opens supplier pricing for that choice.")}</p>
+          <p>${escapeHtml("Pick the key, remote, or blade style first. The next screen opens the field reference for that choice.")}</p>
         </div>
       </div>
       <div class="part-choice-grid">
@@ -1816,9 +1843,16 @@ function renderSelectedSupplierScreen(profile) {
     ...(reference.partVerification || []),
     ...(reference.decodePlan || []).slice(0, 2),
     "Match the on-screen button layout to the customer's key/vehicle equipment",
-    "Confirm FCC/frequency before ordering or programming",
+    "Confirm FCC/frequency before cutting or programming",
   ];
   const jobSections = [
+    {
+      title: "Field flow",
+      rows: [
+        ["Start", (reference.jobFlow || []).slice(0, 2).join(" | ")],
+        ["Photos", (reference.fieldPhotos || []).slice(0, 3).join(" | ")],
+      ],
+    },
     {
       title: "Mechanical",
       rows: [
@@ -1832,6 +1866,13 @@ function renderSelectedSupplierScreen(profile) {
       rows: [
         ["Method", (reference.programming || []).slice(0, 3).join(" | ")],
         ["Warnings", (reference.warnings || []).slice(0, 3).join(" | ")],
+      ],
+    },
+    {
+      title: "Tools",
+      rows: [
+        ["Field kit", (reference.fieldTools || []).slice(0, 3).join(" | ")],
+        ["Access", (reference.access || []).slice(0, 2).join(" | ")],
       ],
     },
   ];
@@ -1852,7 +1893,7 @@ function renderSelectedSupplierScreen(profile) {
         <div class="selected-key-info">
           <span>${escapeHtml(typeLabel)}</span>
           <strong>${escapeHtml(buttonLabel || "Button layout verify")}</strong>
-          <p>${escapeHtml("Confirm the physical buttons and emergency insert/keyway against the vehicle before ordering or programming.")}</p>
+          <p>${escapeHtml("Confirm the physical buttons and emergency insert/keyway against the vehicle before cutting or programming.")}</p>
           <div class="selected-reference-grid">
             ${referenceRows
               .map(
@@ -1973,7 +2014,7 @@ function renderOfferReference(offer) {
   ].filter(([, value]) => value);
 
   if (!details.length) {
-    return `<div class="part-reference-grid empty"><span>Verify FCC, frequency, chip, buttons, and blade before ordering.</span></div>`;
+    return `<div class="part-reference-grid empty"><span>Verify FCC, frequency, chip, buttons, and blade before cutting or programming.</span></div>`;
   }
 
   return `
@@ -2385,6 +2426,7 @@ function renderKeyPackageScreen(profile) {
           )
           .join("")}
       </div>
+      ${renderFieldReferencePreview(profile.vehicleReference)}
       <details class="reference-drawer">
         <summary>Vehicle reference</summary>
         ${renderVehicleReferenceCard(profile.vehicleReference)}
