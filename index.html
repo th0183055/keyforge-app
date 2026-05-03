@@ -151,6 +151,89 @@
                 <button class="primary-action small" data-view-target="ai">Open AI Bench</button>
               </div>
             </section>
+
+            <section class="panel wide">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Reference vault</p>
+                  <h3>Free Web Data Pull</h3>
+                </div>
+                <button class="primary-action small" type="button" id="syncPublicSourcesButton">Pull Free Public Data</button>
+              </div>
+              <div class="assistant-card source-card">
+                <strong>What this pulls</strong>
+                <p>LockForge can pull free public facts from sources like NHTSA vPIC and public programmer coverage endpoints, then use them as clues behind the job kit. Manual entries below are optional overrides for your own notes.</p>
+              </div>
+              <div class="form-status" id="publicSourceStatus"></div>
+              <div class="source-list compact" id="publicSourceList"></div>
+              <form id="referenceVaultForm" class="form-stack">
+                <div class="form-row">
+                  <label>
+                    Start year
+                    <input name="startYear" inputmode="numeric" placeholder="2021" />
+                  </label>
+                  <label>
+                    End year
+                    <input name="endYear" inputmode="numeric" placeholder="2026" />
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>
+                    Make
+                    <input name="make" placeholder="FORD" autocomplete="off" />
+                  </label>
+                  <label>
+                    Model
+                    <input name="model" placeholder="F-150" autocomplete="off" />
+                  </label>
+                </div>
+                <label>
+                  Title
+                  <input name="title" placeholder="Late Ford truck job kit" autocomplete="off" />
+                </label>
+                <label>
+                  Original LockForge summary
+                  <textarea name="summary" rows="2" placeholder="Write this in our own words. No copied book text."></textarea>
+                </label>
+                <div class="form-row">
+                  <label>
+                    Keyway
+                    <input name="keyway" placeholder="HU101 / HU198 family likely" autocomplete="off" />
+                  </label>
+                  <label>
+                    Lishi / decode
+                    <input name="lishi" placeholder="HU101 or HU198 by confirmed profile" autocomplete="off" />
+                  </label>
+                </div>
+                <label>
+                  Key systems
+                  <textarea name="keySystems" rows="2" placeholder="Proximity; Flip/remote head; Transponder"></textarea>
+                </label>
+                <label>
+                  Key/FCC clues
+                  <textarea name="keys" rows="3" placeholder="Name | Type | FCC | Chip | Buttons | Insert | Notes"></textarea>
+                </label>
+                <label>
+                  Programmer coverage
+                  <textarea name="programmers" rows="3" placeholder="Programmer | Coverage | Add key | AKL | PIN | Online | Notes"></textarea>
+                </label>
+                <label>
+                  EEPROM / IMMO notes
+                  <textarea name="eeprom" rows="2" placeholder="OBD first; EEPROM only if AKL/security path fails; module risk notes"></textarea>
+                </label>
+                <label>
+                  Tools / field kit
+                  <textarea name="fieldTools" rows="2" placeholder="Battery maintainer; OBD access check; keyway verification tools"></textarea>
+                </label>
+                <label>
+                  Warnings
+                  <textarea name="warnings" rows="2" placeholder="VIN does not prove FCC or button layout; verify insert profile"></textarea>
+                </label>
+                <button class="primary-action" type="submit">Save Reference Entry</button>
+              </form>
+              <div class="form-status" id="referenceVaultStatus"></div>
+              <div class="source-list compact" id="referenceVaultList"></div>
+            </section>
           </div>
         </section>
 

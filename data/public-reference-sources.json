@@ -1,0 +1,295 @@
+{
+  "generatedAt": "2026-05-03T03:07:03.205Z",
+  "sources": [
+    {
+      "id": "nhtsa-vpic",
+      "name": "NHTSA vPIC",
+      "type": "official public vehicle identity",
+      "use": "VIN/YMM identity, body, engine, trim, plant, drive, fuel, GVWR, and manufacturer facts"
+    },
+    {
+      "id": "autel-coverage",
+      "name": "Autel public vehicle coverage",
+      "type": "public programmer coverage clue",
+      "use": "Programmer availability clues by product/make/model/year where the public endpoint returns data"
+    },
+    {
+      "id": "fcc-equipment",
+      "name": "FCC equipment authorization data",
+      "type": "public FCC ID clue",
+      "use": "FCC grantee/product clues after a candidate FCC is known from supplier or field data"
+    },
+    {
+      "id": "supplier-public-catalogs",
+      "name": "Supplier public catalogs",
+      "type": "public/live catalog facts",
+      "use": "Product names, fitment, FCC/chip/button clues, images, and stock where access is allowed"
+    }
+  ],
+  "autel": {
+    "products": [
+      {
+        "name": "MaxiIM IM508S",
+        "systemName": "sv2131_im508s"
+      },
+      {
+        "name": "MaxiIM IM608 II",
+        "systemName": "dv2123_im608,sv2121_im608"
+      },
+      {
+        "name": "MaxiIM IM608 PRO II",
+        "systemName": "dv2123_im608p,sv2121_im608p"
+      },
+      {
+        "name": "MaxiIM IM608S II",
+        "systemName": "sv2121_im608s"
+      }
+    ],
+    "coverage": [
+      {
+        "product": "MaxiIM IM508S",
+        "supportedMakes": [
+          "Acura",
+          "Chevrolet",
+          "Chrysler",
+          "Dodge",
+          "Ford",
+          "Honda",
+          "JEEP",
+          "Lexus",
+          "Nissan",
+          "RAM",
+          "Subaru",
+          "Toyota",
+          "Volkswagen"
+        ],
+        "supportedMakeCount": 13
+      },
+      {
+        "product": "MaxiIM IM608 II",
+        "supportedMakes": [
+          "Acura",
+          "Chevrolet",
+          "Chrysler",
+          "DODGE",
+          "Dodge",
+          "Ford",
+          "Honda",
+          "JEEP",
+          "Lexus",
+          "Nissan",
+          "RAM",
+          "Subaru",
+          "Toyota",
+          "Volkswagen"
+        ],
+        "supportedMakeCount": 14
+      },
+      {
+        "product": "MaxiIM IM608 PRO II",
+        "supportedMakes": [
+          "Acura",
+          "Chevrolet",
+          "Chrysler",
+          "DODGE",
+          "Dodge",
+          "Ford",
+          "Honda",
+          "JEEP",
+          "Lexus",
+          "Nissan",
+          "RAM",
+          "Subaru",
+          "Toyota",
+          "Volkswagen"
+        ],
+        "supportedMakeCount": 14
+      },
+      {
+        "product": "MaxiIM IM608S II",
+        "supportedMakes": [
+          "Acura",
+          "Chevrolet",
+          "Chrysler",
+          "DODGE",
+          "Dodge",
+          "Ford",
+          "Honda",
+          "JEEP",
+          "Lexus",
+          "Nissan",
+          "RAM",
+          "Subaru",
+          "Toyota",
+          "Volkswagen"
+        ],
+        "supportedMakeCount": 14
+      }
+    ]
+  },
+  "nhtsa": {
+    "vehicleVariableCount": 144,
+    "usefulVariables": [
+      {
+        "id": 5,
+        "name": "Body Class",
+        "group": "Exterior / Body"
+      },
+      {
+        "id": 9,
+        "name": "Engine Number of Cylinders",
+        "group": "Engine"
+      },
+      {
+        "id": 15,
+        "name": "Drive Type",
+        "group": "Mechanical / Drivetrain"
+      },
+      {
+        "id": 17,
+        "name": "Engine Stroke Cycles",
+        "group": "Engine"
+      },
+      {
+        "id": 18,
+        "name": "Engine Model",
+        "group": "Engine"
+      },
+      {
+        "id": 21,
+        "name": "Engine Power (kW)",
+        "group": "Engine"
+      },
+      {
+        "id": 24,
+        "name": "Fuel Type - Primary",
+        "group": "Engine"
+      },
+      {
+        "id": 26,
+        "name": "Make",
+        "group": "General"
+      },
+      {
+        "id": 28,
+        "name": "Model",
+        "group": "General"
+      },
+      {
+        "id": 29,
+        "name": "Model Year",
+        "group": "General"
+      },
+      {
+        "id": 31,
+        "name": "Plant City",
+        "group": "General"
+      },
+      {
+        "id": 34,
+        "name": "Series",
+        "group": "General"
+      },
+      {
+        "id": 37,
+        "name": "Transmission Style",
+        "group": "Mechanical / Transmission"
+      },
+      {
+        "id": 38,
+        "name": "Trim",
+        "group": "General"
+      },
+      {
+        "id": 63,
+        "name": "Transmission Speeds",
+        "group": "Mechanical / Transmission"
+      },
+      {
+        "id": 64,
+        "name": "Engine Configuration",
+        "group": "Engine"
+      },
+      {
+        "id": 66,
+        "name": "Fuel Type - Secondary",
+        "group": "Engine"
+      },
+      {
+        "id": 67,
+        "name": "Fuel Delivery / Fuel Injection Type",
+        "group": "Engine"
+      },
+      {
+        "id": 71,
+        "name": "Engine Brake (hp) From",
+        "group": "Engine"
+      },
+      {
+        "id": 72,
+        "name": "EV Drive Unit",
+        "group": "Mechanical / Battery"
+      },
+      {
+        "id": 75,
+        "name": "Plant Country",
+        "group": "General"
+      },
+      {
+        "id": 76,
+        "name": "Plant Company Name",
+        "group": "General"
+      },
+      {
+        "id": 77,
+        "name": "Plant State",
+        "group": "General"
+      },
+      {
+        "id": 97,
+        "name": "NCSA Make",
+        "group": "Internal"
+      },
+      {
+        "id": 98,
+        "name": "NCSA Model",
+        "group": "Internal"
+      },
+      {
+        "id": 109,
+        "name": "Trim2",
+        "group": "General"
+      },
+      {
+        "id": 110,
+        "name": "Series2",
+        "group": "General"
+      },
+      {
+        "id": 125,
+        "name": "Engine Brake (hp) To",
+        "group": "Engine"
+      },
+      {
+        "id": 129,
+        "name": "Other Engine Info",
+        "group": "Engine"
+      },
+      {
+        "id": 146,
+        "name": "Engine Manufacturer",
+        "group": "Engine"
+      },
+      {
+        "id": 200,
+        "name": "Fuel-Tank Type",
+        "group": "Exterior / Motorcycle"
+      },
+      {
+        "id": 201,
+        "name": "Fuel-Tank Material",
+        "group": "Exterior / Motorcycle"
+      }
+    ]
+  }
+}

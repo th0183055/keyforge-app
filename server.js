@@ -20,6 +20,7 @@ const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
 const vehicleProfilesPath = path.join(dataDir, "vehicle-profiles.json");
 const referenceVaultPath = path.join(dataDir, "reference-vault.json");
+const publicReferenceSourcesPath = path.join(dataDir, "public-reference-sources.json");
 const localSecretPath = path.join(dataDir, ".lockforge-secret");
 
 const supplierRegistry = [
@@ -291,6 +292,19 @@ async function readReferenceVault() {
 async function writeReferenceVault(vault) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(referenceVaultPath, `${JSON.stringify({ ...vault, updatedAt: new Date().toISOString() }, null, 2)}\n`);
+}
+
+async function readPublicReferenceSources() {
+  await mkdir(dataDir, { recursive: true });
+  if (!existsSync(publicReferenceSourcesPath)) {
+    return { generatedAt: "", sources: [], autel: { products: [], coverage: [] }, nhtsa: {} };
+  }
+  return JSON.parse(await readFile(publicReferenceSourcesPath, "utf8"));
+}
+
+async function writePublicReferenceSources(payload) {
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(publicReferenceSourcesPath, `${JSON.stringify({ ...payload, generatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
 async function readKeyIntelligence() {
@@ -3153,6 +3167,10 @@ function applyReferenceVault(reference, entries) {
     };
   }
   for (const entry of entries) {
+    appendUnique(next.keySystems, entry.keySystems);
+    appendUnique(next.vaultKeys, entry.keys?.map((key) => [key.name, key.fcc, key.chip, key.buttons].filter(Boolean).join(" | ")));
+    appendUnique(next.vaultProgrammers, entry.programmers?.map((programmer) => [programmer.name, programmer.coverage, programmer.notes].filter(Boolean).join(" | ")));
+    appendUnique(next.eeprom, entry.eeprom);
     appendUnique(next.origination, entry.origination);
     appendUnique(next.unlock, entry.unlock);
     appendUnique(next.programming, entry.programming);
@@ -3232,6 +3250,32 @@ function sanitizeReferenceVaultEntry(input) {
       primary: cleanString(input.lishi?.primary),
       alternates: listFromInput(input.lishi?.alternates),
     },
+    keySystems: listFromInput(input.keySystems),
+    keys: (Array.isArray(input.keys) ? input.keys : [])
+      .map((key) => ({
+        name: cleanString(key.name),
+        type: cleanString(key.type),
+        fcc: cleanString(key.fcc),
+        chip: cleanString(key.chip),
+        buttons: cleanString(key.buttons),
+        insert: cleanString(key.insert),
+        notes: cleanString(key.notes),
+        confidence: cleanString(key.confidence) || "verify",
+      }))
+      .filter((key) => key.name || key.fcc || key.chip || key.buttons),
+    programmers: (Array.isArray(input.programmers) ? input.programmers : [])
+      .map((programmer) => ({
+        name: cleanString(programmer.name),
+        coverage: cleanString(programmer.coverage),
+        addKey: cleanString(programmer.addKey),
+        allKeysLost: cleanString(programmer.allKeysLost),
+        pin: cleanString(programmer.pin),
+        online: cleanString(programmer.online),
+        notes: cleanString(programmer.notes),
+        confidence: cleanString(programmer.confidence) || "verify",
+      }))
+      .filter((programmer) => programmer.name || programmer.coverage || programmer.notes),
+    eeprom: listFromInput(input.eeprom),
     origination: listFromInput(input.origination),
     unlock: listFromInput(input.unlock),
     programming: listFromInput(input.programming),
@@ -3253,6 +3297,69 @@ function sanitizeReferenceVaultEntry(input) {
       .filter((source) => source.label || source.citation),
     updatedAt: new Date().toISOString(),
   };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  return response.json();
+}
+
+async function syncPublicReferenceSources() {
+  const commonMakes = ["Acura", "Chevrolet", "Chrysler", "Dodge", "Ford", "Honda", "Hyundai", "Jeep", "Kia", "Lexus", "Nissan", "Ram", "Subaru", "Toyota", "Volkswagen"];
+  const autelProductsPayload = await fetchJson("https://www.autel.com/ev-coverage/getProduct?lg=en");
+  const autelProducts = (autelProductsPayload.data || [])
+    .filter((product) => /IMMO|MaxiIM|IM508|IM608/i.test(`${product.proName} ${product.systemName}`))
+    .map((product) => ({ name: product.proName, systemName: product.systemName }));
+  const coverageProducts = autelProducts.filter((product) => /IM508|IM608/i.test(product.name)).slice(0, 4);
+  const coverage = [];
+  for (const product of coverageProducts) {
+    const makesPayload = await fetchJson(`https://www.autel.com/vehicle-coverage/getModel?lg=en&language=en&product=${encodeURIComponent(product.name)}`).catch(() => ({ data: [] }));
+    const makes = (makesPayload.data || []).filter((make) => commonMakes.some((common) => stringsMatch(common, make)));
+    coverage.push({ product: product.name, supportedMakes: makes, supportedMakeCount: makes.length });
+  }
+  const nhtsaVariables = await fetchJson("https://vpic.nhtsa.dot.gov/api/vehicles/GetVehicleVariableList?format=json").catch(() => ({ Results: [] }));
+  const payload = {
+    sources: [
+      {
+        id: "nhtsa-vpic",
+        name: "NHTSA vPIC",
+        type: "official public vehicle identity",
+        use: "VIN/YMM identity, body, engine, trim, plant, drive, fuel, GVWR, and manufacturer facts",
+      },
+      {
+        id: "autel-coverage",
+        name: "Autel public vehicle coverage",
+        type: "public programmer coverage clue",
+        use: "Programmer availability clues by product/make/model/year where the public endpoint returns data",
+      },
+      {
+        id: "fcc-equipment",
+        name: "FCC equipment authorization data",
+        type: "public FCC ID clue",
+        use: "FCC grantee/product clues after a candidate FCC is known from supplier or field data",
+      },
+      {
+        id: "supplier-public-catalogs",
+        name: "Supplier public catalogs",
+        type: "public/live catalog facts",
+        use: "Product names, fitment, FCC/chip/button clues, images, and stock where access is allowed",
+      },
+    ],
+    autel: {
+      products: autelProducts,
+      coverage,
+    },
+    nhtsa: {
+      vehicleVariableCount: nhtsaVariables.Results?.length || 0,
+      usefulVariables: (nhtsaVariables.Results || [])
+        .filter((item) => /Model Year|Make|Model|Trim|Series|Body Class|Engine|Fuel|Drive|GVWR|Plant|Transmission/i.test(item.Name || ""))
+        .map((item) => ({ id: item.ID, name: item.Name, group: item.GroupName }))
+        .slice(0, 80),
+    },
+  };
+  await writePublicReferenceSources(payload);
+  return payload;
 }
 
 function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference) {
@@ -3348,21 +3455,47 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
 
 function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries) {
   const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
-  const keyItems = (selected.keys || [])
+  const vaultKeyItems = (referenceVaultEntries || [])
+    .flatMap((entry) => entry.keys || [])
+    .map((key) => ({
+      name: cleanString(key.name || key.fcc || "Vault key clue"),
+      role: cleanString(key.type || "Key clue"),
+      detail: cleanString([key.fcc ? `FCC ${key.fcc}` : "", key.chip ? `Chip ${key.chip}` : "", key.buttons ? `${key.buttons} buttons` : "", key.insert ? `Insert ${key.insert}` : "", key.notes].filter(Boolean).join(" | ")),
+      confidence: cleanString(key.confidence || "vault"),
+    }));
+  const keyItems = [...vaultKeyItems, ...(selected.keys || [])
     .map((item) => ({
       name: cleanString(item.name || item.partNumber || "Verify key package"),
       role: cleanString(item.position || item.type || "Key option"),
       detail: cleanString(item.notes || item.fccId || item.partNumber || "Confirm FCC, buttons, chip, and blade before final selection."),
       confidence: cleanString(item.confidence || record?.keySystem?.confidence || "verify"),
-    }))
+    }))]
     .slice(0, 4);
-  const programmerItems = (selected.programmers || [])
+  const vaultProgrammerItems = (referenceVaultEntries || [])
+    .flatMap((entry) => entry.programmers || [])
+    .map((programmer) => ({
+      name: cleanString(programmer.name || "Vault programmer clue"),
+      role: cleanString(programmer.coverage || "Coverage clue"),
+      detail: cleanString(
+        [
+          programmer.addKey ? `Add key: ${programmer.addKey}` : "",
+          programmer.allKeysLost ? `AKL: ${programmer.allKeysLost}` : "",
+          programmer.pin ? `PIN: ${programmer.pin}` : "",
+          programmer.online ? `Online: ${programmer.online}` : "",
+          programmer.notes,
+        ]
+          .filter(Boolean)
+          .join(" | "),
+      ),
+      confidence: cleanString(programmer.confidence || "vault"),
+    }));
+  const programmerItems = [...vaultProgrammerItems, ...(selected.programmers || [])
     .map((item) => ({
       name: cleanString(item.name || "Coverage-verified programmer"),
       role: cleanString(item.type || "Programming path"),
       detail: cleanString(item.notes || programmingReference?.programMethod || "Confirm exact year/model/key-system coverage before programming."),
       confidence: cleanString(item.confidence || (programmingReference ? "high" : "verify")),
-    }))
+    }))]
     .slice(0, 4);
   const toolItems = [
     ...(selected.tools || []).map((item) => ({
@@ -3395,7 +3528,7 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
     "Confirm ownership/authorization",
     "Confirm customer-visible key style",
   ];
-  const warnings = [...(reference.warnings || []), ...securityFlags].filter(Boolean);
+  const warnings = [...(reference.warnings || []), ...(reference.eeprom || []).map((item) => `EEPROM/IMMO: ${item}`), ...securityFlags].filter(Boolean);
   const confidence = record
     ? "verified"
     : referenceVaultEntries?.length
@@ -3691,6 +3824,20 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/reference-vault") {
     sendJson(response, 200, await readReferenceVault());
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/public-reference-sources") {
+    sendJson(response, 200, await readPublicReferenceSources());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/public-reference-sources/sync") {
+    try {
+      sendJson(response, 200, await syncPublicReferenceSources());
+    } catch (error) {
+      sendError(response, 502, `Public source sync failed: ${error.message}`);
+    }
     return;
   }
 

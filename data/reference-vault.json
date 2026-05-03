@@ -24,6 +24,34 @@
         "primary": "HU101 or HU198 by confirmed blade profile",
         "alternates": ["Do not pick tool from VIN alone"]
       },
+      "keySystems": ["Proximity", "Flip / remote head", "Transponder"],
+      "keys": [
+        {
+          "name": "Ford truck key package",
+          "type": "Verify prox vs flip/transponder",
+          "fcc": "",
+          "chip": "",
+          "buttons": "Verify panic, remote start, tailgate/hatch",
+          "insert": "HU101/HU198 family must be confirmed",
+          "notes": "Use the selected ignition/key family plus FCC/button evidence before final key choice.",
+          "confidence": "medium"
+        }
+      ],
+      "programmers": [
+        {
+          "name": "FDRS / OEM path or coverage-verified aftermarket programmer",
+          "coverage": "Late Ford truck key programming",
+          "addKey": "Verify",
+          "allKeysLost": "Verify security access and tool coverage",
+          "pin": "Security access may apply",
+          "online": "OEM path may apply",
+          "notes": "Decide programmer path before opening security functions.",
+          "confidence": "medium"
+        }
+      ],
+      "eeprom": [
+        "Treat EEPROM/module work as escalation only after standard OBD/OEM path is verified unsuitable."
+      ],
       "origination": [
         "Confirm prox vs flip/transponder from ignition/start button and customer-visible key style",
         "Confirm blade profile before cutting a test key"
@@ -104,6 +132,34 @@
         "primary": "Toyota keyway-specific Lishi after insert verification",
         "alternates": []
       },
+      "keySystems": ["Proximity", "Emergency insert"],
+      "keys": [
+        {
+          "name": "Toyota hybrid prox package",
+          "type": "Proximity",
+          "fcc": "",
+          "chip": "",
+          "buttons": "Verify trunk/panic/remote-start layout",
+          "insert": "Confirm emergency insert profile",
+          "notes": "Hybrid/prox equipment and FCC must be confirmed before selecting final key.",
+          "confidence": "medium"
+        }
+      ],
+      "programmers": [
+        {
+          "name": "TIS/Techstream path or Toyota-capable programmer",
+          "coverage": "Late Toyota hybrid prox",
+          "addKey": "Verify",
+          "allKeysLost": "Verify security/online requirements",
+          "pin": "Verify",
+          "online": "May apply",
+          "notes": "Confirm coverage and security path before dispatch.",
+          "confidence": "medium"
+        }
+      ],
+      "eeprom": [
+        "EEPROM/bench work should be treated as an advanced fallback path, not the first quote."
+      ],
       "programming": [
         "Confirm TIS/Techstream or equivalent coverage",
         "Check online/security requirement before dispatch"

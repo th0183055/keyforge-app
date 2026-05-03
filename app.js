@@ -4,6 +4,8 @@ let calendarAnalysis = null;
 let keyIntelligence = [];
 let sourceConnectors = [];
 let supplierAccounts = [];
+let referenceVaultEntries = [];
+let publicReferenceSources = null;
 let selectedSupplierId = "key-innovations";
 let selectedJobId = null;
 let latestVinProfile = null;
@@ -48,6 +50,12 @@ const supplierSettingsForm = document.querySelector("#supplierSettingsForm");
 const supplierSettingsStatus = document.querySelector("#supplierSettingsStatus");
 const supplierAccountList = document.querySelector("#supplierAccountList");
 const supplierSelect = document.querySelector("#supplierSelect");
+const referenceVaultForm = document.querySelector("#referenceVaultForm");
+const referenceVaultStatus = document.querySelector("#referenceVaultStatus");
+const referenceVaultList = document.querySelector("#referenceVaultList");
+const syncPublicSourcesButton = document.querySelector("#syncPublicSourcesButton");
+const publicSourceStatus = document.querySelector("#publicSourceStatus");
+const publicSourceList = document.querySelector("#publicSourceList");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -389,6 +397,63 @@ function renderOptionList(title, options) {
       </div>
     </section>
   `;
+}
+
+function renderReferenceVault() {
+  if (!referenceVaultList) return;
+  if (!referenceVaultEntries.length) {
+    referenceVaultList.innerHTML = `<article class="source-card-row"><strong>No reference entries yet</strong><p>Add original LockForge summaries with citations to grow VIN/YMM guidance.</p></article>`;
+    return;
+  }
+  referenceVaultList.innerHTML = referenceVaultEntries
+    .slice(0, 12)
+    .map(
+      (entry) => `
+        <article class="source-card-row">
+          <strong>${escapeHtml(entry.title || "Reference entry")}</strong>
+          <p>${escapeHtml([entry.vehicle?.startYear, entry.vehicle?.endYear && entry.vehicle.endYear !== entry.vehicle.startYear ? `-${entry.vehicle.endYear}` : "", entry.vehicle?.make, entry.vehicle?.model].filter(Boolean).join(" "))}</p>
+          <span>${escapeHtml(`${entry.confidence || "medium"} confidence | ${entry.sources?.length || 0} source${entry.sources?.length === 1 ? "" : "s"}`)}</span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderPublicReferenceSources() {
+  if (!publicSourceList) return;
+  const sources = publicReferenceSources?.sources || [];
+  const autel = publicReferenceSources?.autel || {};
+  const nhtsa = publicReferenceSources?.nhtsa || {};
+  const rows = [
+    ...sources.map((source) => ({
+      title: source.name,
+      body: source.use,
+      meta: source.type,
+    })),
+    {
+      title: "Autel IMMO products found",
+      body: `${autel.products?.length || 0} key/IMMO-related public products indexed.`,
+      meta: `${autel.coverage?.length || 0} coverage samples`,
+    },
+    {
+      title: "NHTSA variables found",
+      body: `${nhtsa.vehicleVariableCount || 0} public vehicle variables available for VIN/YMM identity.`,
+      meta: "Official public data",
+    },
+  ];
+  publicSourceList.innerHTML = rows.length
+    ? rows
+        .map(
+          (row) => `
+            <article class="source-card-row">
+              <strong>${escapeHtml(row.title)}</strong>
+              <p>${escapeHtml(row.body || "")}</p>
+              <span>${escapeHtml(row.meta || "")}</span>
+            </article>
+          `,
+        )
+        .join("")
+    : `<article class="source-card-row"><strong>No public data pulled yet</strong><p>Tap Pull Free Public Data to index available web sources.</p></article>`;
 }
 
 function renderCheckList(title, items) {
@@ -3166,6 +3231,19 @@ async function loadSupplierAccounts() {
   renderSupplierAccounts();
 }
 
+async function loadReferenceVault() {
+  if (!referenceVaultList) return;
+  const payload = await api("/api/reference-vault");
+  referenceVaultEntries = payload.entries || [];
+  renderReferenceVault();
+}
+
+async function loadPublicReferenceSources() {
+  if (!publicSourceList) return;
+  publicReferenceSources = await api("/api/public-reference-sources");
+  renderPublicReferenceSources();
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => showView(item.dataset.view));
 });
@@ -3456,6 +3534,85 @@ if (supplierSettingsForm) {
   });
 }
 
+syncPublicSourcesButton?.addEventListener("click", async () => {
+  try {
+    syncPublicSourcesButton.disabled = true;
+    publicSourceStatus.textContent = "Pulling free public web data...";
+    publicReferenceSources = await api("/api/public-reference-sources/sync", { method: "POST" });
+    renderPublicReferenceSources();
+    publicSourceStatus.textContent = "Public source pull complete. These facts now feed the LockForge data layer.";
+  } catch (error) {
+    publicSourceStatus.textContent = error.message;
+  } finally {
+    syncPublicSourcesButton.disabled = false;
+  }
+});
+
+function splitVaultRows(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter(Boolean);
+}
+
+function parseVaultKeyRows(value) {
+  return splitVaultRows(value).map((row) => {
+    const [name, type, fcc, chip, buttons, insert, notes] = row.split("|").map((part) => part.trim());
+    return { name, type, fcc, chip, buttons, insert, notes, confidence: "verify" };
+  });
+}
+
+function parseVaultProgrammerRows(value) {
+  return splitVaultRows(value).map((row) => {
+    const [name, coverage, addKey, allKeysLost, pin, online, notes] = row.split("|").map((part) => part.trim());
+    return { name, coverage, addKey, allKeysLost, pin, online, notes, confidence: "verify" };
+  });
+}
+
+if (referenceVaultForm) {
+  referenceVaultForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(referenceVaultForm);
+    const submitButton = referenceVaultForm.querySelector("button[type='submit']");
+    try {
+      submitButton.disabled = true;
+      referenceVaultStatus.textContent = "Saving original reference entry...";
+      const payload = {
+        title: data.get("title"),
+        summary: data.get("summary"),
+        status: "active",
+        confidence: "medium",
+        vehicle: {
+          startYear: data.get("startYear"),
+          endYear: data.get("endYear"),
+          make: data.get("make"),
+          model: data.get("model"),
+        },
+        keyway: { primary: data.get("keyway") },
+        lishi: { primary: data.get("lishi") },
+        keySystems: data.get("keySystems"),
+        keys: parseVaultKeyRows(data.get("keys")),
+        programmers: parseVaultProgrammerRows(data.get("programmers")),
+        eeprom: data.get("eeprom"),
+        fieldTools: data.get("fieldTools"),
+        warnings: data.get("warnings"),
+      };
+      const result = await api("/api/reference-vault", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      referenceVaultEntries.unshift(result.entry);
+      renderReferenceVault();
+      referenceVaultForm.reset();
+      referenceVaultStatus.textContent = "Reference entry saved. VIN/YMM lookups can now use this original guidance.";
+    } catch (error) {
+      referenceVaultStatus.textContent = error.message;
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+
 aiForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(aiForm);
@@ -3579,11 +3736,15 @@ renderInsights();
 renderKeyRecords();
 renderSources();
 renderSupplierAccounts();
+renderReferenceVault();
+renderPublicReferenceSources();
 loadJobs();
 loadVehicles();
 loadInsights();
 loadKeyIntelligence();
 loadSources();
 loadSupplierAccounts();
+loadReferenceVault();
+loadPublicReferenceSources();
 updateConnectionStatus();
 updateInstallButton();
