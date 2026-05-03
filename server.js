@@ -1980,8 +1980,19 @@ function vehicleFamily(make, model) {
     return "gm";
   }
   if (text.includes("chrysler") || text.includes("dodge") || text.includes("jeep") || text.includes("ram")) return "chrysler";
+  if (text.includes("fiat") || text.includes("alfa romeo") || text.includes("maserati")) return "chrysler";
   if (text.includes("nissan") || text.includes("infiniti")) return "nissan";
   if (text.includes("hyundai") || text.includes("kia") || text.includes("genesis")) return "hyundai";
+  if (text.includes("mazda")) return "mazda";
+  if (text.includes("subaru")) return "subaru";
+  if (text.includes("volkswagen") || text.includes("audi")) return "vw";
+  if (text.includes("bmw") || text.includes("mini")) return "bmw";
+  if (text.includes("mercedes")) return "mercedes";
+  if (text.includes("mitsubishi")) return "mitsubishi";
+  if (text.includes("porsche")) return "porsche";
+  if (text.includes("jaguar") || text.includes("land rover") || text.includes("range rover")) return "jlr";
+  if (text.includes("volvo") || text.includes("polestar")) return "volvo";
+  if (text.includes("tesla")) return "tesla";
   return "general";
 }
 
@@ -3423,6 +3434,15 @@ async function syncPublicReferenceSources() {
       products: autelProducts,
       coverage,
     },
+    aftermarketProgrammers: aftermarketProgrammerCatalog.map((programmer) => ({
+      platform: programmer.platform,
+      name: programmer.name,
+      models: programmer.models,
+      sourceId: programmer.sourceId,
+      sourceUrl: programmer.sourceUrl,
+      detail: programmer.detail,
+      confidencePercent: programmer.confidencePercent,
+    })),
     probes: sourceProbes,
     programmerSources: sourceProbes.filter((probe) => /programmer|OEM/i.test(probe.category)),
     eepromSources: sourceProbes.filter((probe) => /EEPROM/i.test(probe.category)),
@@ -3529,43 +3549,168 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
   };
 }
 
+const aftermarketProgrammerCatalog = [
+  {
+    platform: "Autel MaxiIM",
+    name: "Autel MaxiIM family",
+    models: ["IM508S", "IM608 II", "IM608 Pro II", "IM608S II", "KM100/KM100E"],
+    sourceId: "autel",
+    sourceUrl: "https://autel.us/product-category/key-and-immobilizer-programming/professional-key-and-immobilizer-programming/",
+    detail: "Public Autel IMMO line lists key/immobilizer programming coverage; verify exact year/model/add-key/AKL path in Autel coverage before dispatch.",
+    confidencePercent: 58,
+  },
+  {
+    platform: "XTOOL / AutoProPAD",
+    name: "XTOOL / AutoProPAD family",
+    models: ["X100 PAD series", "AutoProPAD G3", "AutoProPAD G2", "AutoProPAD Core"],
+    sourceId: "xtool-autopropad",
+    sourceUrl: "https://www.autopropad.com/autopropad-g3-series",
+    detail: "US locksmith-focused XTOOL/AutoProPAD family. Verify supported-vehicle coverage and required adapters in AutoProPAD/XTOOL resources.",
+    confidencePercent: 55,
+  },
+  {
+    platform: "Advanced Diagnostics / Ilco",
+    name: "Advanced Diagnostics Smart Pro",
+    models: ["Smart Pro", "Smart Pro Lite"],
+    sourceId: "advanced-diagnostics",
+    sourceUrl: "https://www.ilco.us/products/smart-pro",
+    detail: "Smart Pro/MYKEYS Pro public material lists vehicle key programming coverage for most makes and models worldwide; verify tokens/software path.",
+    confidencePercent: 58,
+  },
+  {
+    platform: "SmartBox",
+    name: "SmartBox Automotive",
+    models: ["SmartBox Gen 3"],
+    sourceId: "smartbox",
+    sourceUrl: "https://smartboxauto.com/faq",
+    detail: "SmartBox public resources describe key/remote programming device workflows and combined PIN/program functions. Verify exact vehicle coverage in SmartBox.",
+    confidencePercent: 52,
+  },
+  {
+    platform: "OBDSTAR",
+    name: "OBDSTAR Key Master / X300",
+    models: ["Key Master DP Plus", "X300 DP Plus"],
+    sourceId: "obdstar",
+    sourceUrl: "https://www.obdstar.com/Products_266.html",
+    detail: "OBDSTAR public product data lists immobilizer, EEPROM, key-renewing, diagnostics, and built-in help/coverage notes. Verify by vehicle on device.",
+    confidencePercent: 52,
+  },
+  {
+    platform: "Xhorse VVDI",
+    name: "Xhorse VVDI family",
+    models: ["VVDI Key Tool Plus", "VVDI2", "Key Tool Max Pro", "VVDI Prog"],
+    sourceId: "xhorse",
+    sourceUrl: "https://www.xhorsevvdi.com/wholesale/xhorse-vvdi-key-tool-plus.html",
+    detail: "Xhorse VVDI tools cover OBD IMMO, remote generation, transponder cloning, and EEPROM/module workflows depending on model and adapter.",
+    confidencePercent: 52,
+  },
+  {
+    platform: "Lonsdor",
+    name: "Lonsdor K518 family",
+    models: ["K518 PRO", "K518 ISE"],
+    sourceId: "lonsdor",
+    sourceUrl: "https://en.lonsdor.com/html",
+    detail: "Lonsdor K518 family is a professional key programming/matching platform. Verify exact vehicle functions and updates inside Lonsdor coverage.",
+    confidencePercent: 52,
+  },
+  {
+    platform: "Launch X-431 IMMO",
+    name: "Launch X-431 IMMO family",
+    models: ["IMMO Plus", "IMMO Elite", "X-PROG3"],
+    sourceId: "launch",
+    sourceUrl: "https://us.launchx431pro.com/products/launch-x431-immo-plus",
+    detail: "Launch IMMO tools combine immobilizer programming/matching, diagnostics, and X-PROG style adapter workflows. Verify exact vehicle coverage.",
+    confidencePercent: 50,
+  },
+  {
+    platform: "TOPDON T-Ninja",
+    name: "TOPDON T-Ninja",
+    models: ["T-Ninja Pro"],
+    sourceId: "topdon",
+    sourceUrl: "https://www.topdon.us/products/t-ninja-pro",
+    detail: "TOPDON public material positions T-Ninja Pro as a locksmith key/immobilizer programming tool for broad vehicle coverage. Verify exact functions.",
+    confidencePercent: 50,
+  },
+  {
+    platform: "Abrites AVDI",
+    name: "Abrites AVDI",
+    models: ["AVDI", "AVDI Plus"],
+    sourceId: "abrites",
+    sourceUrl: "https://www.abritesusa.com/avdi-specs",
+    detail: "Abrites AVDI is a diagnostics/programming interface with brand-specific special functions, PIN reading, and key programming where licensed.",
+    confidencePercent: 48,
+  },
+  {
+    platform: "CGDI / CG",
+    name: "CGDI / CG key tools",
+    models: ["CGDI MB", "CGDI BMW", "CG FC200", "CG Pro 9S12"],
+    sourceId: "cgdi",
+    sourceUrl: "https://www.cgdiprog.com/",
+    detail: "CGDI/CG tools are mostly brand/module-specific BMW, Mercedes, ECU, MCU, and bench/key workflows. Treat as specialist support, not broad OBD coverage.",
+    confidencePercent: 45,
+  },
+  {
+    platform: "Yanhua Mini ACDP",
+    name: "Yanhua Mini ACDP",
+    models: ["Mini ACDP"],
+    sourceId: "yanhua",
+    sourceUrl: "https://www.yanhuaacdp.com/service/yanhua-mini-acdp-key-programmer-user-manual-1.html",
+    detail: "Yanhua Mini ACDP public material focuses on BMW CAS/FEM/BDC, EEPROM, module, and adapter-based workflows. Treat as specialist support.",
+    confidencePercent: 45,
+  },
+  {
+    platform: "TMPro2",
+    name: "TMPro2",
+    models: ["Transponder Maker Pro 2"],
+    sourceId: "tmpro2",
+    sourceUrl: "https://tmpro2.com/",
+    detail: "TMPro2 public material describes transponder key programming/copying, PIN/security code calculation, EEPROM reading, and EEPROM programming.",
+    confidencePercent: 44,
+  },
+  {
+    platform: "Keyline",
+    name: "Keyline cloning tools",
+    models: ["884 Decryptor Mini", "884 Decryptor Ultegra"],
+    sourceId: "keyline",
+    sourceUrl: "https://www.keyline-usa.com/en_US/software-and-keycoin/categories-2/keyline-cloning-tool",
+    detail: "Keyline public resources focus on transponder cloning/pre-coding rather than broad vehicle OBD programming. Use as clone/prep support.",
+    confidencePercent: 40,
+  },
+  {
+    platform: "KeylessRide HotWire",
+    name: "KeylessRide HotWire",
+    models: ["HotWire"],
+    sourceId: "hotwire",
+    sourceUrl: "https://www.locksmithledger.com/keys-tools/article/10229397/keyless-ride-hotwire-pc-based-key-and-remote-programmer",
+    detail: "Legacy PC-based key and remote programming platform seen in US locksmith market. Verify current availability before relying on it.",
+    confidencePercent: 35,
+  },
+];
+
 function publicProgrammerCluesFor(vehicle, publicSources) {
-  const make = cleanString(vehicle.make).toLowerCase();
-  const family = vehicleFamily(vehicle.make, vehicle.model);
   const clues = [];
-  for (const item of publicSources?.autel?.coverage || []) {
-    if ((item.supportedMakes || []).some((supportedMake) => stringsMatch(supportedMake, vehicle.make))) {
-      clues.push({
-        name: item.product,
-        role: "Public coverage clue",
-        detail: `Public Autel coverage lists ${vehicle.make || "this make"}; verify exact model/year IMMO functions before dispatch.`,
-        confidence: "public clue",
-      });
-    }
+  const autelMatches = (publicSources?.autel?.coverage || []).filter((item) =>
+    (item.supportedMakes || []).some((supportedMake) => stringsMatch(supportedMake, vehicle.make)),
+  );
+  if (autelMatches.length) {
+    const autelCatalog = aftermarketProgrammerCatalog.find((item) => item.platform === "Autel MaxiIM");
+    clues.push({
+      ...autelCatalog,
+      models: [...new Set(autelMatches.map((item) => item.product).filter(Boolean))],
+      role: "Aftermarket coverage clue",
+      detail: `Public Autel coverage lists ${vehicle.make || "this make"} across ${autelMatches.length} MaxiIM product${autelMatches.length === 1 ? "" : "s"}. Verify exact model/year IMMO functions before dispatch.`,
+      confidence: "public clue",
+    });
   }
-  const availableProbes = (publicSources?.programmerSources || publicSources?.probes || []).filter((probe) => probe.status === "available");
-  const broadProgrammers = [
-    ["xtool", "XTOOL public coverage", "Public XTOOL source available; verify exact model/year key-programming and IMMO functions."],
-    ["advanced-diagnostics", "Advanced Diagnostics Smart Pro", "Public Smart Pro source available; verify exact coverage in licensed Info Quest/Smart Pro resources."],
-  ];
-  for (const [probeId, name, detail] of broadProgrammers) {
-    if (availableProbes.some((probe) => probe.id.includes(probeId))) {
-      clues.push({ name, role: "Public coverage clue", detail, confidence: "verify" });
-    }
+  for (const item of aftermarketProgrammerCatalog) {
+    if (item.platform === "Autel MaxiIM" && autelMatches.length) continue;
+    clues.push({
+      ...item,
+      role: "Aftermarket platform",
+      confidence: "public clue",
+    });
   }
-  const oemByFamily = {
-    ford: ["Ford Motorcraft Service / FDRS", "OEM path clue", "Use FDRS/IDS/FJDS account-based path when late Ford security/module behavior requires OEM workflow."],
-    toyota: ["Toyota TIS / Techstream", "OEM path clue", "Use TIS/Techstream path when Toyota/Lexus immobilizer, smart reset, or security-professional workflow is required."],
-    gm: ["GM Techline Connect / SPS", "OEM path clue", "Use Techline Connect/SPS path when GM module/security programming requires OEM workflow."],
-    chrysler: ["Stellantis TechAuthority / wiTECH path", "OEM path clue", "Use authorized Stellantis security/programming resources when PIN, module, or SGW workflow requires it."],
-    honda: ["Honda Service Express / i-HDS", "OEM path clue", "Use authorized Honda service/security resources when immobilizer or module programming requires OEM workflow."],
-    nissan: ["Nissan TechInfo / CONSULT path", "OEM path clue", "Use authorized Nissan service/security resources when BCM/prox/security workflow requires OEM verification."],
-  };
-  const oem = oemByFamily[family] || (make.includes("lexus") ? oemByFamily.toyota : null);
-  if (oem) {
-    clues.push({ name: oem[0], role: oem[1], detail: oem[2], confidence: "verify" });
-  }
-  return clues.slice(0, 5);
+  return clues;
 }
 
 function publicEepromToolClues(publicSources) {
@@ -3584,19 +3729,118 @@ function oemProgrammerInfoFor(vehicle) {
   const make = cleanString(vehicle.make).toLowerCase();
   const family = vehicleFamily(vehicle.make, vehicle.model);
   const oemByFamily = {
-    ford: ["Ford Motorcraft Service / FDRS", "Use FDRS/IDS/FJDS account-based path when late Ford security/module behavior requires OEM workflow."],
-    toyota: ["Toyota TIS / Techstream", "Use TIS/Techstream path when Toyota/Lexus immobilizer, smart reset, or security-professional workflow is required."],
-    gm: ["GM Techline Connect / SPS", "Use Techline Connect/SPS path when GM module/security programming requires OEM workflow."],
-    chrysler: ["Stellantis TechAuthority / wiTECH path", "Use authorized Stellantis security/programming resources when PIN, module, or SGW workflow requires it."],
-    honda: ["Honda Service Express / i-HDS", "Use authorized Honda service/security resources when immobilizer or module programming requires OEM workflow."],
-    nissan: ["Nissan TechInfo / CONSULT path", "Use authorized Nissan service-info resources when BCM/prox/security workflow requires OEM verification."],
+    ford: {
+      name: "Ford FDRS",
+      detail: "Use Ford Motorcraft Service/FDRS for late Ford security, module, immobilizer, and OEM fallback workflows.",
+      passThru: "Ford VCM 3 or VCM II preferred; validated J2534 pass-thru such as Mongoose-Plus Ford/Cardaq where supported.",
+      matchTokens: ["FDRS", "IDS", "FJDS", "MOTORCRAFT", "FORD VCM"],
+    },
+    toyota: {
+      name: "Toyota TIS / Techstream",
+      detail: "Use Toyota TIS/Techstream for Toyota/Lexus immobilizer, smart reset, and security-professional workflows.",
+      passThru: "Toyota validated J2534 interface such as Mongoose-Plus Toyota3/MongoosePro MFC3 or OEM-supported Techstream VIM.",
+      matchTokens: ["TECHSTREAM", "TOYOTA TIS", "LEXUS TIS"],
+    },
+    gm: {
+      name: "GM Techline Connect / SPS2",
+      detail: "Use GM Techline Connect/SPS2 when GM module, immobilizer, or security programming requires OEM workflow.",
+      passThru: "GM MDI 2 preferred; certified J2534 pass-thru where Techline Connect supports it.",
+      matchTokens: ["TECHLINE", "SPS", "MDI", "GDS2"],
+    },
+    chrysler: {
+      name: "Stellantis wiTECH 2.0 / TechAuthority",
+      detail: "Use Stellantis TechAuthority/wiTECH when PIN, module, SGW, or OEM security workflow requires it.",
+      passThru: "Mopar Diagnostic Pod Plus/MDP+ preferred for newer coverage; wiTECH-supported J2534 path where allowed.",
+      matchTokens: ["WITECH", "TECHAUTHORITY", "MDP", "MOPAR"],
+    },
+    honda: {
+      name: "Honda i-HDS",
+      detail: "Use Honda Service Express/i-HDS when Honda/Acura immobilizer or module programming requires OEM workflow.",
+      passThru: "Honda DST-i or validated SAE J2534 VCI such as MongoosePro Honda.",
+      matchTokens: ["I-HDS", "IHDS", "HONDA SERVICE EXPRESS", "DST-I"],
+    },
+    nissan: {
+      name: "Nissan CONSULT-III plus",
+      detail: "Use Nissan TechInfo/CONSULT path when BCM, prox, PIN, or security workflow requires OEM verification.",
+      passThru: "CONSULT-III plus VI or Nissan-validated J2534 interface for R2R/J2534 applications.",
+      matchTokens: ["CONSULT", "NISSAN TECHINFO"],
+    },
+    hyundai: {
+      name: "Hyundai/Kia GDS / Techline",
+      detail: "Use Hyundai/Kia OEM service software when immobilizer, smart key, or module security workflow requires OEM access.",
+      passThru: "Hyundai/Kia VCI or validated J2534 pass-thru supported by the OEM application.",
+      matchTokens: ["GDS", "HYUNDAI TECHLINE", "KIA TECHLINE", "VCI"],
+    },
+    mazda: {
+      name: "Mazda MDARS / Mazda Service Info",
+      detail: "Use Mazda MDARS/OEM service-info path when security or module programming needs OEM coverage.",
+      passThru: "Mazda VCM/J2534-compatible interface supported by MDARS for the model year.",
+      matchTokens: ["MDARS", "MAZDA SERVICE", "MAZDA VCM"],
+    },
+    subaru: {
+      name: "Subaru SSM / Techinfo",
+      detail: "Use Subaru Select Monitor/OEM Techinfo when immobilizer, smart key, or module workflow requires OEM coverage.",
+      passThru: "Subaru DST-i or validated J2534 pass-thru supported by Subaru SSM.",
+      matchTokens: ["SSM", "SUBARU SELECT MONITOR", "DST-I"],
+    },
+    vw: {
+      name: "VW/Audi ODIS Service",
+      detail: "Use ODIS Service when immobilizer, component protection, module, or key/security workflow requires OEM access.",
+      passThru: "VAS 6154/6154A or ODIS-supported pass-thru interface.",
+      matchTokens: ["ODIS", "VAS 6154", "VW", "AUDI"],
+    },
+    bmw: {
+      name: "BMW ISTA / AOS",
+      detail: "Use BMW ISTA/AOS when BMW/MINI security, module, or service programming requires OEM workflow.",
+      passThru: "BMW ICOM Next preferred; supported J2534/PassThru only where BMW service application allows it.",
+      matchTokens: ["ISTA", "AOS", "ICOM", "BMW"],
+    },
+    mercedes: {
+      name: "Mercedes-Benz XENTRY",
+      detail: "Use Mercedes-Benz XENTRY for OEM diagnostic, security, DAS/drive authorization, and module programming workflows.",
+      passThru: "Mercedes-Benz VCI/DoIP-capable XENTRY interface; pass-thru only where explicitly supported.",
+      matchTokens: ["XENTRY", "DAS", "MERCEDES VCI"],
+    },
+    mitsubishi: {
+      name: "Mitsubishi MUT-III / OEM service path",
+      detail: "Use Mitsubishi MUT-III/OEM service-info path when immobilizer or module security workflow requires OEM coverage.",
+      passThru: "MUT-III VCI or Mitsubishi-supported J2534 pass-thru for the model year.",
+      matchTokens: ["MUT-III", "MUT3", "MITSUBISHI"],
+    },
+    porsche: {
+      name: "Porsche PIWIS / PPN",
+      detail: "Use Porsche PIWIS/OEM portal when security, immobilizer, or module programming requires OEM workflow.",
+      passThru: "Porsche PIWIS tester/VCI or Porsche-supported pass-thru interface where allowed.",
+      matchTokens: ["PIWIS", "PORSCHE"],
+    },
+    jlr: {
+      name: "Jaguar Land Rover TOPIx Cloud / Pathfinder",
+      detail: "Use JLR TOPIx/Pathfinder where security, smart key, or module workflow requires OEM access.",
+      passThru: "JLR DoIP VCI or JLR-supported pass-thru interface for the model year.",
+      matchTokens: ["TOPIX", "PATHFINDER", "JLR", "DOIP"],
+    },
+    volvo: {
+      name: "Volvo VIDA",
+      detail: "Use Volvo VIDA when immobilizer, key, or module workflow requires OEM software and account access.",
+      passThru: "Volvo DiCE for legacy vehicles or VIDA-supported J2534/DoIP interface for newer coverage.",
+      matchTokens: ["VIDA", "DICE", "VOLVO"],
+    },
+    tesla: {
+      name: "Tesla Toolbox",
+      detail: "Use Tesla Toolbox/service path when vehicle security or module workflow requires OEM diagnostics.",
+      passThru: "Tesla-supported diagnostic cable/interface for the exact platform; confirm service mode and Toolbox requirements.",
+      matchTokens: ["TESLA TOOLBOX", "TOOLBOX"],
+    },
   };
   const match = oemByFamily[family] || (make.includes("lexus") ? oemByFamily.toyota : null);
   return match
-    ? { name: match[0], detail: match[1] }
+    ? { family, ...match }
     : {
         name: "Manufacturer service-info programmer",
         detail: "Use the manufacturer service-info path as the highest-confidence fallback when aftermarket coverage is not proven.",
+        passThru: "Validated J2534 pass-thru or OEM vehicle communication interface listed by the manufacturer for the exact vehicle.",
+        matchTokens: ["OEM", "SERVICE INFO", "J2534"],
+        family,
       };
 }
 
@@ -3616,6 +3860,9 @@ function confidencePercentFromLabel(value, fallback = 55) {
 }
 
 function programmerCoverageKey(item) {
+  if (item.platform) {
+    return cleanString([item.platform, item.confidencePercent || item.confidence || ""].filter(Boolean).join("|")).toUpperCase();
+  }
   return cleanString([item.name, item.role].filter(Boolean).join("|")).toUpperCase();
 }
 
@@ -3626,9 +3873,27 @@ function normalizeProgrammerCoverageItem(item, programmingReference) {
     : confidencePercentFromLabel([item.confidence, item.role, item.detail].filter(Boolean).join(" "), programmingReference ? 70 : 55);
   return {
     ...item,
+    models: Array.isArray(item.models) ? item.models.filter(Boolean) : [],
     confidence: `${confidencePercent}%`,
     confidencePercent,
     oemKeyLikelihood: Number.isFinite(Number(item.oemKeyLikelihood)) ? Number(item.oemKeyLikelihood) : 0,
+  };
+}
+
+function itemMatchesOemProgrammer(item, oem) {
+  const text = cleanString([item.name, item.role, item.detail, item.platform].filter(Boolean).join(" ")).toUpperCase();
+  return (oem.matchTokens || []).some((token) => text.includes(cleanString(token).toUpperCase()));
+}
+
+function mergeProgrammerCoverage(existing, item) {
+  const models = [...new Set([...(existing.models || []), ...(item.models || [])].filter(Boolean))];
+  const better = item.confidencePercent > existing.confidencePercent ? item : existing;
+  return {
+    ...existing,
+    ...better,
+    detail: cleanString(existing.detail).length >= cleanString(item.detail).length ? existing.detail : item.detail,
+    models,
+    sourceUrl: existing.sourceUrl || item.sourceUrl,
   };
 }
 
@@ -3642,15 +3907,16 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
   );
   const coverage = [
     {
-      name: "OEM Programmer",
-      role: oem.name,
-      detail: `${oem.detail} Highest-confidence fallback. If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.`,
+      name: oem.name,
+      role: "OEM programmer",
+      detail: `${oem.detail} Pass-through/interface: ${oem.passThru} If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.`,
+      passThru: oem.passThru,
       confidence: "100%",
       confidencePercent: 100,
       oemKeyLikelihood: 90,
       source: oemRequired ? "OEM likely required" : "OEM fallback",
     },
-    ...(programmerItems || []),
+    ...(programmerItems || []).filter((item) => !itemMatchesOemProgrammer(item, oem)),
   ];
   if (programmingReference?.programMethod && !coverage.some((item) => /OBD|EEPROM|BENCH|OEM/i.test(`${item.name} ${item.role}`))) {
     coverage.push({
@@ -3665,11 +3931,12 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
   coverage.map((item) => normalizeProgrammerCoverageItem(item, programmingReference)).forEach((item) => {
     const key = programmerCoverageKey(item);
     const existing = merged.get(key);
-    if (!existing || item.confidencePercent > existing.confidencePercent) merged.set(key, item);
+    if (!existing) merged.set(key, item);
+    else merged.set(key, mergeProgrammerCoverage(existing, item));
   });
   return Array.from(merged.values())
     .sort((a, b) => b.confidencePercent - a.confidencePercent || cleanString(a.name).localeCompare(cleanString(b.name)))
-    .slice(0, 8);
+    .slice(0, 18);
 }
 
 function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries, publicSources) {

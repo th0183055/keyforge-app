@@ -2024,7 +2024,7 @@ function programmerPercent(item, fallback = 50) {
 }
 
 function programmerOptionKey(item, index) {
-  return String([item.name, item.role, index].filter(Boolean).join("|"))
+  return String([item.platform || item.name, item.role, item.sourceId, item.confidencePercent, index].filter(Boolean).join("|"))
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
@@ -2093,12 +2093,17 @@ function renderProgrammerCoverageScreen(profile) {
                 .map((item) => {
                   const percent = programmerPercent(item);
                   const oemNote = Number(item.oemKeyLikelihood) >= 90 ? `OEM key likely ${item.oemKeyLikelihood}% if this path is required.` : "";
+                  const modelNote = item.models?.length ? `Models: ${item.models.join(", ")}` : "";
+                  const passThruNote =
+                    item.passThru && !String(item.detail || "").includes(item.passThru)
+                      ? `Pass-through/VCI: ${item.passThru}`
+                      : "";
                   return `
                     <button class="programmer-option ${selectedProgrammerKey === item.key ? "active" : ""}" type="button" data-select-programmer="${escapeHtml(item.key)}">
                       <div class="programmer-option-copy">
                         <span>${escapeHtml(item.role || item.source || "Coverage path")}</span>
                         <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
-                        <p>${escapeHtml([item.detail || "Confirm exact vehicle coverage before dispatch.", oemNote].filter(Boolean).join(" "))}</p>
+                        <p>${escapeHtml([modelNote, item.detail || "Confirm exact vehicle coverage before dispatch.", passThruNote, oemNote].filter(Boolean).join(" "))}</p>
                       </div>
                       <div class="programmer-confidence">
                         <strong>${percent}%</strong>
@@ -2216,6 +2221,8 @@ function renderFinalJobSummaryScreen(profile) {
     ["FCC / buttons", [snapshot.group.fccs.join(" / "), snapshot.group.buttons.length ? `${snapshot.group.buttons.join(" / ")} button` : ""].filter(Boolean).join(" | ")],
     ["Chip / frequency", [best.chip, snapshot.group.frequencies.join(" / ")].filter(Boolean).join(" | ")],
     ["Programmer", programmer ? `${programmer.name} (${percent}% confidence)` : "Verify coverage"],
+    ["Programmer models", programmer?.models?.length ? programmer.models.join(" / ") : ""],
+    ["Pass-through / VCI", programmer?.passThru || ""],
     ["OEM key note", programmer && Number(programmer.oemKeyLikelihood) >= 90 ? `Plan OEM key about ${programmer.oemKeyLikelihood}% of the time when this path is required.` : ""],
     ["Keyway", reference.keyway?.primary || "Verify by lock/emergency insert"],
     ["Lishi / decode", reference.lishi?.primary || "Verify keyway before choosing tool"],
