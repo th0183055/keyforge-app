@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js && node --check scripts/analyze-calendar.js && node --check scripts/build-vin-reference.js && node --check scripts/sync-vpic-catalog.js && node --check scripts/sync-public-reference-sources.js && node --check scripts/import-key-innovations-labels.js && node --check scripts/import-programming-data.js",
+    "check": "node --check app.js && node --check server.js && node --check scripts/analyze-calendar.js && node --check scripts/build-vin-reference.js && node --check scripts/sync-vpic-catalog.js && node --check scripts/sync-public-reference-sources.js && node --check scripts/import-key-innovations-labels.js && node --check scripts/import-programming-data.js && node scripts/check-vin-normalization.js",
     "build:vin-reference": "node scripts/build-vin-reference.js",
     "sync:vpic": "node scripts/sync-vpic-catalog.js",
     "sync:public-sources": "node scripts/sync-public-reference-sources.js",

@@ -10,7 +10,7 @@ const outputJsonPath = path.join(dataDir, "vin-reference.json");
 const outputCsvPath = path.join(dataDir, "vin-reference.csv");
 const cachePath = path.join(dataDir, "vin-decode-cache.json");
 
-const vinPattern = /\b[A-HJ-NPR-Z0-9]{17}\b/gi;
+const vinPattern = /[A-HJ-NPR-Z0-9][A-HJ-NPR-Z0-9\s-]{15,35}[A-HJ-NPR-Z0-9]/gi;
 
 function unfoldIcs(text) {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\n[ \t]/g, "");
@@ -52,8 +52,18 @@ function parseIcsDate(value) {
   ).toISOString();
 }
 
+function validateVin(vin) {
+  return /^[A-HJ-NPR-Z0-9]{17}$/i.test(vin);
+}
+
+function normalizeVinCandidate(value) {
+  const candidate = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return validateVin(candidate) ? candidate : "";
+}
+
 function addVin(map, vin, source) {
-  const normalized = vin.toUpperCase();
+  const normalized = normalizeVinCandidate(vin);
+  if (!normalized) return;
   if (!map.has(normalized)) {
     map.set(normalized, {
       vin: normalized,

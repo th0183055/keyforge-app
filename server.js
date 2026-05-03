@@ -3931,7 +3931,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname.startsWith("/api/vin-reference/")) {
-    const vin = decodeURIComponent(pathname.replace("/api/vin-reference/", "")).trim().toUpperCase();
+    const vin = normalizeVinCandidate(decodeURIComponent(pathname.replace("/api/vin-reference/", "")));
     try {
       const reference = JSON.parse(await readFile(vinReferencePath, "utf8"));
       const row = reference.rows.find((item) => item.vin === vin);
@@ -4144,7 +4144,7 @@ async function handleApi(request, response, pathname) {
   }
 
   if (request.method === "GET" && pathname.startsWith("/api/vin/")) {
-    const vin = decodeURIComponent(pathname.replace("/api/vin/", "")).trim().toUpperCase();
+    const vin = normalizeVinCandidate(decodeURIComponent(pathname.replace("/api/vin/", "")));
     if (!validateVin(vin)) {
       sendError(response, 400, "Enter a valid 17-character VIN. Letters I, O, and Q are not used.");
       return;
@@ -4238,7 +4238,7 @@ async function handleApi(request, response, pathname) {
       plantCountry: cleanString(url.searchParams.get("plantCountry")),
       identitySource: cleanString(url.searchParams.get("identitySource")) || "Vehicle profile supplier lookup",
     };
-    const vin = cleanString(url.searchParams.get("vin")).toUpperCase();
+    const vin = normalizeVinCandidate(url.searchParams.get("vin"));
 
     if (!/^(19|20)\d{2}$/.test(vehicle.year) || !vehicle.make || !vehicle.model) {
       sendError(response, 400, "Supplier lookup needs year, make, and model.");
