@@ -1,6 +1,8 @@
 const spacedVin = "1V2 WR2CA9 RC560139";
 const dashedVin = "1V2-WR2CA9-RC560139";
 const cleanVin = "1V2WR2CA9RC560139";
+const mitsubishiSpacedVin = "JA4 ATWAA6 SZ024012";
+const mitsubishiCleanVin = "JA4ATWAA6SZ024012";
 const vinPattern = /[A-HJ-NPR-Z0-9][A-HJ-NPR-Z0-9\s-]{15,35}[A-HJ-NPR-Z0-9]/gi;
 
 function validateVin(vin) {
@@ -17,6 +19,10 @@ for (const input of [spacedVin, dashedVin, cleanVin, " 1v2 wr2ca9 rc560139 "]) {
   if (normalized !== cleanVin) {
     throw new Error(`Expected ${input} to normalize to ${cleanVin}, got ${normalized}`);
   }
+}
+
+if (normalizeVinCandidate(mitsubishiSpacedVin) !== mitsubishiCleanVin) {
+  throw new Error(`Expected ${mitsubishiSpacedVin} to normalize to ${mitsubishiCleanVin}`);
 }
 
 for (const input of ["1V2 WR2CA9 RC56013", "1V2 WR2CAO RC560139", "1V2 WR2CAQ RC560139"]) {

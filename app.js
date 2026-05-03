@@ -3265,7 +3265,7 @@ function ensureVinScannerModal() {
       <div class="scanner-frame" aria-hidden="true"></div>
       <p class="scanner-status">Point the camera at the VIN barcode. Manual entry still works below.</p>
       <div class="scanner-manual">
-        <input name="manualVinScan" maxlength="17" autocomplete="off" placeholder="Enter VIN manually" />
+        <input name="manualVinScan" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Enter VIN manually" />
         <button class="primary-action small" type="button" data-use-scanned-vin>Use VIN</button>
       </div>
     </div>
