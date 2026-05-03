@@ -754,6 +754,7 @@ function stepLabel(step) {
     "vehicle-details": "Details",
     package: "Key type",
     parts: "Pictures",
+    lishi: "Lishi",
     programmers: "Programmers",
     summary: "Summary",
     suppliers: "Summary",
@@ -1945,7 +1946,6 @@ function renderPartChoiceCard(group) {
       <div class="part-choice-copy">
         <span>${escapeHtml(typeLabel)}</span>
         <strong>${escapeHtml(buttonLabel || "Button layout verify")}</strong>
-        <small>${escapeHtml("Select if the picture/buttons match")}</small>
       </div>
       <div class="part-choice-footer">
         <span>${escapeHtml(typeLabel)}</span>
@@ -2081,7 +2081,7 @@ function renderProgrammerCoverageScreen(profile) {
   return `
     <section class="program-screen programmer-step">
       <div class="workflow-heading">
-        <p class="eyebrow">Screen 5</p>
+        <p class="eyebrow">Screen 6</p>
         <h3>Confirm programmer coverage</h3>
         <p>Pick the programmer path you plan to trust for this job. The final screen will summarize the selected key, programmer, and field tools.</p>
       </div>
@@ -2112,7 +2112,80 @@ function renderProgrammerCoverageScreen(profile) {
             : `<article class="assistant-card"><strong>No programmer coverage yet</strong><p>Add a programmer record or use OEM as the fallback path before quoting.</p></article>`
         }
       </div>
-      ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`])}
+      ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="lishi">Back</button>`])}
+    </section>
+  `;
+}
+
+function renderLishiDecodeScreen(profile) {
+  const snapshot = selectedPartSnapshot(profile);
+  if (!snapshot) {
+    return `
+      <section class="program-screen lishi-step">
+        <div class="workflow-heading">
+          <p class="eyebrow">Screen 5</p>
+          <h3>Select a key picture first</h3>
+          <p>Go back one screen and choose the picture/button layout before checking decode tools.</p>
+        </div>
+        ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`])}
+      </section>
+    `;
+  }
+  const reference = profile.vehicleReference || {};
+  const codeSources = [
+    "NASTF SDRM / Vehicle Security Professional account for OEM security access where supported",
+    "OEM service-information portals tied to the vehicle make and authorized locksmith credentials",
+    "Authorized key-code or PIN-code provider after customer ownership and locksmith authorization are documented",
+    "Dealer/OEM parts or service channel when the manufacturer requires direct authorization",
+  ];
+  const rows = [
+    ["Keyway", reference.keyway?.primary || "Confirm from lock or emergency insert"],
+    ["Lishi / decoder", reference.lishi?.primary || "Choose only after keyway confirmation"],
+    ["Alternates", (reference.lishi?.alternates || reference.keyway?.alternates || []).join(" | ")],
+    ["Decode plan", (reference.decodePlan || []).slice(0, 3).join(" | ")],
+    ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
+  ].filter(([, value]) => value);
+  const checklist = [
+    "Confirm ownership/authorization before requesting any key code or PIN",
+    "Confirm keyway from the lock, door cylinder, or emergency insert before choosing a Lishi",
+    "VIN may identify the vehicle but does not prove the mechanical keyway on its own",
+    ...(reference.access || []).slice(0, 2),
+  ];
+  return `
+    <section class="program-screen lishi-step">
+      <div class="workflow-heading">
+        <p class="eyebrow">Screen 5</p>
+        <h3>Decode lock and code source</h3>
+        <p>Confirm the mechanical path before programming. Use authorized code/PIN sources only with valid credentials and documented customer authorization.</p>
+      </div>
+      ${renderSelectedKeyMini(snapshot)}
+      <section class="lishi-reference-grid">
+        ${rows
+          .map(
+            ([label, value]) => `
+              <article>
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+              </article>
+            `,
+          )
+          .join("")}
+      </section>
+      <section class="code-source-panel">
+        <div>
+          <span>Code / PIN sources</span>
+          <strong>Use NASTF/OEM-authorized paths</strong>
+        </div>
+        <ul>${codeSources.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+      <section class="reference-checklist">
+        <span>Before decode/code request</span>
+        <ul>${[...new Set(checklist)].slice(0, 7).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+      ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
+        `<button class="primary-action" type="button" data-continue-programmers>Programmer coverage</button>`,
+      ])}
     </section>
   `;
 }
@@ -2706,8 +2779,34 @@ function renderSelectedPartsStep(lookup) {
   `;
 }
 
+function renderVitalVehicleFacts(profile) {
+  const vehicle = profile.vehicle || {};
+  const facts = [
+    ["Year / Make / Model", [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")],
+    ["Trim / Series", [vehicle.trim, vehicle.series].filter(Boolean).join(" / ")],
+    ["Body", [vehicle.bodyClass, vehicle.vehicleType].filter(Boolean).join(" / ")],
+    ["Engine", [vehicle.engine, vehicle.engineModel, vehicle.engineCylinders ? `${vehicle.engineCylinders} cyl` : ""].filter(Boolean).join(" / ")],
+    ["Drive / Weight", [vehicle.driveType, vehicle.gvwr].filter(Boolean).join(" / ")],
+    ["Build plant", [vehicle.plantCity, vehicle.plantCountry].filter(Boolean).join(", ")],
+  ].filter(([, value]) => value);
+  return `
+    <section class="vital-vehicle-grid">
+      ${facts
+        .map(
+          ([label, value]) => `
+            <article>
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
 function renderVehicleApprovalScreen(profile, context) {
-  const { vehicle, title, sourceBadge } = context;
+  const { vehicle, title } = context;
   const identifier = profile.vin || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
   const identityStatus = profile.vin
     ? profile.vinDetails?.checkDigitValid
@@ -2722,10 +2821,10 @@ function renderVehicleApprovalScreen(profile, context) {
         <div class="vin-strip">
           <span>${escapeHtml(identifier)}</span>
           <span>${escapeHtml(identityStatus)}</span>
-          <span>${escapeHtml(sourceBadge)}</span>
+          <span>${escapeHtml(vehicle.identitySource || "VIN decode")}</span>
         </div>
       </div>
-      ${renderJobKitSummary(profile.jobKit)}
+      ${renderVitalVehicleFacts(profile)}
       ${renderWorkflowActions([
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
         `<button class="secondary-action" type="button" data-view-vehicle-details>View details</button>`,
@@ -2743,7 +2842,6 @@ function renderVehicleDetailsScreen(profile, context) {
         <p class="eyebrow">Vehicle details</p>
         <h3>${escapeHtml(title || "Vehicle details")}</h3>
       </div>
-      ${renderJobKitDetail(profile.jobKit)}
       ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
@@ -2805,16 +2903,12 @@ function renderKeyFamilyScreen(profile) {
 }
 
 function renderKeyPackageScreen(profile) {
-  const vehicle = profile.vehicle || {};
-  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
-  const packageOption = selectedPackageOption();
   return `
     <section class="program-screen key-package-step">
       <div class="workflow-heading">
         <p class="eyebrow">Screen 3</p>
         <h3>Choose ignition type</h3>
       </div>
-      ${renderJobKitSummary(profile.jobKit)}
       <div class="key-package-grid">
         ${keyPackageOptions
           .map(
@@ -2826,11 +2920,6 @@ function renderKeyPackageScreen(profile) {
           )
           .join("")}
       </div>
-      ${renderFieldReferencePreview(profile.vehicleReference)}
-      <details class="reference-drawer">
-        <summary>Vehicle reference</summary>
-        ${renderVehicleReferenceCard(profile.vehicleReference)}
-      </details>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
       ])}
@@ -3003,6 +3092,8 @@ function renderVinProfile(profile) {
     screenMarkup = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
     screenMarkup = renderKeyChoicesScreen(profile);
+  } else if (vinWorkflowStep === "lishi") {
+    screenMarkup = renderLishiDecodeScreen(profile);
   } else if (vinWorkflowStep === "programmers") {
     screenMarkup = renderProgrammerCoverageScreen(profile);
   } else if (vinWorkflowStep === "summary") {
@@ -3018,9 +3109,9 @@ function renderVinProfile(profile) {
 
   vinRecommendation.innerHTML = `
     <strong>Reference mode</strong>
-    <p>${escapeHtml("Decode the vehicle, choose the visible key style, then use the final screen as a field reference for identifiers, keyway, tools, and programming checks.")}</p>
+    <p>${escapeHtml("Decode the vehicle, choose the visible key style, confirm Lishi/code path, then choose programmer coverage before the final rundown.")}</p>
     <div class="tag-row">
-      <span>Vehicle</span><span>Keyway</span><span>Buttons</span><span>FCC</span><span>Programming</span>
+      <span>Vehicle</span><span>Buttons</span><span>Lishi</span><span>Codes</span><span>Programming</span>
     </div>
   `;
   return;
@@ -3581,6 +3672,13 @@ document.addEventListener("click", (event) => {
   if (partChoiceButton && latestVinProfile) {
     selectedPartChoiceKey = partChoiceButton.dataset.selectPartChoice;
     selectedProgrammerKey = "";
+    vinWorkflowStep = "lishi";
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const continueProgrammersButton = event.target.closest("[data-continue-programmers]");
+  if (continueProgrammersButton && latestVinProfile) {
     vinWorkflowStep = "programmers";
     renderVinProfile(latestVinProfile);
     return;

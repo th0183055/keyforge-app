@@ -1260,6 +1260,38 @@ textarea {
   line-height: 1;
 }
 
+.vital-vehicle-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vital-vehicle-grid article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.vital-vehicle-grid span {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.vital-vehicle-grid strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+}
+
 .vin-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1973,6 +2005,7 @@ textarea {
   line-height: 1.38;
 }
 
+.lishi-step,
 .programmer-step,
 .final-rundown-step {
   display: grid;
@@ -2117,6 +2150,45 @@ textarea {
   padding-left: 18px;
   color: var(--muted);
   line-height: 1.38;
+}
+
+.lishi-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lishi-reference-grid article,
+.code-source-panel {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.lishi-reference-grid span,
+.code-source-panel span {
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.lishi-reference-grid strong,
+.code-source-panel strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.code-source-panel ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .supplier-options-drawer,
@@ -3513,7 +3585,9 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .vital-vehicle-grid,
   .programmer-option,
+  .lishi-reference-grid,
   .job-rundown-grid,
   .job-rundown-lists {
     grid-template-columns: 1fr;
