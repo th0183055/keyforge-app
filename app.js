@@ -424,11 +424,17 @@ function renderPublicReferenceSources() {
   const sources = publicReferenceSources?.sources || [];
   const autel = publicReferenceSources?.autel || {};
   const nhtsa = publicReferenceSources?.nhtsa || {};
+  const probes = publicReferenceSources?.probes || [];
   const rows = [
     ...sources.map((source) => ({
       title: source.name,
       body: source.use,
       meta: source.type,
+    })),
+    ...probes.map((probe) => ({
+      title: probe.name,
+      body: probe.status === "available" ? `${probe.use} Signals: ${(probe.signals || []).join(", ") || "public page reachable"}` : `${probe.use} Probe status: ${probe.status}`,
+      meta: `${probe.category || "source"} | ${probe.httpStatus || probe.error || "checked"}`,
     })),
     {
       title: "Autel IMMO products found",

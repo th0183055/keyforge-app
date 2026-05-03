@@ -3300,9 +3300,54 @@ function sanitizeReferenceVaultEntry(input) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, {
+    headers: { "user-agent": "LockForge public source indexer", ...(options.headers || {}) },
+    signal: options.signal || AbortSignal.timeout(20000),
+    ...options,
+  });
   if (!response.ok) throw new Error(`${url} returned ${response.status}`);
   return response.json();
+}
+
+const publicReferenceTargets = [
+  ["xtool-vehicle-coverage", "XTOOL public vehicle coverage", "programmer coverage", "https://www.xtoolonline.com/support/vehicle-coverage", "XTOOL make/model coverage clue for diagnosis, key programming, special functions, and IMMO where publicly accessible."],
+  ["xtool-key-programming-manual", "XTOOL key programming manual", "programmer / EEPROM tool", "https://www.xtooltech.com/official/product_document/1661416059950.pdf", "Public manual availability clue for XTOOL key programming workflow and EEPROM/IMMO tool capability."],
+  ["advanced-diagnostics-smart-pro", "Advanced Diagnostics Smart Pro", "programmer coverage", "https://www.hickleys.com/diagnostics/smartpro.php", "Public Smart Pro / Info Quest capability clue. Verify exact vehicle coverage inside licensed AD resources before dispatch."],
+  ["toyota-tis-techstream", "Toyota TIS / Techstream", "OEM programmer", "https://techinfo.toyota.com/", "Official Toyota service-info clue for Techstream, key code, immobilizer/smart reset, and security-professional workflow."],
+  ["gm-techline-connect", "GM Techline Connect / SPS", "OEM programmer", "https://www.gmparts.com/trade-professionals/diagnostic-support-resources", "Official GM clue for Techline Connect, SPS, calibrations, GDS software, and scan-tool update workflow."],
+  ["ford-motorcraft-service", "Ford Motorcraft Service / FDRS", "OEM programmer", "https://www.motorcraft-service.com/contact/index.html", "Official Ford service-info clue for IDS/FJDS/FDRS diagnostic support and account-based service access."],
+  ["honda-techinfo", "Honda Service Express / i-HDS", "OEM programmer", "https://techinfo.honda.com/", "Official Honda service-info entry point. Verify immobilizer and module workflows through authorized service resources."],
+  ["nissan-techinfo", "Nissan TechInfo", "OEM programmer", "https://www.nissan-techinfo.com/", "Official Nissan service-info entry point. Verify CONSULT/security workflows through authorized resources."],
+  ["stellantis-techauthority", "Stellantis TechAuthority", "OEM programmer", "https://www.techauthority.com/", "Official Stellantis service-info entry point for Chrysler/Dodge/Jeep/Ram security and programming references."],
+  ["autel-xp400-pro", "Autel XP400 Pro", "EEPROM tool", "https://autel.com/au/immo/xp400-pro/", "Public EEPROM/MCU/IMMO ECU read-write tool capability clue for Autel IM508/IM608 workflows."],
+  ["xhorse-key-tool-plus-manual", "Xhorse Key Tool Plus manual", "EEPROM tool", "https://www.xhorsetool.com/upload/pro/22120916705811783595.pdf", "Public manual availability clue for Xhorse OBD IMMO, EEPROM read/write, and immo data tooling."],
+  ["obdstar-x300-dp-plus", "OBDSTAR X300 DP Plus", "EEPROM tool", "https://www.obdstarstore.com/wholesale/obdstar-x300-dp-plus-full-configuration.html", "Public IMMO/EEPROM/key-renewing adapter capability clue. Verify vehicle-specific coverage before quoting."],
+].map(([id, name, category, url, use]) => ({ id, name, category, url, use }));
+
+async function probePublicReferenceTarget(target) {
+  try {
+    const response = await fetch(target.url, {
+      headers: { "user-agent": "LockForge public source indexer" },
+      signal: AbortSignal.timeout(18000),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    let text = "";
+    if (response.ok && /text|html|json/i.test(contentType)) {
+      text = (await response.text()).replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ");
+    }
+    const haystack = response.ok ? `${target.name} ${target.use} ${text}`.toLowerCase() : "";
+    const keywords = ["key programming", "immo", "immobilizer", "all keys lost", "add key", "read password", "pin", "remote learning", "eeprom", "mcu", "ecu", "fdrs", "techstream", "techline", "sps", "smart pro", "info quest", "xhorse", "x100"];
+    return {
+      ...target,
+      status: response.ok ? "available" : "unavailable",
+      httpStatus: response.status,
+      contentType,
+      signals: response.ok ? keywords.filter((keyword) => haystack.includes(keyword)).slice(0, 12) : [],
+      publicTextIndexed: Boolean(text),
+    };
+  } catch (error) {
+    return { ...target, status: "probe failed", error: error.message, signals: [], publicTextIndexed: false };
+  }
 }
 
 async function syncPublicReferenceSources() {
@@ -3319,6 +3364,10 @@ async function syncPublicReferenceSources() {
     coverage.push({ product: product.name, supportedMakes: makes, supportedMakeCount: makes.length });
   }
   const nhtsaVariables = await fetchJson("https://vpic.nhtsa.dot.gov/api/vehicles/GetVehicleVariableList?format=json").catch(() => ({ Results: [] }));
+  const sourceProbes = [];
+  for (const target of publicReferenceTargets) {
+    sourceProbes.push(await probePublicReferenceTarget(target));
+  }
   const payload = {
     sources: [
       {
@@ -3332,6 +3381,30 @@ async function syncPublicReferenceSources() {
         name: "Autel public vehicle coverage",
         type: "public programmer coverage clue",
         use: "Programmer availability clues by product/make/model/year where the public endpoint returns data",
+      },
+      {
+        id: "xtool-public",
+        name: "XTOOL public sources",
+        type: "public programmer coverage clue",
+        use: "Public XTOOL pages/manuals for key programming, IMMO, and EEPROM capability clues",
+      },
+      {
+        id: "advanced-diagnostics-public",
+        name: "Advanced Diagnostics public sources",
+        type: "public programmer coverage clue",
+        use: "Public Smart Pro / Info Quest capability clues; exact coverage still must be verified in licensed resources",
+      },
+      {
+        id: "oem-programmer-sources",
+        name: "OEM programmer sources",
+        type: "official service-info clue",
+        use: "Official Ford/Toyota/GM/Honda/Nissan/Stellantis entry points for OEM/security programming paths",
+      },
+      {
+        id: "eeprom-tool-sources",
+        name: "EEPROM tool sources",
+        type: "public tool capability clue",
+        use: "Public tool pages/manuals for EEPROM/MCU/IMMO ECU read-write capability",
       },
       {
         id: "fcc-equipment",
@@ -3350,6 +3423,9 @@ async function syncPublicReferenceSources() {
       products: autelProducts,
       coverage,
     },
+    probes: sourceProbes,
+    programmerSources: sourceProbes.filter((probe) => /programmer|OEM/i.test(probe.category)),
+    eepromSources: sourceProbes.filter((probe) => /EEPROM/i.test(probe.category)),
     nhtsa: {
       vehicleVariableCount: nhtsaVariables.Results?.length || 0,
       usefulVariables: (nhtsaVariables.Results || [])
@@ -3453,7 +3529,58 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
   };
 }
 
-function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries) {
+function publicProgrammerCluesFor(vehicle, publicSources) {
+  const make = cleanString(vehicle.make).toLowerCase();
+  const family = vehicleFamily(vehicle.make, vehicle.model);
+  const clues = [];
+  for (const item of publicSources?.autel?.coverage || []) {
+    if ((item.supportedMakes || []).some((supportedMake) => stringsMatch(supportedMake, vehicle.make))) {
+      clues.push({
+        name: item.product,
+        role: "Public coverage clue",
+        detail: `Public Autel coverage lists ${vehicle.make || "this make"}; verify exact model/year IMMO functions before dispatch.`,
+        confidence: "public clue",
+      });
+    }
+  }
+  const availableProbes = (publicSources?.programmerSources || publicSources?.probes || []).filter((probe) => probe.status === "available");
+  const broadProgrammers = [
+    ["xtool", "XTOOL public coverage", "Public XTOOL source available; verify exact model/year key-programming and IMMO functions."],
+    ["advanced-diagnostics", "Advanced Diagnostics Smart Pro", "Public Smart Pro source available; verify exact coverage in licensed Info Quest/Smart Pro resources."],
+  ];
+  for (const [probeId, name, detail] of broadProgrammers) {
+    if (availableProbes.some((probe) => probe.id.includes(probeId))) {
+      clues.push({ name, role: "Public coverage clue", detail, confidence: "verify" });
+    }
+  }
+  const oemByFamily = {
+    ford: ["Ford Motorcraft Service / FDRS", "OEM path clue", "Use FDRS/IDS/FJDS account-based path when late Ford security/module behavior requires OEM workflow."],
+    toyota: ["Toyota TIS / Techstream", "OEM path clue", "Use TIS/Techstream path when Toyota/Lexus immobilizer, smart reset, or security-professional workflow is required."],
+    gm: ["GM Techline Connect / SPS", "OEM path clue", "Use Techline Connect/SPS path when GM module/security programming requires OEM workflow."],
+    chrysler: ["Stellantis TechAuthority / wiTECH path", "OEM path clue", "Use authorized Stellantis security/programming resources when PIN, module, or SGW workflow requires it."],
+    honda: ["Honda Service Express / i-HDS", "OEM path clue", "Use authorized Honda service/security resources when immobilizer or module programming requires OEM workflow."],
+    nissan: ["Nissan TechInfo / CONSULT path", "OEM path clue", "Use authorized Nissan service/security resources when BCM/prox/security workflow requires OEM verification."],
+  };
+  const oem = oemByFamily[family] || (make.includes("lexus") ? oemByFamily.toyota : null);
+  if (oem) {
+    clues.push({ name: oem[0], role: oem[1], detail: oem[2], confidence: "verify" });
+  }
+  return clues.slice(0, 5);
+}
+
+function publicEepromToolClues(publicSources) {
+  return (publicSources?.eepromSources || [])
+    .filter((source) => source.status === "available")
+    .map((source) => ({
+      name: source.name,
+      role: "EEPROM / bench clue",
+      detail: `${source.use} Treat as advanced fallback after OBD/OEM path is verified unsuitable.`,
+      confidence: "verify",
+    }))
+    .slice(0, 4);
+}
+
+function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries, publicSources) {
   const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
   const vaultKeyItems = (referenceVaultEntries || [])
     .flatMap((entry) => entry.keys || [])
@@ -3489,7 +3616,8 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
       ),
       confidence: cleanString(programmer.confidence || "vault"),
     }));
-  const programmerItems = [...vaultProgrammerItems, ...(selected.programmers || [])
+  const publicProgrammerItems = publicProgrammerCluesFor(vehicle, publicSources);
+  const programmerItems = [...vaultProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
     .map((item) => ({
       name: cleanString(item.name || "Coverage-verified programmer"),
       role: cleanString(item.type || "Programming path"),
@@ -3516,6 +3644,7 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
       detail: "Bring or verify before dispatch.",
       confidence: "workflow",
     })),
+    ...publicEepromToolClues(publicSources),
   ].slice(0, 7);
   const securityFlags = [
     programmingReference?.requiresPin ? "PIN/passcode may be required" : "",
@@ -3659,6 +3788,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const referenceVaultEntries = await findReferenceVaultEntries(vehicle);
+  const publicSources = await readPublicReferenceSources();
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
   const liveSupplierLookup = options.skipSupplierLookup
     ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
@@ -3707,7 +3837,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
       sourceCount: entry.sources?.length || 0,
     })),
     vehicleReference,
-    jobKit: buildJobKit(vehicle, selected, record, programmingReference, vehicleReference, referenceVaultEntries),
+    jobKit: buildJobKit(vehicle, selected, record, programmingReference, vehicleReference, referenceVaultEntries, publicSources),
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,
