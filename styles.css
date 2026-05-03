@@ -2159,6 +2159,8 @@ textarea {
 }
 
 .lishi-reference-grid article,
+.lishi-candidate-list,
+.lishi-candidate-list article,
 .code-source-panel {
   min-width: 0;
   padding: 12px;
@@ -2168,6 +2170,7 @@ textarea {
 }
 
 .lishi-reference-grid span,
+.lishi-candidate-list span,
 .code-source-panel span {
   color: var(--accent-dark);
   font-size: 0.72rem;
@@ -2176,12 +2179,35 @@ textarea {
 }
 
 .lishi-reference-grid strong,
+.lishi-candidate-list strong,
 .code-source-panel strong {
   display: block;
   margin-top: 5px;
   color: var(--ink);
   line-height: 1.18;
   overflow-wrap: anywhere;
+}
+
+.lishi-candidate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.lishi-candidate-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.lishi-candidate-list article {
+  background: #fffdfa;
+}
+
+.lishi-candidate-list p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .code-source-panel ul {

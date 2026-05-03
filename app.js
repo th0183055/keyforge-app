@@ -658,9 +658,48 @@ function partTypeBucket(product) {
 function buttonLayoutBucket(product) {
   const buttons = product.keyInfo?.buttons || buttonCountFromText(product.name);
   if (!buttons) return "Button layout unknown";
-  if (/remote start/i.test(buttons)) return "Remote start";
+  const hasRemoteStart = /remote start|r\/s|rs\b/i.test(buttons);
   const count = String(buttons).match(/\b([2-7])\b/);
-  return count ? `${count[1]} button` : String(buttons);
+  if (count) return `${count[1]} button${hasRemoteStart ? " + remote start" : ""}`;
+  if (hasRemoteStart) return "Remote start";
+  return String(buttons);
+}
+
+function productSearchText(product) {
+  return [
+    product.name,
+    product.brand,
+    product.keyInfo?.productType,
+    product.keyInfo?.sku,
+    product.keyInfo?.oem,
+    product.keyInfo?.fcc,
+    product.keyInfo?.chip,
+    product.keyInfo?.buttons,
+    product.keyInfo?.fitment,
+    product.description,
+    ...(product.fitmentLines || []),
+    ...Object.values(product.customFields || {}).slice(0, 80),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isNonKeyReferenceProduct(product) {
+  const text = productSearchText(product).toLowerCase();
+  return /\b(pinning|pinning kit|pin kit|ignition|lock cylinder|cylinder|spring|clip|retainer|roll pin|battery|button pad|pad|case|shell|cover|repair|refill|adapter|programmer|machine|tool|lishi|pick|decoder|2-in-1|2 in 1|reader|tester)\b/.test(text);
+}
+
+function isStandaloneChipProduct(product) {
+  const text = productSearchText(product).toLowerCase();
+  return /\b(chip|transponder chip|clone chip|id4\d|id6\d|pcf)\b/.test(text) && !/\b(key|remote|fob|prox|proximity|smart|flip|head)\b/.test(text);
+}
+
+function isDisplayKeyProduct(product) {
+  if (!product) return false;
+  const text = productSearchText(product).toLowerCase();
+  if (isNonKeyReferenceProduct(product) || isStandaloneChipProduct(product)) return false;
+  if (/\b(insert|emergency blade|blade only|key blade|mechanical blade|blank blade)\b/.test(text)) return false;
+  return /\b(key|remote|fob|prox|proximity|smart|flip|transponder|remote head|rhk|peps|push)\b/.test(text);
 }
 
 function liveFilterValue(product, group) {
@@ -704,14 +743,14 @@ function productPassesLiveFilters(product) {
 
 function productKeyFamily(product) {
   const serverFamily = product.selection?.family || product.keyInfo?.selectionFamily || "";
-  if (serverFamily === "proximity") return "proximity";
-  if (["remote-head", "transponder"].includes(serverFamily)) return "keyed";
-  if (["insert", "tool", "supporting"].includes(serverFamily)) return "supporting";
-
   const text = [product.name, product.keyInfo?.productType, product.keyInfo?.buttons, product.keyInfo?.chip]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+  if (serverFamily === "proximity") return "proximity";
+  if (["remote-head", "transponder"].includes(serverFamily)) return "keyed";
+  if (["tool", "supporting"].includes(serverFamily)) return "supporting";
+  if (serverFamily === "insert" && !/prox|smart|peps|proximity|remote|fob|flip|switchblade|transponder/.test(text)) return "supporting";
   if (text.includes("prox") || text.includes("smart") || text.includes("peps") || text.includes("proximity")) return "proximity";
   if (text.includes("flip") || text.includes("remote head") || text.includes("switchblade") || text.includes("transponder") || text.includes("chip")) return "keyed";
   if (text.includes("tool") || text.includes("lishi") || text.includes("decoder") || text.includes("insert") || text.includes("blade")) return "supporting";
@@ -725,7 +764,7 @@ function keyFamilyLabel(family) {
 }
 
 function productsForFamily(products, family) {
-  return products.filter((product) => productKeyFamily(product) === family);
+  return products.filter((product) => productKeyFamily(product) === family && (family === "supporting" || isDisplayKeyProduct(product)));
 }
 
 function familyCounts(products) {
@@ -745,7 +784,11 @@ function ensureSelectedKeyFamily(products) {
 }
 
 function renderWorkflowActions(actions) {
-  return `<div class="workflow-actions">${actions.join("")}</div>`;
+  const hasHome = actions.some((action) => /data-vin-home|data-vin-reset/.test(action) && />\s*Home\s*</i.test(action));
+  const withHome = hasHome
+    ? actions
+    : [...actions, `<button class="secondary-action" type="button" data-vin-home>Home</button>`];
+  return `<div class="workflow-actions">${withHome.join("")}</div>`;
 }
 
 function stepLabel(step) {
@@ -1129,6 +1172,8 @@ function resetVinWorkflow() {
   selectedPartChoiceKey = "";
   selectedProgrammerKey = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
+  vinForm.reset();
+  ymmForm?.reset();
   vinForm.classList.remove("is-hidden");
   ymmForm?.classList.remove("is-hidden");
   vinResult.innerHTML = "";
@@ -1420,6 +1465,7 @@ function buildExactPartGroup(key, offers, options = {}) {
   group.fccs = [...new Set(group.offers.map((offer) => offer.fcc).filter(Boolean))];
   group.frequencies = [...new Set(group.offers.map((offer) => offer.frequency).filter(Boolean))];
   group.buttons = [...new Set(group.offers.map((offer) => offer.buttons).filter(Boolean))];
+  group.buttonLayouts = [...new Set(group.offers.map((offer) => buttonLayoutBucket(offer.rawProduct)).filter(Boolean))];
   group.lowestPrice = group.offers
     .filter((offer) => offer.priceValue)
     .sort((a, b) => a.priceValue - b.priceValue)[0];
@@ -1455,22 +1501,32 @@ function exactPartGroups(offers) {
 }
 
 function visualPartChoiceKey(group) {
-  const label = exactPartLabel(group);
-  const normalizedLabel = String(label || "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "");
-  if (normalizedLabel && normalizedLabel.length >= 4) return `part:${normalizedLabel}`;
   const best = group.bestOffer || group.offers[0];
-  const fallback = partNumberTokens([best.oem, best.sku, best.partName, best.fcc].filter(Boolean).join(" "))[0];
-  return fallback ? `part:${fallback}` : group.key;
+  const family = productKeyFamily(best.rawProduct);
+  const type = partTypeBucket(best.rawProduct);
+  const layout = buttonLayoutBucket(best.rawProduct);
+  const text = [best.partName, best.productType, best.buttons, best.chip].filter(Boolean).join(" ").toLowerCase();
+  const style =
+    /prox|proximity|smart|peps|push/.test(text) || type === "Proximity / smart"
+      ? "proximity"
+      : /flip|remote head|switchblade/.test(text) || type === "Flip / remote head"
+        ? "flip-remote"
+        : /transponder/.test(text) || type === "Transponder key"
+          ? "transponder"
+          : "key";
+  const normalizedLayout = String(layout || "unknown")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `visual:${family}:${style}:${normalizedLayout || "UNKNOWN"}`;
 }
 
 function visualPartChoiceGroups(offers) {
   const merged = new Map();
-  exactPartGroups(offers).forEach((group) => {
-    const key = visualPartChoiceKey(group);
+  offers.filter((offer) => isDisplayKeyProduct(offer.rawProduct)).forEach((offer) => {
+    const key = visualPartChoiceKey({ bestOffer: offer, offers: [offer], key: offerIdentityKey(offer) });
     if (!merged.has(key)) merged.set(key, []);
-    merged.get(key).push(...group.offers);
+    merged.get(key).push(offer);
   });
 
   return Array.from(merged.entries())
@@ -1932,7 +1988,7 @@ function renderOfferLanes(offers, baselineOffers = offers) {
 function renderPartChoiceCard(group) {
   const offer = group.bestOffer;
   const chosen = selectedPartChoiceKey === group.key;
-  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(offer.rawProduct);
+  const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(offer.rawProduct));
   const typeLabel = partTypeBucket(offer.rawProduct);
   return `
     <button class="part-choice-card ${chosen ? "active" : ""}" type="button" data-select-part-choice="${escapeHtml(group.key)}">
@@ -1966,7 +2022,7 @@ function renderPartChoiceBoard(lookup, products) {
         <div>
           <p class="eyebrow">Part choices</p>
           <h3>${escapeHtml(`${groups.length} visual choices`)}</h3>
-          <p>${escapeHtml("Pick the key, remote, or blade style first. The next screen opens the field reference for that choice.")}</p>
+          <p>${escapeHtml("Pick the visible key/button layout. Hardware, Lishi tools, chips, springs, shells, and duplicate button layouts are filtered out here.")}</p>
         </div>
       </div>
       <div class="part-choice-grid">
@@ -1984,7 +2040,7 @@ function selectedVisualPartGroup(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   let selectedProducts = productsForFamily(products, selectedKeyFamily);
   if (!selectedProducts.length && products.length) {
-    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting" && isDisplayKeyProduct(product));
   }
   const offers = sortSupplierOffers(selectedProducts.filter(productPassesLiveFilters));
   const baselineOffers = sortSupplierOffers(selectedProducts);
@@ -1997,7 +2053,7 @@ function selectedPartSnapshot(profile) {
   const group = selectedVisualPartGroup(profile);
   if (!group) return null;
   const best = group.bestOffer;
-  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct);
+  const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct));
   const typeLabel = partTypeBucket(best.rawProduct);
   return {
     group,
@@ -2006,6 +2062,84 @@ function selectedPartSnapshot(profile) {
     typeLabel,
     title: buttonLabel || typeLabel || "Selected key",
     identifier: group.label || best.fcc || best.oem || best.sku || "Visual match selected",
+  };
+}
+
+function extractKeywayTokens(value) {
+  const text = String(value || "").toUpperCase();
+  const tokens = [];
+  const patterns = [
+    /\b(?:HU|TOY|TR|DAT|NSN|NIS|MIT|MZ|MAZ|GM|BMW|BW|VA|HON|HD|HY|KIA|SUB|CY|FO|H|Y|B)\s*[- ]?\s*\d{2,4}[A-Z]?\b/g,
+    /\b(?:FO38|FO21|B106|H72|H75|H92|H94|H101|Y160|Y164|Y165|Y170|Y171|Y172|Y157|TOY43|TOY48|TOY49|TR47|DAT17|NSN11|NSN14)\b/g,
+  ];
+  patterns.forEach((pattern) => {
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0].replace(/[\s-]+/g, "");
+      if (token.length >= 3 && !tokens.includes(token)) tokens.push(token);
+    }
+  });
+  return tokens;
+}
+
+function lishiReferenceForProfile(profile, snapshot = selectedPartSnapshot(profile)) {
+  const reference = profile.vehicleReference || {};
+  const products = profile.liveSupplierLookup?.products || [];
+  const selectedProducts = snapshot?.group?.offers?.map((offer) => offer.rawProduct).filter(Boolean) || [];
+  const sourceProducts = [
+    ...selectedProducts,
+    ...products.filter((product) => {
+      const text = productSearchText(product).toLowerCase();
+      return /\b(lishi|decoder|2-in-1|2 in 1|keyway|key blank|blank|blade|emergency insert|insert key|mechanical)\b/.test(text);
+    }),
+  ];
+  const references = [
+    reference.keyway?.primary,
+    ...(reference.keyway?.alternates || []),
+    reference.lishi?.primary,
+    ...(reference.lishi?.alternates || []),
+    ...(reference.cutting || []),
+    ...(reference.decodePlan || []),
+  ];
+  const candidates = new Map();
+  const addCandidate = (token, source, productName = "") => {
+    if (!token) return;
+    if (!candidates.has(token)) {
+      candidates.set(token, {
+        keyway: token,
+        tool: `${token} Lishi / decoder`,
+        sources: new Set(),
+        products: new Set(),
+      });
+    }
+    const candidate = candidates.get(token);
+    if (source) candidate.sources.add(source);
+    if (productName) candidate.products.add(productName);
+  };
+
+  references.forEach((value) => {
+    extractKeywayTokens(value).forEach((token) => addCandidate(token, "vehicle reference"));
+  });
+  sourceProducts.forEach((product) => {
+    const text = productSearchText(product);
+    const source = /\b(lishi|decoder|2-in-1|2 in 1)\b/i.test(text)
+      ? "supplier Lishi/decoder listing"
+      : /\b(blank|blade|insert)\b/i.test(text)
+        ? "mechanical key listing"
+        : "selected key listing";
+    extractKeywayTokens(text).forEach((token) => addCandidate(token, source, product.name || product.keyInfo?.sku || ""));
+  });
+
+  const list = Array.from(candidates.values()).map((candidate) => ({
+    ...candidate,
+    sources: Array.from(candidate.sources),
+    products: Array.from(candidate.products).slice(0, 3),
+  }));
+  const fallbackPrimary = reference.lishi?.primary || reference.keyway?.primary || "Confirm from lock or emergency insert";
+  return {
+    primary: list.length ? list.map((candidate) => candidate.tool).join(" / ") : fallbackPrimary,
+    keyways: list.map((candidate) => candidate.keyway),
+    candidates: list,
+    fallbackPrimary,
   };
 }
 
@@ -2137,6 +2271,7 @@ function renderLishiDecodeScreen(profile) {
     `;
   }
   const reference = profile.vehicleReference || {};
+  const lishi = lishiReferenceForProfile(profile, snapshot);
   const codeSources = [
     "NASTF SDRM / Vehicle Security Professional account for OEM security access where supported",
     "OEM service-information portals tied to the vehicle make and authorized locksmith credentials",
@@ -2144,9 +2279,9 @@ function renderLishiDecodeScreen(profile) {
     "Dealer/OEM parts or service channel when the manufacturer requires direct authorization",
   ];
   const rows = [
-    ["Keyway", reference.keyway?.primary || "Confirm from lock or emergency insert"],
-    ["Lishi / decoder", reference.lishi?.primary || "Choose only after keyway confirmation"],
-    ["Alternates", (reference.lishi?.alternates || reference.keyway?.alternates || []).join(" | ")],
+    ["Keyway candidates", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Confirm from lock or emergency insert"],
+    ["Lishi / decoder", lishi.primary],
+    ["Alternates", [...new Set([...(reference.lishi?.alternates || []), ...(reference.keyway?.alternates || [])])].join(" | ")],
     ["Decode plan", (reference.decodePlan || []).slice(0, 3).join(" | ")],
     ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
   ].filter(([, value]) => value);
@@ -2175,6 +2310,26 @@ function renderLishiDecodeScreen(profile) {
             `,
           )
           .join("")}
+      </section>
+      <section class="lishi-candidate-list">
+        <div>
+          <span>Lishi shortlist</span>
+          <strong>${escapeHtml(lishi.candidates.length ? `${lishi.candidates.length} candidate${lishi.candidates.length === 1 ? "" : "s"}` : "Verify by keyway")}</strong>
+        </div>
+        ${
+          lishi.candidates.length
+            ? lishi.candidates
+                .map(
+                  (candidate) => `
+                    <article>
+                      <strong>${escapeHtml(candidate.tool)}</strong>
+                      <p>${escapeHtml([candidate.sources.join(" + "), candidate.products.length ? `Seen on: ${candidate.products.join(" / ")}` : ""].filter(Boolean).join(" | "))}</p>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<article><strong>${escapeHtml(lishi.fallbackPrimary)}</strong><p>Supplier listings did not expose a specific Lishi/keyway. Confirm from the lock, emergency insert, or authorized code source.</p></article>`
+        }
       </section>
       <section class="code-source-panel">
         <div>
@@ -2213,19 +2368,20 @@ function renderFinalJobSummaryScreen(profile) {
   const vehicle = profile.vehicle || {};
   const reference = profile.vehicleReference || {};
   const best = snapshot.best;
+  const lishi = lishiReferenceForProfile(profile, snapshot);
   const percent = programmer ? programmerPercent(programmer) : 0;
   const rows = [
     ["Vehicle", [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ")],
     ["Key choice", [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ")],
     ["Part clue", snapshot.identifier],
-    ["FCC / buttons", [snapshot.group.fccs.join(" / "), snapshot.group.buttons.length ? `${snapshot.group.buttons.join(" / ")} button` : ""].filter(Boolean).join(" | ")],
+    ["FCC / buttons", [snapshot.group.fccs.join(" / "), snapshot.group.buttonLayouts?.join(" / ") || (snapshot.group.buttons.length ? `${snapshot.group.buttons.join(" / ")} button` : "")].filter(Boolean).join(" | ")],
     ["Chip / frequency", [best.chip, snapshot.group.frequencies.join(" / ")].filter(Boolean).join(" | ")],
     ["Programmer", programmer ? `${programmer.name} (${percent}% confidence)` : "Verify coverage"],
     ["Programmer models", programmer?.models?.length ? programmer.models.join(" / ") : ""],
     ["Pass-through / VCI", programmer?.passThru || ""],
     ["OEM key note", programmer && Number(programmer.oemKeyLikelihood) >= 90 ? `Plan OEM key about ${programmer.oemKeyLikelihood}% of the time when this path is required.` : ""],
-    ["Keyway", reference.keyway?.primary || "Verify by lock/emergency insert"],
-    ["Lishi / decode", reference.lishi?.primary || "Verify keyway before choosing tool"],
+    ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify by lock/emergency insert"],
+    ["Lishi / decode", lishi.primary || "Verify keyway before choosing tool"],
     ["Cut / originate", (reference.cutting || reference.decodePlan || []).slice(0, 2).join(" | ")],
   ].filter(([, value]) => value);
   const verify = [
@@ -2280,7 +2436,7 @@ function renderSelectedSupplierScreen(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   let selectedProducts = productsForFamily(products, selectedKeyFamily);
   if (!selectedProducts.length && products.length) {
-    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting" && isDisplayKeyProduct(product));
   }
   const offers = sortSupplierOffers(selectedProducts.filter(productPassesLiveFilters));
   const baselineOffers = sortSupplierOffers(selectedProducts);
@@ -2305,9 +2461,10 @@ function renderSelectedSupplierScreen(profile) {
     `;
   }
   const best = group.bestOffer;
-  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct);
+  const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct));
   const typeLabel = partTypeBucket(best.rawProduct);
   const reference = profile.vehicleReference || {};
+  const lishi = lishiReferenceForProfile(profile, { group, best });
   const referenceRows = [
     ["Style", typeLabel],
     ["Buttons", buttonLabel],
@@ -2333,8 +2490,8 @@ function renderSelectedSupplierScreen(profile) {
     {
       title: "Mechanical",
       rows: [
-        ["Keyway", reference.keyway?.primary],
-        ["Lishi / decode", reference.lishi?.primary],
+        ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary],
+        ["Lishi / decode", lishi.primary || reference.lishi?.primary],
         ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
       ],
     },
@@ -2833,6 +2990,7 @@ function renderVehicleApprovalScreen(profile, context) {
       </div>
       ${renderVitalVehicleFacts(profile)}
       ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-home>Back</button>`,
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
         `<button class="secondary-action" type="button" data-view-vehicle-details>View details</button>`,
         `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
@@ -2939,7 +3097,7 @@ function renderKeyChoicesScreen(profile) {
   ensureSelectedKeyFamily(products);
   let selectedProducts = productsForFamily(products, selectedKeyFamily);
   if (!selectedProducts.length && products.length) {
-    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting" && isDisplayKeyProduct(product));
   }
   const packageOption = selectedPackageOption();
   const decisionNote = profile.vin
@@ -3625,7 +3783,7 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const resetButton = event.target.closest("[data-vin-reset]");
+  const resetButton = event.target.closest("[data-vin-reset], [data-vin-home]");
   if (resetButton) {
     resetVinWorkflow();
     return;
