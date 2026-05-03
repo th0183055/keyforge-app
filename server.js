@@ -19,6 +19,7 @@ const programmingReferencePath = path.join(dataDir, "programming-reference.json"
 const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
 const vehicleProfilesPath = path.join(dataDir, "vehicle-profiles.json");
+const referenceVaultPath = path.join(dataDir, "reference-vault.json");
 const localSecretPath = path.join(dataDir, ".lockforge-secret");
 
 const supplierRegistry = [
@@ -272,6 +273,24 @@ async function readVehicleProfiles() {
 async function writeVehicleProfiles(profiles) {
   await mkdir(dataDir, { recursive: true });
   await writeFile(vehicleProfilesPath, `${JSON.stringify({ ...profiles, updatedAt: new Date().toISOString() }, null, 2)}\n`);
+}
+
+async function readReferenceVault() {
+  await mkdir(dataDir, { recursive: true });
+  if (!existsSync(referenceVaultPath)) {
+    return { version: 1, updatedAt: new Date().toISOString(), entries: [] };
+  }
+  const vault = JSON.parse(await readFile(referenceVaultPath, "utf8"));
+  return {
+    version: vault.version || 1,
+    updatedAt: vault.updatedAt || "",
+    entries: Array.isArray(vault.entries) ? vault.entries : [],
+  };
+}
+
+async function writeReferenceVault(vault) {
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(referenceVaultPath, `${JSON.stringify({ ...vault, updatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
 async function readKeyIntelligence() {
@@ -3072,6 +3091,170 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
   return reference;
 }
 
+function modelMatchesVault(entryVehicle, vehicleModel) {
+  const model = normalizeVehicleText(vehicleModel);
+  const candidates = [entryVehicle?.model, ...(Array.isArray(entryVehicle?.aliases) ? entryVehicle.aliases : [])]
+    .flat()
+    .filter(Boolean)
+    .map(normalizeVehicleText);
+  return candidates.some((candidate) => candidate && (model === candidate || model.includes(candidate) || candidate.includes(model)));
+}
+
+function vaultEntryMatchesVehicle(entry, vehicle) {
+  if (!entry || !entry.vehicle) return false;
+  const year = Number(vehicle.year);
+  const startYear = Number(entry.vehicle.startYear || entry.vehicle.year || 0);
+  const endYear = Number(entry.vehicle.endYear || entry.vehicle.year || 9999);
+  if (Number.isFinite(year) && year && (year < startYear || year > endYear)) return false;
+  if (entry.vehicle.make && !stringsMatch(entry.vehicle.make, vehicle.make)) return false;
+  if (entry.vehicle.model && !modelMatchesVault(entry.vehicle, vehicle.model)) return false;
+  return true;
+}
+
+async function findReferenceVaultEntries(vehicle) {
+  const vault = await readReferenceVault();
+  return vault.entries
+    .filter((entry) => entry.status !== "retired")
+    .filter((entry) => vaultEntryMatchesVehicle(entry, vehicle))
+    .sort((a, b) => {
+      const confidenceWeight = { high: 4, "medium-high": 3, medium: 2, low: 1 };
+      return (confidenceWeight[b.confidence] || 0) - (confidenceWeight[a.confidence] || 0);
+    })
+    .slice(0, 5);
+}
+
+function appendUnique(target, items) {
+  if (!Array.isArray(target)) return;
+  const seen = new Set(target.map((item) => String(item).toLowerCase()));
+  for (const item of items || []) {
+    const clean = cleanString(item);
+    if (!clean || seen.has(clean.toLowerCase())) continue;
+    target.push(clean);
+    seen.add(clean.toLowerCase());
+  }
+}
+
+function applyReferenceVault(reference, entries) {
+  if (!entries?.length) return reference;
+  const next = structuredClone(reference);
+  const strongest = entries[0];
+  if (strongest.keyway?.primary) {
+    next.keyway = {
+      primary: strongest.keyway.primary,
+      alternates: strongest.keyway.alternates || next.keyway?.alternates || [],
+      confidence: strongest.confidence || next.keyway?.confidence || "verify",
+    };
+  }
+  if (strongest.lishi?.primary) {
+    next.lishi = {
+      primary: strongest.lishi.primary,
+      alternates: strongest.lishi.alternates || next.lishi?.alternates || [],
+      confidence: strongest.confidence || next.lishi?.confidence || "verify",
+    };
+  }
+  for (const entry of entries) {
+    appendUnique(next.origination, entry.origination);
+    appendUnique(next.unlock, entry.unlock);
+    appendUnique(next.programming, entry.programming);
+    appendUnique(next.access, entry.access);
+    appendUnique(next.fieldPhotos, entry.fieldPhotos);
+    appendUnique(next.fieldTools, entry.fieldTools);
+    appendUnique(next.jobFlow, entry.jobFlow);
+    appendUnique(next.decodePlan, entry.decodePlan);
+    appendUnique(next.cutting, entry.cutting);
+    appendUnique(next.partVerification, entry.partVerification);
+    appendUnique(next.warnings, entry.warnings);
+  }
+  next.vaultNotes = entries
+    .map((entry) => [entry.title, entry.summary].filter(Boolean).join(": "))
+    .filter(Boolean)
+    .slice(0, 5);
+  next.vaultSources = entries
+    .flatMap((entry) => entry.sources || [])
+    .map((source) => ({
+      label: source.label || "Reference source",
+      citation: source.citation || "",
+      sourceType: source.sourceType || "reference",
+    }))
+    .slice(0, 8);
+  next.referenceVault = {
+    matched: entries.length,
+    confidence: strongest.confidence || "medium",
+    sourcePolicy: "Original LockForge summaries only; source citations are for audit/verification.",
+  };
+  next.source = `${next.source}; ${entries.length} LockForge vault match${entries.length === 1 ? "" : "es"}`;
+  return next;
+}
+
+function listFromInput(value) {
+  if (Array.isArray(value)) return value.map(cleanString).filter(Boolean);
+  return cleanString(value)
+    .split(/\r?\n|;/)
+    .map(cleanString)
+    .filter(Boolean);
+}
+
+function sanitizeReferenceVaultEntry(input) {
+  const vehicle = input.vehicle || {};
+  const id =
+    cleanString(input.id) ||
+    [
+      cleanString(vehicle.startYear || vehicle.year),
+      cleanString(vehicle.endYear && vehicle.endYear !== vehicle.startYear ? vehicle.endYear : ""),
+      cleanString(vehicle.make),
+      cleanString(vehicle.model),
+      cleanString(input.title),
+    ]
+      .filter(Boolean)
+      .join("-")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") ||
+    randomUUID();
+  return {
+    id,
+    title: cleanString(input.title) || "Vehicle reference entry",
+    summary: cleanString(input.summary),
+    status: cleanString(input.status) || "draft",
+    confidence: cleanString(input.confidence) || "medium",
+    vehicle: {
+      make: cleanString(vehicle.make).toUpperCase(),
+      model: cleanString(vehicle.model),
+      aliases: listFromInput(vehicle.aliases),
+      startYear: cleanString(vehicle.startYear || vehicle.year),
+      endYear: cleanString(vehicle.endYear || vehicle.year || vehicle.startYear),
+    },
+    keyway: {
+      primary: cleanString(input.keyway?.primary),
+      alternates: listFromInput(input.keyway?.alternates),
+    },
+    lishi: {
+      primary: cleanString(input.lishi?.primary),
+      alternates: listFromInput(input.lishi?.alternates),
+    },
+    origination: listFromInput(input.origination),
+    unlock: listFromInput(input.unlock),
+    programming: listFromInput(input.programming),
+    access: listFromInput(input.access),
+    fieldPhotos: listFromInput(input.fieldPhotos),
+    fieldTools: listFromInput(input.fieldTools),
+    jobFlow: listFromInput(input.jobFlow),
+    decodePlan: listFromInput(input.decodePlan),
+    cutting: listFromInput(input.cutting),
+    partVerification: listFromInput(input.partVerification),
+    warnings: listFromInput(input.warnings),
+    sources: (Array.isArray(input.sources) ? input.sources : [])
+      .map((source) => ({
+        label: cleanString(source.label),
+        citation: cleanString(source.citation),
+        sourceType: cleanString(source.sourceType) || "reference",
+        notes: cleanString(source.notes),
+      }))
+      .filter((source) => source.label || source.citation),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference) {
   const family = vehicleFamily(vehicle.make, vehicle.model);
   const year = Number(vehicle.year);
@@ -3254,6 +3437,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const shopEvidence = buildShopEvidence(vehicle, options.vin || "", store.jobs);
   const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
+  const referenceVaultEntries = await findReferenceVaultEntries(vehicle);
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
   const liveSupplierLookup = options.skipSupplierLookup
     ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
@@ -3294,7 +3478,13 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     verifiedProfile,
     shopEvidence,
     liveSupplierLookup,
-    vehicleReference: vehicleReferenceFor(vehicle, programmingReference, shopEvidence),
+    referenceVault: referenceVaultEntries.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      confidence: entry.confidence,
+      sourceCount: entry.sources?.length || 0,
+    })),
+    vehicleReference: applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries),
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,
@@ -3406,6 +3596,30 @@ async function handleApi(request, response, pathname) {
   if (request.method === "GET" && pathname === "/api/key-intelligence") {
     const intelligence = await readKeyIntelligence();
     sendJson(response, 200, intelligence);
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/reference-vault") {
+    sendJson(response, 200, await readReferenceVault());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/reference-vault") {
+    const body = await readJsonBody(request);
+    const entry = sanitizeReferenceVaultEntry(body);
+    if (!entry.vehicle.make || !entry.vehicle.model || !entry.vehicle.startYear) {
+      sendError(response, 400, "Reference vault entries need at least startYear, make, and model.");
+      return;
+    }
+    const vault = await readReferenceVault();
+    const existingIndex = vault.entries.findIndex((item) => item.id === entry.id);
+    if (existingIndex >= 0) {
+      vault.entries[existingIndex] = { ...vault.entries[existingIndex], ...entry };
+    } else {
+      vault.entries.unshift(entry);
+    }
+    await writeReferenceVault(vault);
+    sendJson(response, existingIndex >= 0 ? 200 : 201, { entry });
     return;
   }
 

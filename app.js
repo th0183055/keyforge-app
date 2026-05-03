@@ -808,10 +808,20 @@ function renderVehicleReferenceCard(reference) {
         ${renderReferenceArticle("Decode plan", reference.decodePlan)}
         ${renderReferenceArticle("Cutting setup", reference.cutting)}
         ${renderReferenceArticle("Part verification", reference.partVerification)}
+        ${renderReferenceArticle("Vault notes", reference.vaultNotes)}
         <article>
           <small>Watch outs</small>
           <ul>${renderList(reference.warnings)}</ul>
         </article>
+        ${
+          reference.referenceVault?.matched
+            ? `<article>
+                <small>Reference vault</small>
+                <strong>${escapeHtml(`${reference.referenceVault.matched} original LockForge match${reference.referenceVault.matched === 1 ? "" : "es"}`)}</strong>
+                <p>${escapeHtml(reference.referenceVault.sourcePolicy || "Original summaries with source audit trail.")}</p>
+              </article>`
+            : ""
+        }
       </div>
     </section>
   `;
@@ -823,7 +833,12 @@ function renderFieldReferencePreview(reference) {
     ["Keyway", reference.keyway?.primary || "Verify by insert/lock"],
     ["Decode", (reference.decodePlan || [])[0] || "Confirm code/decode path"],
     ["Tools", (reference.fieldTools || [])[0] || reference.lishi?.primary || "Verify field tools"],
-    ["Watch", (reference.warnings || [])[0] || "VIN alone is not enough"],
+    [
+      "Vault",
+      reference.referenceVault?.matched
+        ? `${reference.referenceVault.matched} original match${reference.referenceVault.matched === 1 ? "" : "es"}`
+        : (reference.warnings || [])[0] || "VIN alone is not enough",
+    ],
   ];
   return `
     <section class="field-reference-strip">

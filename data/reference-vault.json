@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "updatedAt": "2026-05-02T00:00:00.000Z",
+  "policy": "Original LockForge reference summaries only. Sources are used for audit and verification; do not copy copyrighted wording, charts, or layouts.",
+  "entries": [
+    {
+      "id": "2021-2026-ford-f-series-field-reference",
+      "title": "Late Ford truck field reference",
+      "summary": "Ford F-Series style jobs need key-system confirmation before committing to prox, flip, or transponder workflow.",
+      "status": "active",
+      "confidence": "medium",
+      "vehicle": {
+        "make": "FORD",
+        "model": "F-150",
+        "aliases": ["F150", "F-Series"],
+        "startYear": "2021",
+        "endYear": "2026"
+      },
+      "keyway": {
+        "primary": "HU101 / HU198 family likely",
+        "alternates": ["Confirm emergency insert or door profile before cutting"]
+      },
+      "lishi": {
+        "primary": "HU101 or HU198 by confirmed blade profile",
+        "alternates": ["Do not pick tool from VIN alone"]
+      },
+      "origination": [
+        "Confirm prox vs flip/transponder from ignition/start button and customer-visible key style",
+        "Confirm blade profile before cutting a test key"
+      ],
+      "unlock": [
+        "Use protected long-reach entry setup",
+        "Watch weatherstrip, wiring, and cab configuration"
+      ],
+      "programming": [
+        "Confirm FDRS/OEM path need before opening security functions",
+        "Use stable voltage support during programming"
+      ],
+      "access": [
+        "Photograph VIN plate and door jamb label",
+        "Document authorization before entry or key generation"
+      ],
+      "fieldPhotos": [
+        "VIN plate",
+        "Door jamb label",
+        "Start button or keyed ignition",
+        "Tailgate/remote-start button clues",
+        "Emergency insert profile"
+      ],
+      "fieldTools": [
+        "Battery maintainer",
+        "OBD access check",
+        "HU101/HU198 verification tools",
+        "Protected long-reach entry kit"
+      ],
+      "jobFlow": [
+        "Approve decoded vehicle identity",
+        "Choose visible ignition/key family",
+        "Confirm button layout and insert profile",
+        "Confirm programmer path before programming"
+      ],
+      "decodePlan": [
+        "Use authorized code source when available",
+        "If decoding, verify door read against insert/ignition behavior before final cut"
+      ],
+      "cutting": [
+        "Verify center-mill profile and jaw setup",
+        "Cut and test mechanical function before programming electronics"
+      ],
+      "partVerification": [
+        "Confirm FCC, frequency, board, buttons, panic, remote start, and tailgate/hatch options",
+        "Treat similar-looking Ford remotes as different until identifiers are verified"
+      ],
+      "warnings": [
+        "Late Ford truck prox/flip options can split by trim and equipment",
+        "VIN confirms vehicle identity, not final button layout or board"
+      ],
+      "sources": [
+        {
+          "label": "LockForge original seed",
+          "citation": "Internal field-reference starter entry",
+          "sourceType": "original"
+        }
+      ]
+    },
+    {
+      "id": "2025-toyota-camry-hybrid-field-reference",
+      "title": "Late Toyota hybrid prox reference",
+      "summary": "Late Toyota hybrid work needs prox/insert/FCC verification and a programmer path check before committing.",
+      "status": "active",
+      "confidence": "medium",
+      "vehicle": {
+        "make": "TOYOTA",
+        "model": "Camry",
+        "aliases": ["Camry Hybrid"],
+        "startYear": "2025",
+        "endYear": "2026"
+      },
+      "keyway": {
+        "primary": "Toyota emergency insert keyway must be confirmed",
+        "alternates": ["Hybrid/prox packages may differ"]
+      },
+      "lishi": {
+        "primary": "Toyota keyway-specific Lishi after insert verification",
+        "alternates": []
+      },
+      "programming": [
+        "Confirm TIS/Techstream or equivalent coverage",
+        "Check online/security requirement before dispatch"
+      ],
+      "fieldPhotos": [
+        "VIN plate",
+        "Door jamb label",
+        "Hybrid badge/trim clue",
+        "Push-button area",
+        "Emergency insert profile"
+      ],
+      "fieldTools": [
+        "Battery maintainer",
+        "Toyota coverage-verified programmer",
+        "Insert/keyway verification tools"
+      ],
+      "jobFlow": [
+        "Confirm hybrid/prox equipment",
+        "Confirm FCC and emergency insert before selecting key package",
+        "Verify programmer coverage before security functions"
+      ],
+      "partVerification": [
+        "Confirm FCC, board, emergency insert, and button layout",
+        "Hybrid trim and package can change correct prox"
+      ],
+      "warnings": [
+        "Do not select Toyota prox from year/model alone",
+        "Online/security access may be the deciding factor"
+      ],
+      "sources": [
+        {
+          "label": "LockForge original seed",
+          "citation": "Internal field-reference starter entry",
+          "sourceType": "original"
+        }
+      ]
+    }
+  ]
+}
