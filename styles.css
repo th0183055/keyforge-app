@@ -1006,6 +1006,106 @@ textarea {
   line-height: 1.22;
 }
 
+.job-kit-summary,
+.job-kit-detail {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #e1c7bf;
+  border-left: 5px solid var(--accent);
+  border-radius: 12px;
+  background: #fffaf6;
+}
+
+.job-kit-head {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.job-kit-head span,
+.job-kit-cards span,
+.job-kit-lanes span,
+.job-kit-checks span {
+  color: var(--accent-dark);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.job-kit-head strong,
+.job-kit-cards strong,
+.job-kit-lanes strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  line-height: 1.18;
+}
+
+.job-kit-head p,
+.job-kit-cards p,
+.job-kit-lanes p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.job-kit-head small {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: var(--charcoal);
+  color: #fff6ef;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.job-kit-cards,
+.job-kit-lanes,
+.job-kit-checks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.job-kit-cards article,
+.job-kit-lanes article,
+.job-kit-checks article {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: white;
+}
+
+.job-kit-lanes section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-kit-lanes h4 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.job-kit-lanes section > div {
+  display: grid;
+  gap: 8px;
+}
+
+.job-kit-checks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.job-kit-checks ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .reference-head {
   display: flex;
   gap: 12px;
@@ -3554,6 +3654,17 @@ textarea {
 
   .field-reference-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .job-kit-cards,
+  .job-kit-lanes,
+  .job-kit-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .job-kit-head {
+    align-items: start;
+    flex-direction: column;
   }
 
   .decision-grid {

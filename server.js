@@ -3346,6 +3346,94 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
   };
 }
 
+function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries) {
+  const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
+  const keyItems = (selected.keys || [])
+    .map((item) => ({
+      name: cleanString(item.name || item.partNumber || "Verify key package"),
+      role: cleanString(item.position || item.type || "Key option"),
+      detail: cleanString(item.notes || item.fccId || item.partNumber || "Confirm FCC, buttons, chip, and blade before final selection."),
+      confidence: cleanString(item.confidence || record?.keySystem?.confidence || "verify"),
+    }))
+    .slice(0, 4);
+  const programmerItems = (selected.programmers || [])
+    .map((item) => ({
+      name: cleanString(item.name || "Coverage-verified programmer"),
+      role: cleanString(item.type || "Programming path"),
+      detail: cleanString(item.notes || programmingReference?.programMethod || "Confirm exact year/model/key-system coverage before programming."),
+      confidence: cleanString(item.confidence || (programmingReference ? "high" : "verify")),
+    }))
+    .slice(0, 4);
+  const toolItems = [
+    ...(selected.tools || []).map((item) => ({
+      name: cleanString(item.name || "Keyway-specific originator"),
+      role: cleanString(item.type || "Origination"),
+      detail: cleanString(item.notes || "Confirm keyway and cutting path before making the key."),
+      confidence: cleanString(item.confidence || "verify"),
+    })),
+    {
+      name: reference.lishi?.primary || "Keyway-confirmed Lishi / decoder",
+      role: "Decode",
+      detail: "Choose from the confirmed lock or emergency insert profile, not VIN alone.",
+      confidence: reference.lishi?.confidence || "verify",
+    },
+    ...(reference.fieldTools || []).slice(0, 3).map((tool) => ({
+      name: tool,
+      role: "Field tool",
+      detail: "Bring or verify before dispatch.",
+      confidence: "workflow",
+    })),
+  ].slice(0, 7);
+  const securityFlags = [
+    programmingReference?.requiresPin ? "PIN/passcode may be required" : "",
+    programmingReference?.requiresOnline ? "Online/OEM path may be required" : "",
+    programmingReference?.requiresBypass ? "Bypass/security procedure may be required" : "",
+  ].filter(Boolean);
+  const verify = [
+    ...(reference.partVerification || []),
+    ...(reference.decodePlan || []).slice(0, 2),
+    "Confirm ownership/authorization",
+    "Confirm customer-visible key style",
+  ];
+  const warnings = [...(reference.warnings || []), ...securityFlags].filter(Boolean);
+  const confidence = record
+    ? "verified"
+    : referenceVaultEntries?.length
+      ? referenceVaultEntries[0].confidence || "medium"
+      : programmingReference
+        ? "medium"
+        : "verify";
+  return {
+    headline: `${vehicleTitle || "Vehicle"} job kit`,
+    confidence,
+    summary:
+      "Use this as the dispatch and field checklist. It tells the locksmith what key package to verify, what programmer path to trust, and what tools to bring.",
+    keys: keyItems.length
+      ? keyItems
+      : [
+          {
+            name: "Verify key package",
+            role: "Key option",
+            detail: "Select prox, flip/remote-head, or transponder after checking ignition style, FCC, buttons, and blade.",
+            confidence: "verify",
+          },
+        ],
+    programmers: programmerItems.length
+      ? programmerItems
+      : [
+          {
+            name: programmingReference?.programmer || "Coverage-verified programmer",
+            role: programmingReference?.programMethod || "Programming path",
+            detail: "Confirm exact vehicle coverage before dispatch.",
+            confidence: programmingReference ? "medium" : "verify",
+          },
+        ],
+    tools: toolItems,
+    verify: [...new Set(verify)].slice(0, 8),
+    warnings: [...new Set(warnings)].slice(0, 7),
+  };
+}
+
 function sourceReadiness(record, identity = { status: "connected", result: "Used for VIN decode" }) {
   return [
     {
@@ -3442,6 +3530,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const liveSupplierLookup = options.skipSupplierLookup
     ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
     : await buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence);
+  const vehicleReference = applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries);
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -3484,7 +3573,8 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
       confidence: entry.confidence,
       sourceCount: entry.sources?.length || 0,
     })),
-    vehicleReference: applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries),
+    vehicleReference,
+    jobKit: buildJobKit(vehicle, selected, record, programmingReference, vehicleReference, referenceVaultEntries),
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,

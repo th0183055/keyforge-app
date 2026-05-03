@@ -856,6 +856,96 @@ function renderFieldReferencePreview(reference) {
   `;
 }
 
+function renderJobKitSummary(jobKit) {
+  if (!jobKit) return "";
+  const firstKey = jobKit.keys?.[0];
+  const firstProgrammer = jobKit.programmers?.[0];
+  const firstTool = jobKit.tools?.[0];
+  const cards = [
+    ["Keys needed", firstKey?.name || "Verify key package", firstKey?.detail || "Confirm prox, flip, transponder, FCC, buttons, and blade."],
+    ["Programmer", firstProgrammer?.name || "Verify coverage", firstProgrammer?.detail || "Confirm exact programmer coverage before dispatch."],
+    ["Tools", firstTool?.name || "Bring field kit", firstTool?.detail || "Confirm keyway, decode/cut path, OBD, and battery support."],
+  ];
+  return `
+    <section class="job-kit-summary">
+      <div class="job-kit-head">
+        <div>
+          <span>Job kit</span>
+          <strong>${escapeHtml(jobKit.headline || "Vehicle job kit")}</strong>
+          <p>${escapeHtml(jobKit.summary || "Keys, programmers, tools, and warnings for this lookup.")}</p>
+        </div>
+        <small>${escapeHtml(jobKit.confidence || "verify")}</small>
+      </div>
+      <div class="job-kit-cards">
+        ${cards
+          .map(
+            ([label, title, detail]) => `
+              <article>
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(title)}</strong>
+                <p>${escapeHtml(detail)}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderJobKitDetail(jobKit) {
+  if (!jobKit) return "";
+  const renderItems = (items) =>
+    (items || [])
+      .slice(0, 8)
+      .map(
+        (item) => `
+          <article>
+            <span>${escapeHtml(item.role || item.confidence || "Verify")}</span>
+            <strong>${escapeHtml(item.name || "Verify")}</strong>
+            <p>${escapeHtml(item.detail || "Confirm before dispatch.")}</p>
+          </article>
+        `,
+      )
+      .join("");
+  const renderList = (items) => (items || []).slice(0, 8).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return `
+    <section class="job-kit-detail">
+      <div class="job-kit-head">
+        <div>
+          <span>What this job needs</span>
+          <strong>${escapeHtml(jobKit.headline || "Vehicle job kit")}</strong>
+        </div>
+        <small>${escapeHtml(jobKit.confidence || "verify")}</small>
+      </div>
+      <div class="job-kit-lanes">
+        <section>
+          <h4>Keys</h4>
+          <div>${renderItems(jobKit.keys)}</div>
+        </section>
+        <section>
+          <h4>Programmers</h4>
+          <div>${renderItems(jobKit.programmers)}</div>
+        </section>
+        <section>
+          <h4>Tools</h4>
+          <div>${renderItems(jobKit.tools)}</div>
+        </section>
+      </div>
+      <div class="job-kit-checks">
+        <article>
+          <span>Verify before dispatch</span>
+          <ul>${renderList(jobKit.verify)}</ul>
+        </article>
+        <article>
+          <span>Warnings</span>
+          <ul>${renderList(jobKit.warnings)}</ul>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderVehicleDossier(profile) {
   const vehicle = profile.vehicle || {};
   const groups = profile.vehicleDecodeGroups || [];
@@ -2343,6 +2433,7 @@ function renderVehicleApprovalScreen(profile, context) {
           <span>${escapeHtml(sourceBadge)}</span>
         </div>
       </div>
+      ${renderJobKitSummary(profile.jobKit)}
       ${renderWorkflowActions([
         `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
         `<button class="secondary-action" type="button" data-view-vehicle-details>View details</button>`,
@@ -2360,6 +2451,7 @@ function renderVehicleDetailsScreen(profile, context) {
         <p class="eyebrow">Vehicle details</p>
         <h3>${escapeHtml(title || "Vehicle details")}</h3>
       </div>
+      ${renderJobKitDetail(profile.jobKit)}
       ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
@@ -2430,6 +2522,7 @@ function renderKeyPackageScreen(profile) {
         <p class="eyebrow">Screen 3</p>
         <h3>Choose ignition type</h3>
       </div>
+      ${renderJobKitSummary(profile.jobKit)}
       <div class="key-package-grid">
         ${keyPackageOptions
           .map(
