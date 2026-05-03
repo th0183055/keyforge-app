@@ -3580,6 +3580,98 @@ function publicEepromToolClues(publicSources) {
     .slice(0, 4);
 }
 
+function oemProgrammerInfoFor(vehicle) {
+  const make = cleanString(vehicle.make).toLowerCase();
+  const family = vehicleFamily(vehicle.make, vehicle.model);
+  const oemByFamily = {
+    ford: ["Ford Motorcraft Service / FDRS", "Use FDRS/IDS/FJDS account-based path when late Ford security/module behavior requires OEM workflow."],
+    toyota: ["Toyota TIS / Techstream", "Use TIS/Techstream path when Toyota/Lexus immobilizer, smart reset, or security-professional workflow is required."],
+    gm: ["GM Techline Connect / SPS", "Use Techline Connect/SPS path when GM module/security programming requires OEM workflow."],
+    chrysler: ["Stellantis TechAuthority / wiTECH path", "Use authorized Stellantis security/programming resources when PIN, module, or SGW workflow requires it."],
+    honda: ["Honda Service Express / i-HDS", "Use authorized Honda service/security resources when immobilizer or module programming requires OEM workflow."],
+    nissan: ["Nissan TechInfo / CONSULT path", "Use authorized Nissan service-info resources when BCM/prox/security workflow requires OEM verification."],
+  };
+  const match = oemByFamily[family] || (make.includes("lexus") ? oemByFamily.toyota : null);
+  return match
+    ? { name: match[0], detail: match[1] }
+    : {
+        name: "Manufacturer service-info programmer",
+        detail: "Use the manufacturer service-info path as the highest-confidence fallback when aftermarket coverage is not proven.",
+      };
+}
+
+function confidencePercentFromLabel(value, fallback = 55) {
+  const text = cleanString(value).toLowerCase();
+  const numeric = Number(text.match(/\d{2,3}/)?.[0]);
+  if (Number.isFinite(numeric)) return Math.max(0, Math.min(100, numeric));
+  if (/certain/.test(text)) return 100;
+  if (/verified|high/.test(text)) return 88;
+  if (/medium-high/.test(text)) return 80;
+  if (/vault|shop/.test(text)) return 78;
+  if (/medium/.test(text)) return 68;
+  if (/public/.test(text)) return 58;
+  if (/low/.test(text)) return 42;
+  if (/verify|unknown/.test(text)) return 50;
+  return fallback;
+}
+
+function programmerCoverageKey(item) {
+  return cleanString([item.name, item.role].filter(Boolean).join("|")).toUpperCase();
+}
+
+function normalizeProgrammerCoverageItem(item, programmingReference) {
+  const sourcePercent = Number(item.confidencePercent);
+  const confidencePercent = Number.isFinite(sourcePercent)
+    ? Math.max(0, Math.min(100, sourcePercent))
+    : confidencePercentFromLabel([item.confidence, item.role, item.detail].filter(Boolean).join(" "), programmingReference ? 70 : 55);
+  return {
+    ...item,
+    confidence: `${confidencePercent}%`,
+    confidencePercent,
+    oemKeyLikelihood: Number.isFinite(Number(item.oemKeyLikelihood)) ? Number(item.oemKeyLikelihood) : 0,
+  };
+}
+
+function buildProgrammerCoverageList(vehicle, programmerItems, programmingReference) {
+  const oem = oemProgrammerInfoFor(vehicle);
+  const oemRequired = Boolean(
+    programmingReference?.requiresOnline ||
+      /OEM|ONLINE|SECURITY|SERVICE INFO|NASTF/i.test(
+        [programmingReference?.programMethod, programmingReference?.notes, programmingReference?.immobilizerSystem].filter(Boolean).join(" "),
+      ),
+  );
+  const coverage = [
+    {
+      name: "OEM Programmer",
+      role: oem.name,
+      detail: `${oem.detail} Highest-confidence fallback. If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.`,
+      confidence: "100%",
+      confidencePercent: 100,
+      oemKeyLikelihood: 90,
+      source: oemRequired ? "OEM likely required" : "OEM fallback",
+    },
+    ...(programmerItems || []),
+  ];
+  if (programmingReference?.programMethod && !coverage.some((item) => /OBD|EEPROM|BENCH|OEM/i.test(`${item.name} ${item.role}`))) {
+    coverage.push({
+      name: `${programmingReference.programMethod} programming path`,
+      role: "Programming reference",
+      detail: "Reference row found for this year/make/model. Use exact tool coverage before dispatch.",
+      confidence: programmingReference.allKeysLostSupported ? "78%" : "68%",
+      confidencePercent: programmingReference.allKeysLostSupported ? 78 : 68,
+    });
+  }
+  const merged = new Map();
+  coverage.map((item) => normalizeProgrammerCoverageItem(item, programmingReference)).forEach((item) => {
+    const key = programmerCoverageKey(item);
+    const existing = merged.get(key);
+    if (!existing || item.confidencePercent > existing.confidencePercent) merged.set(key, item);
+  });
+  return Array.from(merged.values())
+    .sort((a, b) => b.confidencePercent - a.confidencePercent || cleanString(a.name).localeCompare(cleanString(b.name)))
+    .slice(0, 8);
+}
+
 function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries, publicSources) {
   const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
   const vaultKeyItems = (referenceVaultEntries || [])
@@ -3617,14 +3709,15 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
       confidence: cleanString(programmer.confidence || "vault"),
     }));
   const publicProgrammerItems = publicProgrammerCluesFor(vehicle, publicSources);
-  const programmerItems = [...vaultProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
+  const rawProgrammerItems = [...vaultProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
     .map((item) => ({
       name: cleanString(item.name || "Coverage-verified programmer"),
       role: cleanString(item.type || "Programming path"),
       detail: cleanString(item.notes || programmingReference?.programMethod || "Confirm exact year/model/key-system coverage before programming."),
       confidence: cleanString(item.confidence || (programmingReference ? "high" : "verify")),
-    }))]
-    .slice(0, 4);
+    }))];
+  const programmerCoverage = buildProgrammerCoverageList(vehicle, rawProgrammerItems, programmingReference);
+  const programmerItems = programmerCoverage.slice(0, 4);
   const toolItems = [
     ...(selected.tools || []).map((item) => ({
       name: cleanString(item.name || "Keyway-specific originator"),
@@ -3687,9 +3780,11 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
             name: programmingReference?.programmer || "Coverage-verified programmer",
             role: programmingReference?.programMethod || "Programming path",
             detail: "Confirm exact vehicle coverage before dispatch.",
-            confidence: programmingReference ? "medium" : "verify",
+            confidence: programmingReference ? "68%" : "50%",
+            confidencePercent: programmingReference ? 68 : 50,
           },
         ],
+    programmerCoverage,
     tools: toolItems,
     verify: [...new Set(verify)].slice(0, 8),
     warnings: [...new Set(warnings)].slice(0, 7),

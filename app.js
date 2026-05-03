@@ -13,6 +13,7 @@ let vinWorkflowStep = "entry";
 let selectedKeyFamily = "";
 let selectedKeyPackage = "";
 let selectedPartChoiceKey = "";
+let selectedProgrammerKey = "";
 let supplierLookupRequestId = 0;
 let activeVinScan = null;
 let pendingJobOfferId = "";
@@ -753,7 +754,9 @@ function stepLabel(step) {
     "vehicle-details": "Details",
     package: "Key type",
     parts: "Pictures",
-    suppliers: "Reference",
+    programmers: "Programmers",
+    summary: "Summary",
+    suppliers: "Summary",
   }[step] || "VIN";
 }
 
@@ -930,11 +933,11 @@ function renderFieldReferencePreview(reference) {
 function renderJobKitSummary(jobKit) {
   if (!jobKit) return "";
   const firstKey = jobKit.keys?.[0];
-  const firstProgrammer = jobKit.programmers?.[0];
   const firstTool = jobKit.tools?.[0];
+  const programmerCount = jobKit.programmerCoverage?.length || jobKit.programmers?.length || 0;
   const cards = [
     ["Keys needed", firstKey?.name || "Verify key package", firstKey?.detail || "Confirm prox, flip, transponder, FCC, buttons, and blade."],
-    ["Programmer", firstProgrammer?.name || "Verify coverage", firstProgrammer?.detail || "Confirm exact programmer coverage before dispatch."],
+    ["Programmer coverage", programmerCount ? `${programmerCount} paths to compare` : "Verify coverage", "Choose the programmer on the confidence screen after picking the key picture."],
     ["Tools", firstTool?.name || "Bring field kit", firstTool?.detail || "Confirm keyway, decode/cut path, OBD, and battery support."],
   ];
   return `
@@ -1123,6 +1126,7 @@ function resetVinWorkflow() {
   selectedKeyFamily = "";
   selectedKeyPackage = "";
   selectedPartChoiceKey = "";
+  selectedProgrammerKey = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   vinForm.classList.remove("is-hidden");
   ymmForm?.classList.remove("is-hidden");
@@ -1157,6 +1161,7 @@ function applyKeyPackage(option) {
   selectedKeyPackage = option.id;
   if (option.family) selectedKeyFamily = option.family;
   selectedPartChoiceKey = "";
+  selectedProgrammerKey = "";
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   if (option.buttonFilter) {
     liveProductFilters.buttons.clear();
@@ -1975,6 +1980,222 @@ function renderPartChoiceBoard(lookup, products) {
   `;
 }
 
+function selectedVisualPartGroup(profile) {
+  const products = profile.liveSupplierLookup?.products || [];
+  let selectedProducts = productsForFamily(products, selectedKeyFamily);
+  if (!selectedProducts.length && products.length) {
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting");
+  }
+  const offers = sortSupplierOffers(selectedProducts.filter(productPassesLiveFilters));
+  const baselineOffers = sortSupplierOffers(selectedProducts);
+  const selectedGroup = visualPartChoiceGroups(offers).find((group) => group.key === selectedPartChoiceKey);
+  const selectedBaselineGroup = visualPartChoiceGroups(baselineOffers).find((group) => group.key === selectedPartChoiceKey);
+  return selectedGroup || selectedBaselineGroup || null;
+}
+
+function selectedPartSnapshot(profile) {
+  const group = selectedVisualPartGroup(profile);
+  if (!group) return null;
+  const best = group.bestOffer;
+  const buttonLabel = group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct);
+  const typeLabel = partTypeBucket(best.rawProduct);
+  return {
+    group,
+    best,
+    buttonLabel,
+    typeLabel,
+    title: buttonLabel || typeLabel || "Selected key",
+    identifier: group.label || best.fcc || best.oem || best.sku || "Visual match selected",
+  };
+}
+
+function programmerPercent(item, fallback = 50) {
+  const direct = Number(item?.confidencePercent);
+  if (Number.isFinite(direct)) return Math.max(0, Math.min(100, Math.round(direct)));
+  const text = String(item?.confidence || "").toLowerCase();
+  const numeric = Number(text.match(/\d{2,3}/)?.[0]);
+  if (Number.isFinite(numeric)) return Math.max(0, Math.min(100, numeric));
+  if (/oem|certain/.test(text)) return 100;
+  if (/verified|high/.test(text)) return 88;
+  if (/medium/.test(text)) return 68;
+  if (/public/.test(text)) return 58;
+  if (/low/.test(text)) return 42;
+  return fallback;
+}
+
+function programmerOptionKey(item, index) {
+  return String([item.name, item.role, index].filter(Boolean).join("|"))
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function programmerCoverageOptions(profile) {
+  const items = profile.jobKit?.programmerCoverage?.length ? profile.jobKit.programmerCoverage : profile.jobKit?.programmers || [];
+  return items
+    .map((item, index) => ({
+      ...item,
+      key: programmerOptionKey(item, index),
+      confidencePercent: programmerPercent(item),
+    }))
+    .sort((a, b) => b.confidencePercent - a.confidencePercent || String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+function selectedProgrammerOption(profile) {
+  const options = programmerCoverageOptions(profile);
+  return options.find((item) => item.key === selectedProgrammerKey) || options[0] || null;
+}
+
+function renderSelectedKeyMini(snapshot) {
+  if (!snapshot) return "";
+  const { best, title, typeLabel, identifier } = snapshot;
+  return `
+    <section class="selected-key-mini">
+      <div class="selected-key-mini-photo">${
+        best.image ? renderOfferThumb(best, title) : `<div class="offer-thumb empty" aria-hidden="true">No photo</div>`
+      }</div>
+      <div>
+        <span>${escapeHtml(typeLabel)}</span>
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(identifier)}</p>
+      </div>
+    </section>
+  `;
+}
+
+function renderProgrammerCoverageScreen(profile) {
+  const snapshot = selectedPartSnapshot(profile);
+  if (!snapshot) {
+    return `
+      <section class="program-screen programmer-step">
+        <div class="workflow-heading">
+          <p class="eyebrow">Screen 5</p>
+          <h3>Select a key picture first</h3>
+          <p>Go back one screen and choose the picture/button layout before confirming programmer coverage.</p>
+        </div>
+        ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`])}
+      </section>
+    `;
+  }
+  const options = programmerCoverageOptions(profile);
+  return `
+    <section class="program-screen programmer-step">
+      <div class="workflow-heading">
+        <p class="eyebrow">Screen 5</p>
+        <h3>Confirm programmer coverage</h3>
+        <p>Pick the programmer path you plan to trust for this job. The final screen will summarize the selected key, programmer, and field tools.</p>
+      </div>
+      ${renderSelectedKeyMini(snapshot)}
+      <div class="programmer-coverage-list">
+        ${
+          options.length
+            ? options
+                .map((item) => {
+                  const percent = programmerPercent(item);
+                  const oemNote = Number(item.oemKeyLikelihood) >= 90 ? `OEM key likely ${item.oemKeyLikelihood}% if this path is required.` : "";
+                  return `
+                    <button class="programmer-option ${selectedProgrammerKey === item.key ? "active" : ""}" type="button" data-select-programmer="${escapeHtml(item.key)}">
+                      <div class="programmer-option-copy">
+                        <span>${escapeHtml(item.role || item.source || "Coverage path")}</span>
+                        <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
+                        <p>${escapeHtml([item.detail || "Confirm exact vehicle coverage before dispatch.", oemNote].filter(Boolean).join(" "))}</p>
+                      </div>
+                      <div class="programmer-confidence">
+                        <strong>${percent}%</strong>
+                        <small>confidence</small>
+                        <i style="--confidence:${percent}%"></i>
+                      </div>
+                    </button>
+                  `;
+                })
+                .join("")
+            : `<article class="assistant-card"><strong>No programmer coverage yet</strong><p>Add a programmer record or use OEM as the fallback path before quoting.</p></article>`
+        }
+      </div>
+      ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`])}
+    </section>
+  `;
+}
+
+function renderFinalJobSummaryScreen(profile) {
+  const snapshot = selectedPartSnapshot(profile);
+  const programmer = selectedProgrammerOption(profile);
+  if (!snapshot) {
+    return `
+      <section class="program-screen final-rundown-step">
+        <div class="workflow-heading">
+          <p class="eyebrow">Final rundown</p>
+          <h3>Select a key picture first</h3>
+          <p>The job rundown needs a selected key/button layout before it can summarize the parts and tools.</p>
+        </div>
+        ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`])}
+      </section>
+    `;
+  }
+  const vehicle = profile.vehicle || {};
+  const reference = profile.vehicleReference || {};
+  const best = snapshot.best;
+  const percent = programmer ? programmerPercent(programmer) : 0;
+  const rows = [
+    ["Vehicle", [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ")],
+    ["Key choice", [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ")],
+    ["Part clue", snapshot.identifier],
+    ["FCC / buttons", [snapshot.group.fccs.join(" / "), snapshot.group.buttons.length ? `${snapshot.group.buttons.join(" / ")} button` : ""].filter(Boolean).join(" | ")],
+    ["Chip / frequency", [best.chip, snapshot.group.frequencies.join(" / ")].filter(Boolean).join(" | ")],
+    ["Programmer", programmer ? `${programmer.name} (${percent}% confidence)` : "Verify coverage"],
+    ["OEM key note", programmer && Number(programmer.oemKeyLikelihood) >= 90 ? `Plan OEM key about ${programmer.oemKeyLikelihood}% of the time when this path is required.` : ""],
+    ["Keyway", reference.keyway?.primary || "Verify by lock/emergency insert"],
+    ["Lishi / decode", reference.lishi?.primary || "Verify keyway before choosing tool"],
+    ["Cut / originate", (reference.cutting || reference.decodePlan || []).slice(0, 2).join(" | ")],
+  ].filter(([, value]) => value);
+  const verify = [
+    ...(profile.jobKit?.verify || []),
+    ...(reference.partVerification || []),
+    "Confirm ownership/authorization",
+    "Confirm FCC, buttons, chip, and emergency insert before cutting/programming",
+  ];
+  const tools = [
+    ...(profile.jobKit?.tools || []).map((item) => item.name || item.detail),
+    ...(reference.fieldTools || []),
+  ].filter(Boolean);
+  return `
+    <section class="program-screen final-rundown-step">
+      <div class="workflow-heading">
+        <p class="eyebrow">Final rundown</p>
+        <h3>What to bring and verify</h3>
+        <p>Basic field summary for this job. No supplier pricing, no shop-history giveaway, just the working reference.</p>
+      </div>
+      ${renderSelectedKeyMini(snapshot)}
+      <section class="job-rundown-grid">
+        ${rows
+          .map(
+            ([label, value]) => `
+              <article>
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+              </article>
+            `,
+          )
+          .join("")}
+      </section>
+      <section class="job-rundown-lists">
+        <article>
+          <span>Tools</span>
+          <ul>${[...new Set(tools)].slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </article>
+        <article>
+          <span>Verify</span>
+          <ul>${[...new Set(verify)].slice(0, 7).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+        </article>
+      </section>
+      ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-back="programmers">Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
+      ])}
+    </section>
+  `;
+}
+
 function renderSelectedSupplierScreen(profile) {
   const products = profile.liveSupplierLookup?.products || [];
   let selectedProducts = productsForFamily(products, selectedKeyFamily);
@@ -2782,8 +3003,13 @@ function renderVinProfile(profile) {
     screenMarkup = renderKeyFamilyScreen(profile);
   } else if (vinWorkflowStep === "parts") {
     screenMarkup = renderKeyChoicesScreen(profile);
+  } else if (vinWorkflowStep === "programmers") {
+    screenMarkup = renderProgrammerCoverageScreen(profile);
+  } else if (vinWorkflowStep === "summary") {
+    screenMarkup = renderFinalJobSummaryScreen(profile);
   } else if (vinWorkflowStep === "suppliers") {
-    screenMarkup = renderSelectedSupplierScreen(profile);
+    vinWorkflowStep = "summary";
+    screenMarkup = renderFinalJobSummaryScreen(profile);
   } else {
     vinWorkflowStep = "vehicle";
     screenMarkup = renderVehicleApprovalScreen(profile, context);
@@ -3310,7 +3536,8 @@ document.addEventListener("click", (event) => {
   const backButton = event.target.closest("[data-vin-back]");
   if (backButton && latestVinProfile) {
     vinWorkflowStep = backButton.dataset.vinBack;
-    if (vinWorkflowStep !== "parts") selectedPartChoiceKey = "";
+    if (["vehicle", "vehicle-details", "package", "family"].includes(vinWorkflowStep)) selectedPartChoiceKey = "";
+    if (["vehicle", "vehicle-details", "package", "family", "parts"].includes(vinWorkflowStep)) selectedProgrammerKey = "";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     renderVinProfile(latestVinProfile);
     return;
@@ -3343,6 +3570,7 @@ document.addEventListener("click", (event) => {
   if (familyButton && latestVinProfile) {
     selectedKeyFamily = familyButton.dataset.keyFamily;
     selectedPartChoiceKey = "";
+    selectedProgrammerKey = "";
     vinWorkflowStep = "parts";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     renderVinProfile(latestVinProfile);
@@ -3352,7 +3580,16 @@ document.addEventListener("click", (event) => {
   const partChoiceButton = event.target.closest("[data-select-part-choice]");
   if (partChoiceButton && latestVinProfile) {
     selectedPartChoiceKey = partChoiceButton.dataset.selectPartChoice;
-    vinWorkflowStep = "suppliers";
+    selectedProgrammerKey = "";
+    vinWorkflowStep = "programmers";
+    renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  const programmerButton = event.target.closest("[data-select-programmer]");
+  if (programmerButton && latestVinProfile) {
+    selectedProgrammerKey = programmerButton.dataset.selectProgrammer;
+    vinWorkflowStep = "summary";
     renderVinProfile(latestVinProfile);
     return;
   }
@@ -3360,6 +3597,7 @@ document.addEventListener("click", (event) => {
   const clearPartChoiceButton = event.target.closest("[data-clear-part-choice]");
   if (clearPartChoiceButton && latestVinProfile) {
     selectedPartChoiceKey = "";
+    selectedProgrammerKey = "";
     renderVinProfile(latestVinProfile);
     return;
   }
@@ -3657,6 +3895,8 @@ vinForm.addEventListener("submit", async (event) => {
     vinWorkflowStep = "vehicle";
     selectedKeyFamily = "";
     selectedKeyPackage = "";
+    selectedPartChoiceKey = "";
+    selectedProgrammerKey = "";
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     vinResult.innerHTML = `
       <div class="lookup-loading">
@@ -3691,6 +3931,8 @@ if (ymmForm) {
       vinWorkflowStep = "vehicle";
       selectedKeyFamily = "";
       selectedKeyPackage = "";
+      selectedPartChoiceKey = "";
+      selectedProgrammerKey = "";
       Object.values(liveProductFilters).forEach((selected) => selected.clear());
       vinResult.innerHTML = `
         <div class="lookup-loading">
