@@ -2192,6 +2192,36 @@ function selectedProgrammerOption(profile) {
   return options.find((item) => item.key === selectedProgrammerKey) || options[0] || null;
 }
 
+function programmerSummaryText(item) {
+  if (!item) return "";
+  if (/OEM/i.test(item.role || "")) {
+    return item.passThru ? `OEM fallback. Interface: ${item.passThru}` : "OEM fallback path when aftermarket coverage is not proven.";
+  }
+  if (item.models?.length) return item.models.join(" / ");
+  return item.detail || "Verify exact year, model, key system, and add-key/all-keys-lost coverage.";
+}
+
+function programmerLane(item) {
+  if (/OEM/i.test(item.role || "")) return "OEM fallback";
+  if (item.platform || /Aftermarket/i.test(`${item.role} ${item.name}`)) return "Aftermarket";
+  return "Saved / verified";
+}
+
+function renderProgrammerCompactOption(item) {
+  const percent = programmerPercent(item);
+  const selected = selectedProgrammerKey === item.key;
+  return `
+    <button class="programmer-compact-option ${selected ? "active" : ""}" type="button" data-select-programmer="${escapeHtml(item.key)}">
+      <div>
+        <span>${escapeHtml(programmerLane(item))}</span>
+        <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
+        <p>${escapeHtml(programmerSummaryText(item))}</p>
+      </div>
+      <em>${percent}%</em>
+    </button>
+  `;
+}
+
 function renderSelectedKeyMini(snapshot) {
   if (!snapshot) return "";
   const { best, title, typeLabel, identifier } = snapshot;
@@ -2224,46 +2254,58 @@ function renderProgrammerCoverageScreen(profile) {
     `;
   }
   const options = programmerCoverageOptions(profile);
+  const oemOptions = options.filter((item) => /OEM/i.test(item.role || ""));
+  const savedOptions = options.filter((item) => !oemOptions.includes(item) && !item.platform && !/Aftermarket/i.test(`${item.role} ${item.name}`));
+  const aftermarketOptions = options.filter((item) => !oemOptions.includes(item) && !savedOptions.includes(item));
+  const topAftermarket = aftermarketOptions.slice(0, 6);
+  const extraAftermarket = aftermarketOptions.slice(6);
   return `
     <section class="program-screen programmer-step">
-      <div class="workflow-heading">
-        <p class="eyebrow">Screen 6</p>
-        <h3>Confirm programmer coverage</h3>
-        <p>Pick the programmer path you plan to trust for this job. The final screen will summarize the selected key, programmer, and field tools.</p>
+      <div class="programmer-command-head">
+        <div>
+          <p class="eyebrow">Screen 6</p>
+          <h3>Choose programmer path</h3>
+          <p>Tap the path you would actually use. Use the form button to teach LockForge what worked after the job.</p>
+        </div>
+        <button class="primary-action" type="button" data-save-selected-job>Enter worked job info</button>
       </div>
       ${renderSelectedKeyMini(snapshot)}
-      <div class="programmer-coverage-list">
-        ${
-          options.length
-            ? options
-                .map((item) => {
-                  const percent = programmerPercent(item);
-                  const oemNote = Number(item.oemKeyLikelihood) >= 90 ? `OEM key likely ${item.oemKeyLikelihood}% if this path is required.` : "";
-                  const modelNote = item.models?.length ? `Models: ${item.models.join(", ")}` : "";
-                  const passThruNote =
-                    item.passThru && !String(item.detail || "").includes(item.passThru)
-                      ? `Pass-through/VCI: ${item.passThru}`
-                      : "";
-                  return `
-                    <button class="programmer-option ${selectedProgrammerKey === item.key ? "active" : ""}" type="button" data-select-programmer="${escapeHtml(item.key)}">
-                      <div class="programmer-option-copy">
-                        <span>${escapeHtml(item.role || item.source || "Coverage path")}</span>
-                        <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
-                        <p>${escapeHtml([modelNote, item.detail || "Confirm exact vehicle coverage before dispatch.", passThruNote, oemNote].filter(Boolean).join(" "))}</p>
-                      </div>
-                      <div class="programmer-confidence">
-                        <strong>${percent}%</strong>
-                        <small>confidence</small>
-                        <i style="--confidence:${percent}%"></i>
-                      </div>
-                    </button>
-                  `;
-                })
-                .join("")
-            : `<article class="assistant-card"><strong>No programmer coverage yet</strong><p>Add a programmer record or use OEM as the fallback path before quoting.</p></article>`
-        }
+      <div class="job-entry-callout">
+        <strong>Where the form is</strong>
+        <p>Tap <b>Enter worked job info</b> to save exact vehicle, key, Lishi/keyway, part number, programmer, and outcome. That data raises future confidence.</p>
       </div>
-      ${renderWorkflowActions([`<button class="secondary-action" type="button" data-vin-back="lishi">Back</button>`])}
+      ${
+        options.length
+          ? `
+            <div class="programmer-lanes">
+              ${
+                savedOptions.length
+                  ? `<section><div class="programmer-lane-head"><span>Best starting point</span><strong>Saved / verified path</strong></div>${savedOptions.map(renderProgrammerCompactOption).join("")}</section>`
+                  : ""
+              }
+              ${
+                oemOptions.length
+                  ? `<section><div class="programmer-lane-head"><span>100% fallback</span><strong>OEM path</strong></div>${oemOptions.map(renderProgrammerCompactOption).join("")}</section>`
+                  : ""
+              }
+              ${
+                topAftermarket.length
+                  ? `<section><div class="programmer-lane-head"><span>Coverage clues</span><strong>Aftermarket options</strong></div>${topAftermarket.map(renderProgrammerCompactOption).join("")}</section>`
+                  : ""
+              }
+              ${
+                extraAftermarket.length
+                  ? `<details class="programmer-more"><summary>More aftermarket platforms (${extraAftermarket.length})</summary>${extraAftermarket.map(renderProgrammerCompactOption).join("")}</details>`
+                  : ""
+              }
+            </div>
+          `
+          : `<article class="assistant-card"><strong>No programmer coverage yet</strong><p>Add a worked job record or use OEM as the fallback path before quoting.</p></article>`
+      }
+      ${renderWorkflowActions([
+        `<button class="secondary-action" type="button" data-vin-back="lishi">Back</button>`,
+        `<button class="secondary-action" type="button" data-save-selected-job>Save worked job</button>`,
+      ])}
     </section>
   `;
 }

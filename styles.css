@@ -2073,6 +2073,134 @@ textarea {
   gap: 10px;
 }
 
+.programmer-command-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.programmer-command-head h3 {
+  margin: 2px 0 6px;
+  font-size: clamp(1.45rem, 4vw, 2.1rem);
+}
+
+.programmer-command-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.job-entry-callout {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(208, 22, 38, 0.3);
+  border-left: 5px solid var(--accent);
+  border-radius: 12px;
+  background: #fffdfa;
+}
+
+.job-entry-callout strong {
+  color: var(--ink);
+}
+
+.job-entry-callout p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.programmer-lanes {
+  display: grid;
+  gap: 12px;
+}
+
+.programmer-lanes section,
+.programmer-more {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1c7bf;
+  border-radius: 12px;
+  background: white;
+}
+
+.programmer-lane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.programmer-lane-head span,
+.programmer-compact-option span {
+  color: var(--accent-dark);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.programmer-lane-head strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.programmer-compact-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #ead2cb;
+  border-radius: 10px;
+  background: #fffaf6;
+  text-align: left;
+}
+
+.programmer-compact-option.active,
+.programmer-compact-option:hover {
+  border-color: var(--accent);
+  box-shadow: 0 8px 18px rgba(208, 22, 38, 0.12);
+}
+
+.programmer-compact-option strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.programmer-compact-option p {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.programmer-compact-option em {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.programmer-more summary {
+  cursor: pointer;
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
 .programmer-option {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 92px;
@@ -3609,6 +3737,14 @@ textarea {
 
   .selected-key-reference {
     grid-template-columns: 1fr;
+  }
+
+  .programmer-command-head {
+    grid-template-columns: 1fr;
+  }
+
+  .programmer-command-head .primary-action {
+    width: 100%;
   }
 
   .vital-vehicle-grid,
