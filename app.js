@@ -59,6 +59,7 @@ const publicSourceStatus = document.querySelector("#publicSourceStatus");
 const publicSourceList = document.querySelector("#publicSourceList");
 const workedJobForm = document.querySelector("#workedJobForm");
 const workedJobStatus = document.querySelector("#workedJobStatus");
+const fillWorkedJobFromLookupButton = document.querySelector("#fillWorkedJobFromLookup");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -2731,6 +2732,39 @@ async function saveWorkedJobPayload(payload) {
   });
 }
 
+function fillWorkedJobFromCurrentLookup() {
+  if (!workedJobForm || !latestVinProfile?.vehicle) {
+    if (workedJobStatus) workedJobStatus.textContent = "Run a VIN lookup first, then come back here to prefill the job.";
+    return;
+  }
+  const vehicle = latestVinProfile.vehicle || {};
+  const snapshot = selectedPartSnapshot(latestVinProfile);
+  const lishi = lishiReferenceForProfile(latestVinProfile, snapshot);
+  const programmer = selectedProgrammerOption(latestVinProfile);
+  const best = snapshot?.best || {};
+  workedJobForm.elements.vin.value = latestVinProfile.vin || "";
+  workedJobForm.elements.year.value = vehicle.year || "";
+  workedJobForm.elements.make.value = vehicle.make || "";
+  workedJobForm.elements.model.value = vehicle.model || "";
+  workedJobForm.elements.trim.value = vehicle.trim || "";
+  workedJobForm.elements.keyType.value = selectedKeyFamily === "proximity" ? "proximity" : "keyed";
+  workedJobForm.elements.outcome.value = "worked";
+  workedJobForm.elements.exactPart.value = best.partName || snapshot?.identifier || "";
+  workedJobForm.elements.partNumber.value = [best.sku, best.oem, best.fcc].filter(Boolean).join(" / ");
+  workedJobForm.elements.buttons.value = [snapshot?.buttonLabel, best.fcc].filter(Boolean).join(" / ");
+  workedJobForm.elements.lishi.value = lishi.keyways?.[0] || lishi.primary || "";
+  workedJobForm.elements.programmer.value = programmer?.name || "";
+  workedJobForm.elements.notes.value = [
+    snapshot?.typeLabel,
+    best.frequency ? `Frequency ${best.frequency}` : "",
+    best.chip ? `Chip ${best.chip}` : "",
+    lishi.primary ? `Lishi ${lishi.primary}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (workedJobStatus) workedJobStatus.textContent = "Filled from the current lookup. Verify the fields, then save.";
+}
+
 function feedbackLabel(outcome) {
   return {
     worked: "Worked",
@@ -4073,6 +4107,7 @@ jobForm.addEventListener("submit", async (event) => {
 });
 
 scanButton?.addEventListener("click", startVinScanner);
+fillWorkedJobFromLookupButton?.addEventListener("click", fillWorkedJobFromCurrentLookup);
 
 document.addEventListener("submit", async (event) => {
   if (event.target?.id !== "jobSaveForm") return;
