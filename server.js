@@ -3803,8 +3803,10 @@ function publicProgrammerCluesFor(vehicle, publicSources) {
   return clues;
 }
 
-function evidenceConfidenceFromCount(count, base = 84) {
+function evidenceConfidenceFromCount(count, base = 84, options = {}) {
   const numeric = Number(count) || 0;
+  if (numeric >= 1 && options.provenWorkedJob) return 100;
+  if (numeric >= 1 && options.exactVin) return 100;
   if (numeric >= 5) return 98;
   if (numeric >= 3) return 94;
   if (numeric >= 2) return 90;
@@ -3820,11 +3822,12 @@ function shopEvidenceProgrammerItems(shopEvidence) {
     role: "Shop-success evidence",
     detail: `${total} matching completed shop job${total === 1 ? "" : "s"} mentioned this programmer/tool family.`,
     confidence: "shop evidence",
-    confidencePercent: evidenceConfidenceFromCount(total, 86),
+    confidencePercent: evidenceConfidenceFromCount(total, 86, { exactVin: Number(shopEvidence?.exactVinCount || 0) > 0 }),
     evidence: [
       `${total} matching job-history record${total === 1 ? "" : "s"} for this VIN/YMM pattern.`,
+      Number(shopEvidence?.exactVinCount || 0) > 0 ? "Exact VIN was seen in completed job history." : "",
       "This is your field history, so it outranks broad public coverage clues.",
-    ],
+    ].filter(Boolean),
     source: "shop history",
   }));
 }
@@ -3839,11 +3842,11 @@ function verifiedProfileProgrammerItems(verifiedProfile) {
       return {
         name: cleanString(item.value),
         role: "Worked job outcome",
-        detail: `${count} saved worked-job outcome${count === 1 ? "" : "s"} confirmed this programmer on this vehicle profile.`,
-        confidence: "worked job",
-        confidencePercent: evidenceConfidenceFromCount(count, 88),
+        detail: `${count} saved worked-job outcome${count === 1 ? "" : "s"} confirmed this programmer on this vehicle profile. Treat as shop-confirmed; still verify subscriptions, tokens, security access, and exact job type before dispatch.`,
+        confidence: "shop-confirmed",
+        confidencePercent: evidenceConfidenceFromCount(count, 100, { provenWorkedJob: true }),
         evidence: [
-          `${count} saved worked-job outcome${count === 1 ? "" : "s"} from the app form.`,
+          `${count} saved worked-job outcome${count === 1 ? "" : "s"} from the app form, so this is 100% confirmed in your records.`,
           item.partKey ? `Tied to saved part/key record ${item.partKey}.` : "Tied to this saved vehicle profile.",
         ],
         source: "worked job form",
