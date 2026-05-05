@@ -1,4 +1,4 @@
-const CACHE_NAME = "lockforge-shell-v11";
+const CACHE_NAME = "lockforge-shell-v12";
 const SHELL_ASSETS = [
   "/",
   "/index.html",

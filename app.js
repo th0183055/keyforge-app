@@ -2238,6 +2238,27 @@ function selectedProgrammerOption(profile) {
   return options.find((item) => item.key === selectedProgrammerKey) || options[0] || null;
 }
 
+function normalizedProgrammerName(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+function selectWorkedProgrammerOption(profile, programmerName) {
+  const target = normalizedProgrammerName(programmerName);
+  if (!target) return false;
+  const options = programmerCoverageOptions(profile);
+  const sameName = (item) => normalizedProgrammerName(item.name) === target;
+  const workedMatch =
+    options.find((item) => sameName(item) && /worked|shop-success|shop evidence/i.test([item.role, item.source].filter(Boolean).join(" "))) ||
+    options.find(sameName);
+  if (!workedMatch) return false;
+  selectedProgrammerKey = workedMatch.key;
+  return true;
+}
+
 function programmerSummaryText(item) {
   if (!item) return "";
   if (/OEM/i.test(item.role || "")) {
@@ -3674,12 +3695,13 @@ function openJobSaveModal(offer) {
   const vehicleTitle = latestVinProfile?.vehicle ? [latestVinProfile.vehicle.year, latestVinProfile.vehicle.make, latestVinProfile.vehicle.model].filter(Boolean).join(" ") : "Vehicle";
   const snapshot = selectedPartSnapshot(latestVinProfile);
   const lishi = latestVinProfile ? lishiReferenceForProfile(latestVinProfile, snapshot) : null;
+  const programmer = selectedProgrammerOption(latestVinProfile);
   pendingJobOfferId = offerIdentityKey(offer);
   modal.querySelector("#jobSaveTitle").textContent = offer.partName;
   form.elements.exactPart.value = offer.partName || "";
   form.elements.partNumber.value = [offer.sku, offer.oem, offer.fcc].filter(Boolean).join(" / ");
   form.elements.lishi.value = lishi?.keyways?.[0] || lishi?.primary || "";
-  form.elements.programmer.value = latestVinProfile?.programmingReference?.programmer || latestVinProfile?.programmers?.[0]?.name || "";
+  form.elements.programmer.value = programmer?.name || latestVinProfile?.programmingReference?.programmer || latestVinProfile?.programmers?.[0]?.name || "";
   form.elements.tool.value = latestVinProfile?.tools?.[0]?.name || "";
   form.elements.outcome.value = "worked";
   form.elements.keyType.value = selectedKeyFamily === "proximity" ? "proximity" : "keyed";
@@ -3828,6 +3850,38 @@ async function startSupplierLookup(profile) {
     };
     renderVinProfile(latestVinProfile);
   }
+}
+
+function profileReloadUrl(profile) {
+  if (profile?.vin) return `/api/vin/${encodeURIComponent(profile.vin)}`;
+  const vehicle = profile?.vehicle || {};
+  return `/api/vehicle-lookup?year=${encodeURIComponent(vehicle.year || "")}&make=${encodeURIComponent(vehicle.make || "")}&model=${encodeURIComponent(vehicle.model || "")}`;
+}
+
+async function refreshProfileAfterWorkedJob(result, programmerName = "") {
+  if (!latestVinProfile?.vehicle) return null;
+  const previousProfile = latestVinProfile;
+  const previousLookup = previousProfile.liveSupplierLookup;
+  const previousStep = vinWorkflowStep;
+  const previousFamily = selectedKeyFamily;
+  const previousPartChoice = selectedPartChoiceKey;
+  const previousFilters = Object.fromEntries(Object.entries(liveProductFilters).map(([key, value]) => [key, new Set(value)]));
+
+  const refreshed = await api(profileReloadUrl(previousProfile));
+  if (previousLookup?.products?.length) refreshed.liveSupplierLookup = previousLookup;
+  if (result?.profile) refreshed.verifiedProfile = result.profile;
+
+  vinWorkflowStep = previousStep;
+  selectedKeyFamily = previousFamily;
+  selectedPartChoiceKey = previousPartChoice;
+  Object.entries(previousFilters).forEach(([key, value]) => {
+    liveProductFilters[key] = value;
+  });
+
+  selectWorkedProgrammerOption(refreshed, programmerName);
+  renderVinProfile(refreshed);
+  startSupplierLookup(refreshed);
+  return refreshed;
 }
 
 function renderVinError(message) {
@@ -4188,13 +4242,20 @@ document.addEventListener("submit", async (event) => {
     submitButton.disabled = true;
     submitButton.textContent = "Saving...";
     const outcome = data.get("outcome") || "worked";
+    const programmerName = cleanInput(data.get("programmer"));
+    const lishiName = cleanInput(data.get("lishi"));
+    const exactPartName = cleanInput(data.get("exactPart"));
+    if (!exactPartName || !lishiName || !programmerName) {
+      alert("Enter the exact key, Lishi/keyway, and programmer used so confidence can improve.");
+      return;
+    }
     const part = {
       ...partPayloadFromOffer(offer),
-      name: data.get("exactPart") || offer.partName,
+      name: exactPartName || offer.partName,
       sku: data.get("partNumber") || offer.sku,
-      keyway: data.get("lishi"),
-      lishi: data.get("lishi"),
-      programmer: data.get("programmer"),
+      keyway: lishiName,
+      lishi: lishiName,
+      programmer: programmerName,
     };
     const result = await savePartOutcome(outcome, offer, {
       part,
@@ -4214,8 +4275,7 @@ document.addEventListener("submit", async (event) => {
     selectedJobId = result.job.id;
     renderJobs();
     closeJobSaveModal();
-    if (outcome === "worked") startSupplierLookup(latestVinProfile);
-    else renderVinProfile(latestVinProfile);
+    await refreshProfileAfterWorkedJob(result, programmerName);
   } catch (error) {
     alert(error.message);
   } finally {
@@ -4241,6 +4301,7 @@ workedJobForm?.addEventListener("submit", async (event) => {
     jobs.unshift(result.job);
     selectedJobId = result.job.id;
     renderJobs();
+    await refreshProfileAfterWorkedJob(result, payload.part.programmer);
     workedJobForm.reset();
     workedJobStatus.textContent = `Saved ${payload.vehicle.year} ${payload.vehicle.make} ${payload.vehicle.model}: ${payload.part.name} / ${payload.part.lishi} / ${payload.part.programmer}.`;
   } catch (error) {

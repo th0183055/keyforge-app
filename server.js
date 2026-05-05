@@ -4073,22 +4073,37 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
         [programmingReference?.programMethod, programmingReference?.notes, programmingReference?.immobilizerSystem].filter(Boolean).join(" "),
       ),
   );
+  const incomingProgrammers = programmerItems || [];
+  const oemProgrammerMatches = incomingProgrammers.filter((item) => itemMatchesOemProgrammer(item, oem));
+  const oemWorkedMatches = oemProgrammerMatches.filter((item) => /worked|shop-success|shop evidence/i.test([item.role, item.source, item.confidence].filter(Boolean).join(" ")));
+  const oemEvidence = [
+    `${oem.name} is the OEM/manufacturer path for ${vehicle.make || "this make"}.`,
+    `Pass-through/interface: ${oem.passThru}`,
+    ...oemProgrammerMatches.flatMap((item) => item.evidence || []),
+  ];
+  const oemDetail = [
+    oem.detail,
+    `Pass-through/interface: ${oem.passThru}`,
+    "If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.",
+    oemWorkedMatches.length
+      ? `${oemWorkedMatches.length} saved worked-job outcome${oemWorkedMatches.length === 1 ? "" : "s"} matched this OEM/SPS path.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const coverage = [
     {
       name: oem.name,
       role: "OEM programmer",
-      detail: `${oem.detail} Pass-through/interface: ${oem.passThru} If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.`,
+      detail: oemDetail,
       passThru: oem.passThru,
       confidence: "100%",
       confidencePercent: 100,
       oemKeyLikelihood: 90,
-      source: oemRequired ? "OEM likely required" : "OEM fallback",
-      evidence: [
-        `${oem.name} is the OEM/manufacturer path for ${vehicle.make || "this make"}.`,
-        `Pass-through/interface: ${oem.passThru}`,
-      ],
+      source: oemWorkedMatches.length ? "worked job form" : oemRequired ? "OEM likely required" : "OEM fallback",
+      evidence: [...new Set(oemEvidence.filter(Boolean))].slice(0, 5),
     },
-    ...(programmerItems || []).filter((item) => !itemMatchesOemProgrammer(item, oem)),
+    ...incomingProgrammers.filter((item) => !itemMatchesOemProgrammer(item, oem)),
   ];
   if (programmingReference?.programMethod && !coverage.some((item) => /OBD|EEPROM|BENCH|OEM/i.test(`${item.name} ${item.role}`))) {
     coverage.push({
