@@ -2223,6 +2223,15 @@ textarea {
   -webkit-line-clamp: 2;
 }
 
+.programmer-compact-option small {
+  display: block;
+  margin-top: 5px;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
 .programmer-compact-option em {
   display: grid;
   place-items: center;
@@ -3089,6 +3098,40 @@ textarea {
   place-items: center;
   color: var(--accent-dark);
   font-weight: 900;
+}
+
+.generated-key-thumb {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  place-items: center;
+  gap: 4px;
+  padding: 8px;
+  color: var(--accent-dark);
+  text-align: center;
+}
+
+.generated-key-thumb span {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fff4e5, #f3d1c5);
+  color: var(--accent-dark);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.generated-key-thumb small {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .offer-row.out-of-stock {

@@ -659,13 +659,38 @@ function partTypeBucket(product) {
 }
 
 function buttonLayoutBucket(product) {
-  const buttons = product.keyInfo?.buttons || buttonCountFromText(product.name);
-  if (!buttons) return "Button layout unknown";
-  const hasRemoteStart = /remote start|r\/s|rs\b/i.test(buttons);
-  const count = String(buttons).match(/\b([2-7])\b/);
-  if (count) return `${count[1]} button${hasRemoteStart ? " + remote start" : ""}`;
-  if (hasRemoteStart) return "Remote start";
-  return String(buttons);
+  const source = [
+    product.keyInfo?.buttons,
+    product.buttons,
+    product.name,
+    product.keyInfo?.productType,
+    product.description,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const actions = buttonActionTokens(product);
+  const count = buttonCountFromText(source) || (actions.length >= 2 ? String(actions.length) : "");
+  if (!count && !actions.length) return "Button layout unknown";
+  const actionLabel = actions.length ? `: ${actions.join(" / ")}` : "";
+  if (count) return `${count} button${actionLabel}`;
+  return actions.join(" / ");
+}
+
+function buttonActionTokens(product) {
+  const text = productSearchText(product).toLowerCase();
+  const tokens = [];
+  const add = (label, pattern) => {
+    if (pattern.test(text) && !tokens.includes(label)) tokens.push(label);
+  };
+  add("Lock", /\block\b|\block\/unlock\b/);
+  add("Unlock", /\bunlock\b|\block\/unlock\b/);
+  add("Panic", /\bpanic\b/);
+  add("Trunk", /\btrunk\b/);
+  add("Hatch", /\bhatch\b|\bliftgate\b|\brear gate\b/);
+  add("Tailgate", /\btailgate\b/);
+  add("Remote start", /\bremote start\b|\br\/s\b|\brs\b/);
+  add("Sliding door", /\bsliding door\b|\bslide door\b|\bpower door\b/);
+  return tokens.slice(0, 7);
 }
 
 function productSearchText(product) {
@@ -1277,7 +1302,12 @@ function normalizePrice(value) {
 }
 
 function buttonCountFromText(value) {
-  const match = String(value || "").match(/\b(\d)\s*(?:button|btn)\b/i);
+  const text = String(value || "");
+  const match =
+    text.match(/\b([2-7])\s*(?:button|buttons|btn|btns)\b/i) ||
+    text.match(/\b([2-7])[-\s]*(?:button|buttons|btn|btns)\b/i) ||
+    text.match(/\b([2-7])\s*b\b/i) ||
+    text.match(/\b(?:button|buttons|btn|btns)[:\s-]*([2-7])\b/i);
   return match ? match[1] : "";
 }
 
@@ -1462,6 +1492,8 @@ function buildExactPartGroup(key, offers, options = {}) {
     return (a.priceValue ?? Infinity) - (b.priceValue ?? Infinity) || a.supplier.localeCompare(b.supplier);
   });
   group.bestOffer = group.offers[0];
+  group.imageOffer = group.offers.find((offer) => offer.image) || group.bestOffer;
+  group.image = group.imageOffer?.image || "";
   group.label = exactPartLabel(group);
   group.supplierCount = new Set(group.offers.map((offer) => offer.supplier)).size;
   group.conditions = [...new Set(group.offers.map((offer) => offer.condition && offer.condition !== "Verify" ? offer.condition : conditionBucket(offer.rawProduct)).filter(Boolean))];
@@ -1521,7 +1553,15 @@ function visualPartChoiceKey(group) {
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `visual:${family}:${style}:${normalizedLayout || "UNKNOWN"}`;
+  const layoutUnknown = !normalizedLayout || normalizedLayout === "BUTTON-LAYOUT-UNKNOWN";
+  const unknownIdentity = layoutUnknown
+    ? String([best.fcc, best.oem, best.sku, best.partName, best.image].filter(Boolean).join(" "))
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 90)
+    : "";
+  return `visual:${family}:${style}:${normalizedLayout || "UNKNOWN"}${unknownIdentity ? `:${unknownIdentity}` : ""}`;
 }
 
 function visualPartChoiceGroups(offers) {
@@ -1990,6 +2030,7 @@ function renderOfferLanes(offers, baselineOffers = offers) {
 
 function renderPartChoiceCard(group) {
   const offer = group.bestOffer;
+  const imageOffer = group.imageOffer || group.offers.find((item) => item.image) || offer;
   const chosen = selectedPartChoiceKey === group.key;
   const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(offer.rawProduct));
   const typeLabel = partTypeBucket(offer.rawProduct);
@@ -1997,9 +2038,9 @@ function renderPartChoiceCard(group) {
     <button class="part-choice-card ${chosen ? "active" : ""}" type="button" data-select-part-choice="${escapeHtml(group.key)}">
       <div class="part-choice-image">
         ${
-          offer.image
-            ? renderOfferThumb(offer, group.label)
-            : `<div class="offer-thumb empty" aria-hidden="true">No photo</div>`
+          imageOffer.image
+            ? renderOfferThumb(imageOffer, group.label)
+            : renderKeyImageFallback(buttonLabel, typeLabel)
         }
       </div>
       <div class="part-choice-copy">
@@ -2056,11 +2097,13 @@ function selectedPartSnapshot(profile) {
   const group = selectedVisualPartGroup(profile);
   if (!group) return null;
   const best = group.bestOffer;
+  const imageOffer = group.imageOffer || group.offers.find((offer) => offer.image) || best;
   const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(best.rawProduct));
   const typeLabel = partTypeBucket(best.rawProduct);
   return {
     group,
     best,
+    imageOffer,
     buttonLabel,
     typeLabel,
     title: buttonLabel || typeLabel || "Selected key",
@@ -2204,6 +2247,13 @@ function programmerSummaryText(item) {
   return item.detail || "Verify exact year, model, key system, and add-key/all-keys-lost coverage.";
 }
 
+function programmerEvidenceText(item) {
+  const evidence = Array.isArray(item?.evidence) ? item.evidence.filter(Boolean) : [];
+  if (evidence.length) return evidence.slice(0, 2).join(" | ");
+  if (item?.sourceUrl) return "Public source listed; verify exact function coverage before dispatch.";
+  return "";
+}
+
 function programmerLane(item) {
   if (/OEM/i.test(item.role || "")) return "OEM fallback";
   if (item.platform || /Aftermarket/i.test(`${item.role} ${item.name}`)) return "Aftermarket";
@@ -2219,6 +2269,7 @@ function renderProgrammerCompactOption(item) {
         <span>${escapeHtml(programmerLane(item))}</span>
         <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
         <p>${escapeHtml(programmerSummaryText(item))}</p>
+        ${programmerEvidenceText(item) ? `<small>${escapeHtml(programmerEvidenceText(item))}</small>` : ""}
       </div>
       <em>${percent}%</em>
     </button>
@@ -2227,11 +2278,12 @@ function renderProgrammerCompactOption(item) {
 
 function renderSelectedKeyMini(snapshot) {
   if (!snapshot) return "";
-  const { best, title, typeLabel, identifier } = snapshot;
+  const { best, imageOffer, title, typeLabel, identifier } = snapshot;
+  const thumbOffer = imageOffer || best;
   return `
     <section class="selected-key-mini">
       <div class="selected-key-mini-photo">${
-        best.image ? renderOfferThumb(best, title) : `<div class="offer-thumb empty" aria-hidden="true">No photo</div>`
+        thumbOffer.image ? renderOfferThumb(thumbOffer, title) : renderKeyImageFallback(title, typeLabel)
       }</div>
       <div>
         <span>${escapeHtml(typeLabel)}</span>
@@ -2781,6 +2833,21 @@ function renderOfferThumb(offer, title = "") {
   return offer?.image
     ? `<img class="offer-thumb" src="${escapeHtml(offer.image)}" alt="${escapeHtml(label)}" />`
     : `<div class="offer-thumb empty" aria-hidden="true">${escapeHtml(String(label).charAt(0) || "?")}</div>`;
+}
+
+function renderKeyImageFallback(label = "", typeLabel = "") {
+  const initials = String(typeLabel || label || "Key")
+    .split(/\s+/)
+    .map((word) => word.charAt(0))
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+  return `
+    <div class="offer-thumb generated-key-thumb" aria-label="${escapeHtml(`${typeLabel || "Key"} reference image placeholder`)}">
+      <span>${escapeHtml(initials || "KEY")}</span>
+      <small>${escapeHtml(label || typeLabel || "Verify photo")}</small>
+    </div>
+  `;
 }
 
 function renderOfferPrice(offer) {

@@ -173,11 +173,13 @@ async function main() {
       { id: "eeprom-tool-sources", name: "EEPROM tool sources", type: "public tool capability clue", use: "Public tool pages/manuals for EEPROM/MCU/IMMO ECU read-write capability" },
       { id: "fcc-equipment", name: "FCC equipment authorization data", type: "public FCC ID clue", use: "FCC grantee/product clues after a candidate FCC is known from supplier or field data" },
       { id: "supplier-public-catalogs", name: "Supplier public catalogs", type: "public/live catalog facts", use: "Product names, fitment, FCC/chip/button clues, images, and stock where access is allowed" },
+      { id: "community-field-reports", name: "Public community field reports", type: "anecdotal success/failure clue", use: "Public forum, Reddit, YouTube, or article comments can be captured as lower-confidence clues when the source is public and linkable" },
     ],
     autel: { products: autelProducts, coverage },
     probes: sourceProbes,
     programmerSources: sourceProbes.filter((probe) => /programmer|OEM/i.test(probe.category)),
     eepromSources: sourceProbes.filter((probe) => /EEPROM/i.test(probe.category)),
+    communityEvidence: [],
     nhtsa: {
       vehicleVariableCount: nhtsaVariables.Results?.length || 0,
       usefulVariables: (nhtsaVariables.Results || [])

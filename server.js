@@ -297,7 +297,7 @@ async function writeReferenceVault(vault) {
 async function readPublicReferenceSources() {
   await mkdir(dataDir, { recursive: true });
   if (!existsSync(publicReferenceSourcesPath)) {
-    return { generatedAt: "", sources: [], autel: { products: [], coverage: [] }, nhtsa: {} };
+    return { generatedAt: "", sources: [], autel: { products: [], coverage: [] }, communityEvidence: [], nhtsa: {} };
   }
   return JSON.parse(await readFile(publicReferenceSourcesPath, "utf8"));
 }
@@ -3504,6 +3504,12 @@ async function syncPublicReferenceSources() {
         type: "public/live catalog facts",
         use: "Product names, fitment, FCC/chip/button clues, images, and stock where access is allowed",
       },
+      {
+        id: "community-field-reports",
+        name: "Public community field reports",
+        type: "anecdotal success/failure clue",
+        use: "Public forum, Reddit, YouTube, or article comments can be captured as lower-confidence clues when the source is public and linkable",
+      },
     ],
     autel: {
       products: autelProducts,
@@ -3521,6 +3527,7 @@ async function syncPublicReferenceSources() {
     probes: sourceProbes,
     programmerSources: sourceProbes.filter((probe) => /programmer|OEM/i.test(probe.category)),
     eepromSources: sourceProbes.filter((probe) => /EEPROM/i.test(probe.category)),
+    communityEvidence: [],
     nhtsa: {
       vehicleVariableCount: nhtsaVariables.Results?.length || 0,
       usefulVariables: (nhtsaVariables.Results || [])
@@ -3775,6 +3782,10 @@ function publicProgrammerCluesFor(vehicle, publicSources) {
       role: "Aftermarket coverage clue",
       detail: `Public Autel coverage lists ${vehicle.make || "this make"} across ${autelMatches.length} MaxiIM product${autelMatches.length === 1 ? "" : "s"}. Verify exact model/year IMMO functions before dispatch.`,
       confidence: "public clue",
+      evidence: [
+        `Official Autel public coverage data matched ${vehicle.make || "this make"}.`,
+        "Coverage data is a proof clue, not a completed-job success report.",
+      ],
     });
   }
   for (const item of aftermarketProgrammerCatalog) {
@@ -3783,9 +3794,89 @@ function publicProgrammerCluesFor(vehicle, publicSources) {
       ...item,
       role: "Aftermarket platform",
       confidence: "public clue",
+      evidence: [
+        "Public manufacturer/supplier material lists locksmith IMMO/key programming capability.",
+        "No saved worked-job outcome for this exact vehicle yet.",
+      ],
     });
   }
   return clues;
+}
+
+function evidenceConfidenceFromCount(count, base = 84) {
+  const numeric = Number(count) || 0;
+  if (numeric >= 5) return 98;
+  if (numeric >= 3) return 94;
+  if (numeric >= 2) return 90;
+  if (numeric >= 1) return base;
+  return 55;
+}
+
+function shopEvidenceProgrammerItems(shopEvidence) {
+  const total = Number(shopEvidence?.totalMatches || 0);
+  if (!total || !shopEvidence?.programmers?.length) return [];
+  return shopEvidence.programmers.slice(0, 4).map((programmer) => ({
+    name: cleanString(programmer),
+    role: "Shop-success evidence",
+    detail: `${total} matching completed shop job${total === 1 ? "" : "s"} mentioned this programmer/tool family.`,
+    confidence: "shop evidence",
+    confidencePercent: evidenceConfidenceFromCount(total, 86),
+    evidence: [
+      `${total} matching job-history record${total === 1 ? "" : "s"} for this VIN/YMM pattern.`,
+      "This is your field history, so it outranks broad public coverage clues.",
+    ],
+    source: "shop history",
+  }));
+}
+
+function verifiedProfileProgrammerItems(verifiedProfile) {
+  const outcomes = verifiedProfile?.programmerOutcomes || (verifiedProfile?.preferredProgrammer ? [verifiedProfile.preferredProgrammer] : []);
+  return outcomes
+    .filter((item) => cleanString(item.value))
+    .slice(0, 5)
+    .map((item) => {
+      const count = Number(item.count || 1);
+      return {
+        name: cleanString(item.value),
+        role: "Worked job outcome",
+        detail: `${count} saved worked-job outcome${count === 1 ? "" : "s"} confirmed this programmer on this vehicle profile.`,
+        confidence: "worked job",
+        confidencePercent: evidenceConfidenceFromCount(count, 88),
+        evidence: [
+          `${count} saved worked-job outcome${count === 1 ? "" : "s"} from the app form.`,
+          item.partKey ? `Tied to saved part/key record ${item.partKey}.` : "Tied to this saved vehicle profile.",
+        ],
+        source: "worked job form",
+      };
+    });
+}
+
+function communityProgrammerCluesFor(vehicle, publicSources) {
+  const communityEvidence = Array.isArray(publicSources?.communityEvidence) ? publicSources.communityEvidence : [];
+  return communityEvidence
+    .filter((item) => {
+      const makeOk = !item.make || stringsMatch(item.make, vehicle.make);
+      const modelOk = !item.model || stringsMatch(item.model, vehicle.model);
+      const yearOk = !item.year || String(item.year) === String(vehicle.year);
+      return makeOk && modelOk && yearOk && cleanString(item.programmer);
+    })
+    .slice(0, 6)
+    .map((item) => {
+      const outcome = cleanString(item.outcome).toLowerCase();
+      const worked = !outcome || /work|success|programmed|added|akl/i.test(outcome);
+      return {
+        name: cleanString(item.programmer),
+        role: worked ? "Community success clue" : "Community warning clue",
+        detail: cleanString(item.summary || "Public community report captured as an anecdotal clue. Verify with official coverage before relying on it."),
+        confidence: "community clue",
+        confidencePercent: worked ? 62 : 38,
+        evidence: [
+          cleanString(item.sourceName || item.sourceType || "Public community source"),
+          worked ? "Anecdotal success report, not controlled coverage proof." : "Anecdotal failure/warning report; use as a caution flag.",
+        ],
+        sourceUrl: cleanString(item.url),
+      };
+    });
 }
 
 function publicEepromToolClues(publicSources) {
@@ -3952,6 +4043,7 @@ function normalizeProgrammerCoverageItem(item, programmingReference) {
     confidence: `${confidencePercent}%`,
     confidencePercent,
     oemKeyLikelihood: Number.isFinite(Number(item.oemKeyLikelihood)) ? Number(item.oemKeyLikelihood) : 0,
+    evidence: Array.isArray(item.evidence) ? [...new Set(item.evidence.map(cleanString).filter(Boolean))] : [],
   };
 }
 
@@ -3969,6 +4061,7 @@ function mergeProgrammerCoverage(existing, item) {
     detail: cleanString(existing.detail).length >= cleanString(item.detail).length ? existing.detail : item.detail,
     models,
     sourceUrl: existing.sourceUrl || item.sourceUrl,
+    evidence: [...new Set([...(existing.evidence || []), ...(item.evidence || [])].filter(Boolean))].slice(0, 5),
   };
 }
 
@@ -3990,6 +4083,10 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
       confidencePercent: 100,
       oemKeyLikelihood: 90,
       source: oemRequired ? "OEM likely required" : "OEM fallback",
+      evidence: [
+        `${oem.name} is the OEM/manufacturer path for ${vehicle.make || "this make"}.`,
+        `Pass-through/interface: ${oem.passThru}`,
+      ],
     },
     ...(programmerItems || []).filter((item) => !itemMatchesOemProgrammer(item, oem)),
   ];
@@ -4014,7 +4111,7 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
     .slice(0, 18);
 }
 
-function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries, publicSources) {
+function buildJobKit(vehicle, selected, record, programmingReference, reference, referenceVaultEntries, publicSources, verifiedProfile, shopEvidence) {
   const vehicleTitle = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
   const vaultKeyItems = (referenceVaultEntries || [])
     .flatMap((entry) => entry.keys || [])
@@ -4050,13 +4147,17 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
       ),
       confidence: cleanString(programmer.confidence || "vault"),
     }));
+  const profileProgrammerItems = verifiedProfileProgrammerItems(verifiedProfile);
+  const shopProgrammerItems = shopEvidenceProgrammerItems(shopEvidence);
   const publicProgrammerItems = publicProgrammerCluesFor(vehicle, publicSources);
-  const rawProgrammerItems = [...vaultProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
+  const communityProgrammerItems = communityProgrammerCluesFor(vehicle, publicSources);
+  const rawProgrammerItems = [...profileProgrammerItems, ...shopProgrammerItems, ...vaultProgrammerItems, ...communityProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
     .map((item) => ({
       name: cleanString(item.name || "Coverage-verified programmer"),
       role: cleanString(item.type || "Programming path"),
       detail: cleanString(item.notes || programmingReference?.programMethod || "Confirm exact year/model/key-system coverage before programming."),
       confidence: cleanString(item.confidence || (programmingReference ? "high" : "verify")),
+      evidence: ["Local key-intelligence record matched this vehicle pattern."],
     }))];
   const programmerCoverage = buildProgrammerCoverageList(vehicle, rawProgrammerItems, programmingReference);
   const programmerItems = programmerCoverage.slice(0, 4);
@@ -4277,7 +4378,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
       sourceCount: entry.sources?.length || 0,
     })),
     vehicleReference,
-    jobKit: buildJobKit(vehicle, selected, record, programmingReference, vehicleReference, referenceVaultEntries, publicSources),
+    jobKit: buildJobKit(vehicle, selected, record, programmingReference, vehicleReference, referenceVaultEntries, publicSources, verifiedProfile, shopEvidence),
     keyRequirements: inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, programmingReference),
     sourceReadiness: sourceReadiness(record, options.sourceReadinessIdentity),
     catalogApplication,
