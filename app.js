@@ -2081,16 +2081,25 @@ function extractKeywayTokens(value) {
   return tokens;
 }
 
+function vehicleSpecificKeyways(profile) {
+  const vehicle = profile?.vehicle || {};
+  const make = String(vehicle.make || "").toUpperCase();
+  const model = String(vehicle.model || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  const year = Number(vehicle.year);
+  if (make === "FORD" && model.includes("ESCAPE") && year >= 2013 && year <= 2019) {
+    return [{ keyway: "HU101", source: "Ford Escape key fitment" }];
+  }
+  return [];
+}
+
 function lishiReferenceForProfile(profile, snapshot = selectedPartSnapshot(profile)) {
   const reference = profile.vehicleReference || {};
   const products = profile.liveSupplierLookup?.products || [];
-  const selectedProducts = snapshot?.group?.offers?.map((offer) => offer.rawProduct).filter(Boolean) || [];
+  const selectedProducts = snapshot?.group?.offers?.map((offer) => offer.rawProduct).filter(Boolean).filter(isDisplayKeyProduct) || [];
+  const visibleKeyProducts = productsForFamily(products, selectedKeyFamily).filter(isDisplayKeyProduct);
   const sourceProducts = [
     ...selectedProducts,
-    ...products.filter((product) => {
-      const text = productSearchText(product).toLowerCase();
-      return /\b(lishi|decoder|2-in-1|2 in 1|keyway|key blank|blank|blade|emergency insert|insert key|mechanical)\b/.test(text);
-    }),
+    ...visibleKeyProducts.filter((product) => !selectedProducts.includes(product)),
   ];
   const references = [
     reference.keyway?.primary,
@@ -2116,18 +2125,21 @@ function lishiReferenceForProfile(profile, snapshot = selectedPartSnapshot(profi
     if (productName) candidate.products.add(productName);
   };
 
-  references.forEach((value) => {
-    extractKeywayTokens(value).forEach((token) => addCandidate(token, "vehicle reference"));
-  });
   sourceProducts.forEach((product) => {
     const text = productSearchText(product);
-    const source = /\b(lishi|decoder|2-in-1|2 in 1)\b/i.test(text)
-      ? "supplier Lishi/decoder listing"
-      : /\b(blank|blade|insert)\b/i.test(text)
-        ? "mechanical key listing"
-        : "selected key listing";
+    const source = selectedProducts.includes(product) ? "selected key listing" : "shown key listing";
     extractKeywayTokens(text).forEach((token) => addCandidate(token, source, product.name || product.keyInfo?.sku || ""));
   });
+  const fitmentKeyways = vehicleSpecificKeyways(profile);
+  if (fitmentKeyways.length && (!candidates.size || fitmentKeyways.some((item) => item.keyway === "HU101"))) {
+    candidates.clear();
+    fitmentKeyways.forEach((item) => addCandidate(item.keyway, item.source));
+  }
+  if (!candidates.size) {
+    references.forEach((value) => {
+      extractKeywayTokens(value).forEach((token) => addCandidate(token, "vehicle reference fallback"));
+    });
+  }
 
   const list = Array.from(candidates.values()).map((candidate) => ({
     ...candidate,
@@ -2344,6 +2356,7 @@ function renderLishiDecodeScreen(profile) {
       </section>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
+        `<button class="secondary-action" type="button" data-save-selected-job>Save worked job</button>`,
         `<button class="primary-action" type="button" data-continue-programmers>Programmer coverage</button>`,
       ])}
     </section>
@@ -2426,6 +2439,7 @@ function renderFinalJobSummaryScreen(profile) {
       </section>
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="programmers">Back</button>`,
+        `<button class="primary-action" type="button" data-save-selected-job>Save worked job</button>`,
         `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
       ])}
     </section>
@@ -3398,6 +3412,18 @@ function ensureJobSaveModal() {
         <input name="customer" value="Shop job" autocomplete="off" />
       </label>
       <label>
+        Exact part used
+        <input name="exactPart" autocomplete="off" />
+      </label>
+      <label>
+        Supplier / part number
+        <input name="partNumber" autocomplete="off" />
+      </label>
+      <label>
+        Lishi / keyway used
+        <input name="lishi" autocomplete="off" />
+      </label>
+      <label>
         Programmer used
         <input name="programmer" autocomplete="off" />
       </label>
@@ -3454,9 +3480,14 @@ function openJobSaveModal(offer) {
   const modal = ensureJobSaveModal();
   const form = modal.querySelector("form");
   const vehicleTitle = latestVinProfile?.vehicle ? [latestVinProfile.vehicle.year, latestVinProfile.vehicle.make, latestVinProfile.vehicle.model].filter(Boolean).join(" ") : "Vehicle";
+  const snapshot = selectedPartSnapshot(latestVinProfile);
+  const lishi = latestVinProfile ? lishiReferenceForProfile(latestVinProfile, snapshot) : null;
   pendingJobOfferId = offerIdentityKey(offer);
   modal.querySelector("#jobSaveTitle").textContent = offer.partName;
   form.elements.customer.value = "Shop job";
+  form.elements.exactPart.value = offer.partName || "";
+  form.elements.partNumber.value = [offer.sku, offer.oem, offer.fcc].filter(Boolean).join(" / ");
+  form.elements.lishi.value = lishi?.keyways?.[0] || lishi?.primary || "";
   form.elements.programmer.value = latestVinProfile?.programmingReference?.programmer || latestVinProfile?.programmers?.[0]?.name || "";
   form.elements.tool.value = latestVinProfile?.tools?.[0]?.name || "";
   form.elements.outcome.value = "worked";
@@ -3464,7 +3495,7 @@ function openJobSaveModal(offer) {
   form.elements.price.value = "";
   form.elements.payment.value = "cr";
   form.elements.failureReason.value = "";
-  form.elements.notes.value = `${vehicleTitle}\n${[offer.supplier, offer.sku, offer.oem, offer.fcc, offer.buttons].filter(Boolean).join(" | ")}`;
+  form.elements.notes.value = `${vehicleTitle}\n${[offer.supplier, offer.sku, offer.oem, offer.fcc, offer.buttons, lishi?.keyways?.[0] ? `Lishi ${lishi.keyways[0]}` : ""].filter(Boolean).join(" | ")}`;
   modal.classList.add("active");
 }
 
@@ -3857,6 +3888,13 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const saveSelectedJobButton = event.target.closest("[data-save-selected-job]");
+  if (saveSelectedJobButton && latestVinProfile) {
+    const snapshot = selectedPartSnapshot(latestVinProfile);
+    if (snapshot?.best) openJobSaveModal(snapshot.best);
+    return;
+  }
+
   const clearPartChoiceButton = event.target.closest("[data-clear-part-choice]");
   if (clearPartChoiceButton && latestVinProfile) {
     selectedPartChoiceKey = "";
@@ -3960,9 +3998,21 @@ document.addEventListener("submit", async (event) => {
     submitButton.disabled = true;
     submitButton.textContent = "Saving...";
     const outcome = data.get("outcome") || "worked";
+    const part = {
+      ...partPayloadFromOffer(offer),
+      name: data.get("exactPart") || offer.partName,
+      sku: data.get("partNumber") || offer.sku,
+      keyway: data.get("lishi"),
+      lishi: data.get("lishi"),
+      programmer: data.get("programmer"),
+    };
     const result = await savePartOutcome(outcome, offer, {
+      part,
       job: {
         customer: data.get("customer"),
+        exactPart: data.get("exactPart"),
+        partNumber: data.get("partNumber"),
+        lishi: data.get("lishi"),
         programmer: data.get("programmer"),
         tool: data.get("tool"),
         keyType: data.get("keyType"),

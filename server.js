@@ -1453,6 +1453,10 @@ function cleanPartOutcome(input) {
     part.frequency ? `Frequency ${cleanString(part.frequency)}` : "",
     part.chip ? `Chip ${cleanString(part.chip)}` : "",
     part.buttons ? `Buttons ${cleanString(part.buttons)}` : "",
+    part.lishi || jobInput.lishi ? `Lishi ${cleanString(part.lishi || jobInput.lishi)}` : "",
+    part.keyway || jobInput.keyway ? `Keyway ${cleanString(part.keyway || jobInput.keyway)}` : "",
+    jobInput.exactPart ? `Exact part ${cleanString(jobInput.exactPart)}` : "",
+    jobInput.partNumber ? `Part number ${cleanString(jobInput.partNumber)}` : "",
     part.price ? `Price ${cleanString(part.price)}` : "",
     part.stock ? `Stock ${cleanString(part.stock)}` : "",
     jobInput.keyType ? `Key type ${cleanString(jobInput.keyType)}` : "",
@@ -1469,8 +1473,8 @@ function cleanPartOutcome(input) {
     verification: "Part marked worked in LockForge",
     status: outcome === "worked" ? "Completed" : "Review",
     vin: cleanString(input.vin).toUpperCase(),
-    programmer: cleanString(jobInput.programmer) || [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
-    sequence: partName,
+    programmer: cleanString(jobInput.programmer) || cleanString(part.programmer) || [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
+    sequence: cleanString(jobInput.exactPart) || partName,
     price: Number.isFinite(jobPrice) && jobPrice > 0 ? jobPrice : "",
     payment: cleanString(jobInput.payment),
     tags: ["part-outcome", `outcome-${outcome}`, supplier, make].filter(Boolean),
@@ -1478,6 +1482,7 @@ function cleanPartOutcome(input) {
       `Outcome ${outcomeLabels[outcome] || outcome}`,
       supplier ? `Supplier ${supplier}` : "",
       partName,
+      cleanString(jobInput.lishi || part.lishi) ? `Lishi ${cleanString(jobInput.lishi || part.lishi)}` : "",
       cleanString(jobInput.tool) ? `Tool ${cleanString(jobInput.tool)}` : "",
       cleanString(jobInput.notes),
       ...refs,
@@ -1510,6 +1515,9 @@ function cleanProfilePart(part = {}) {
     frequency: cleanString(part.frequency),
     chip: cleanString(part.chip),
     buttons: cleanString(part.buttons),
+    keyway: cleanString(part.keyway),
+    lishi: cleanString(part.lishi),
+    programmer: cleanString(part.programmer),
     price: cleanString(part.price),
     stock: cleanString(part.stock),
     family: cleanString(part.family),
@@ -1541,6 +1549,30 @@ function mergeWorkedPart(existing = {}, nextPart = {}, supplier = "") {
     supplierOutcomes,
     lastWorkedAt: new Date().toISOString(),
   };
+}
+
+function mergeUsageStat(items = [], value = "", extra = {}) {
+  const cleanValue = cleanString(value);
+  if (!cleanValue) return items;
+  const index = items.findIndex((item) => stringsMatch(item.value, cleanValue));
+  const nextItems = [...items];
+  if (index >= 0) {
+    nextItems[index] = {
+      ...nextItems[index],
+      ...extra,
+      value: nextItems[index].value,
+      count: (nextItems[index].count || 0) + 1,
+      lastWorkedAt: new Date().toISOString(),
+    };
+  } else {
+    nextItems.unshift({
+      value: cleanValue,
+      count: 1,
+      ...extra,
+      lastWorkedAt: new Date().toISOString(),
+    });
+  }
+  return nextItems.sort((a, b) => (b.count || 0) - (a.count || 0));
 }
 
 async function updateVehicleProfileFromOutcome(input) {
@@ -1584,6 +1616,22 @@ async function updateVehicleProfileFromOutcome(input) {
     const index = profile.verifiedParts.findIndex((item) => profilePartKey(item) === key);
     if (index >= 0) profile.verifiedParts[index] = mergeWorkedPart(profile.verifiedParts[index], part, part.supplier);
     else profile.verifiedParts.unshift(mergeWorkedPart({ key }, part, part.supplier));
+    const lishi = cleanString(part.lishi || input.job?.lishi || part.keyway);
+    const programmer = cleanString(part.programmer || input.job?.programmer);
+    if (lishi) {
+      profile.lishiOutcomes = mergeUsageStat(profile.lishiOutcomes || [], lishi, {
+        source: "worked job",
+        partKey: key,
+      }).slice(0, 10);
+      profile.preferredLishi = profile.lishiOutcomes[0] || null;
+    }
+    if (programmer) {
+      profile.programmerOutcomes = mergeUsageStat(profile.programmerOutcomes || [], programmer, {
+        source: "worked job",
+        partKey: key,
+      }).slice(0, 10);
+      profile.preferredProgrammer = profile.programmerOutcomes[0] || null;
+    }
   } else {
     profile.warnings.unshift({
       id: randomUUID(),
@@ -2972,6 +3020,7 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
   const text = normalizeVehicleText(`${vehicle.make} ${vehicle.model} ${vehicle.trim} ${vehicle.bodyClass}`);
   const lateFord = ["ford", "lincoln"].includes(family) && year >= 2015;
   const fordTruck = lateFord && /F150|F 150|EXPEDITION|NAVIGATOR|SUPER DUTY|F250|F350/.test(text);
+  const fordEscape = family === "ford" && /ESCAPE/.test(text) && year >= 2013 && year <= 2019;
   const hondaOlder = family === "honda" && year <= 2005;
   const toyotaLate = ["toyota", "lexus"].includes(family) && year >= 2018;
   const gmLate = family === "gm" && year >= 2015;
@@ -3054,7 +3103,14 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     source: "Brand/year reference; verify on vehicle",
   };
 
-  if (fordTruck) {
+  if (fordEscape) {
+    reference.keyway = { primary: "HU101", alternates: [], confidence: "medium-high" };
+    reference.lishi = { primary: "HU101 Lishi / decoder", alternates: [], confidence: "medium-high" };
+    reference.origination.push("For this Escape generation, start with HU101 from the key/blank fitment, then confirm on the door/insert before cutting");
+    reference.decodePlan.push("Use HU101 path only unless the actual lock or replacement cylinder proves otherwise");
+    reference.cutting.push("Cut/test HU101 mechanical operation before programming electronics");
+    reference.partVerification.push("Confirm supplier key/blank fitment shows HU101 before finalizing the job kit");
+  } else if (fordTruck) {
     reference.keyway = { primary: "HU101 / HU198 family likely", alternates: ["Confirm center mill profile", "Emergency insert may differ by package"], confidence: "medium" };
     reference.lishi = { primary: "HU101 or HU198 Lishi/decoder by confirmed keyway", alternates: ["Confirm 4-depth/10-cut vs newer profile before use"], confidence: "medium" };
     reference.origination.push("Common Ford truck path: decode/source code, cut HU101/HU198 blade, then program remote/prox");
@@ -3212,6 +3268,27 @@ function applyReferenceVault(reference, entries) {
     sourcePolicy: "Original LockForge summaries only; source citations are for audit/verification.",
   };
   next.source = `${next.source}; ${entries.length} LockForge vault match${entries.length === 1 ? "" : "es"}`;
+  return next;
+}
+
+function applyVerifiedProfileReference(reference, verifiedProfile) {
+  if (!verifiedProfile?.preferredLishi?.value) return reference;
+  const next = structuredClone(reference);
+  const lishi = cleanString(verifiedProfile.preferredLishi.value);
+  const count = verifiedProfile.preferredLishi.count || 1;
+  next.keyway = {
+    primary: lishi,
+    alternates: next.keyway?.alternates || [],
+    confidence: count >= 3 ? "high" : "shop-confirmed",
+  };
+  next.lishi = {
+    primary: `${lishi} Lishi / decoder`,
+    alternates: next.lishi?.alternates || [],
+    confidence: count >= 3 ? "high" : "shop-confirmed",
+  };
+  appendUnique(next.decodePlan, [`Shop-confirmed Lishi/keyway: ${lishi} from ${count} worked job${count === 1 ? "" : "s"}`]);
+  appendUnique(next.partVerification, [`Prefer saved shop keyway ${lishi} unless the actual lock or replacement cylinder proves otherwise`]);
+  next.source = `${next.source}; shop-confirmed Lishi/keyway`;
   return next;
 }
 
@@ -4155,7 +4232,10 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const liveSupplierLookup = options.skipSupplierLookup
     ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
     : await buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence);
-  const vehicleReference = applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries);
+  const vehicleReference = applyVerifiedProfileReference(
+    applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries),
+    verifiedProfile,
+  );
   const selected = record
     ? {
         keys: record.keyOptions,
