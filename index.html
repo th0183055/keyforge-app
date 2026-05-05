@@ -24,6 +24,7 @@
 
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
+          <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
           <button class="nav-item" data-view="about">About</button>
         </nav>
@@ -106,6 +107,90 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" id="learn">
+          <section class="panel wide worked-job-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Teach LockForge</p>
+                <h3>Save what actually worked</h3>
+              </div>
+            </div>
+            <form id="workedJobForm" class="worked-job-form">
+              <label>
+                VIN
+                <input name="vin" placeholder="1FMCU9GD1HUA00000" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <div class="form-row">
+                <label>
+                  Year
+                  <input name="year" inputmode="numeric" maxlength="4" placeholder="2017" autocomplete="off" />
+                </label>
+                <label>
+                  Make
+                  <input name="make" placeholder="Ford" autocomplete="off" />
+                </label>
+                <label>
+                  Model
+                  <input name="model" placeholder="Escape" autocomplete="off" />
+                </label>
+              </div>
+              <label>
+                Trim / package clue
+                <input name="trim" placeholder="SE, Titanium, XLT, etc." autocomplete="off" />
+              </label>
+              <div class="form-row">
+                <label>
+                  Key type
+                  <select name="keyType">
+                    <option value="proximity">Proximity / smart</option>
+                    <option value="keyed">Flip / transponder</option>
+                  </select>
+                </label>
+                <label>
+                  Outcome
+                  <select name="outcome">
+                    <option value="worked">Worked</option>
+                    <option value="failed-program">Did not program</option>
+                    <option value="wrong-fcc">Wrong FCC</option>
+                    <option value="wrong-buttons">Wrong buttons</option>
+                    <option value="different-key-style">Different key style</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Exact key / part used
+                <input name="exactPart" placeholder="LAB000, 164-R8334, FCC, SKU, etc." autocomplete="off" />
+              </label>
+              <div class="form-row">
+                <label>
+                  Supplier / part number
+                  <input name="partNumber" placeholder="KI SKU, OEM, FCC, or supplier part #" autocomplete="off" />
+                </label>
+                <label>
+                  Buttons / FCC clue
+                  <input name="buttons" placeholder="4 button / M3N..." autocomplete="off" />
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  Lishi / keyway
+                  <input name="lishi" placeholder="HU101" autocomplete="off" />
+                </label>
+                <label>
+                  Programmer
+                  <input name="programmer" placeholder="FDRS, IM608, Smart Pro, etc." autocomplete="off" />
+                </label>
+              </div>
+              <label>
+                Notes
+                <textarea name="notes" rows="3" placeholder="Anything that matters next time: AKL/add-key, code source, PIN, odd trim clue, etc."></textarea>
+              </label>
+              <button class="primary-action" type="submit">Save to reference</button>
+            </form>
+            <div class="form-status" id="workedJobStatus"></div>
+          </section>
         </section>
 
         <section class="view" id="dashboard">

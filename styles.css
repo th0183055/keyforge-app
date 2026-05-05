@@ -149,6 +149,46 @@ button:disabled {
   line-height: 1.45;
 }
 
+.worked-job-panel {
+  max-width: 980px;
+}
+
+.worked-job-form {
+  display: grid;
+  gap: 14px;
+}
+
+.worked-job-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.worked-job-form input,
+.worked-job-form select,
+.worked-job-form textarea {
+  width: 100%;
+  border: 1px solid #e1c7bf;
+  border-radius: 10px;
+  padding: 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.worked-job-form input:focus,
+.worked-job-form select:focus,
+.worked-job-form textarea:focus {
+  outline: 2px solid rgba(208, 22, 38, 0.25);
+  border-color: var(--accent);
+}
+
 .about-panel {
   max-width: 980px;
 }
@@ -3536,7 +3576,7 @@ textarea {
   }
 
   .nav-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0;
   }
 

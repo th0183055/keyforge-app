@@ -1457,12 +1457,10 @@ function cleanPartOutcome(input) {
     part.keyway || jobInput.keyway ? `Keyway ${cleanString(part.keyway || jobInput.keyway)}` : "",
     jobInput.exactPart ? `Exact part ${cleanString(jobInput.exactPart)}` : "",
     jobInput.partNumber ? `Part number ${cleanString(jobInput.partNumber)}` : "",
-    part.price ? `Price ${cleanString(part.price)}` : "",
     part.stock ? `Stock ${cleanString(part.stock)}` : "",
     jobInput.keyType ? `Key type ${cleanString(jobInput.keyType)}` : "",
     jobInput.failureReason ? `Failure reason ${cleanString(jobInput.failureReason)}` : "",
   ].filter(Boolean);
-  const jobPrice = Number(String(jobInput.price || "").replace(/[^0-9.]/g, ""));
 
   return {
     id: randomUUID(),
@@ -1475,8 +1473,8 @@ function cleanPartOutcome(input) {
     vin: cleanString(input.vin).toUpperCase(),
     programmer: cleanString(jobInput.programmer) || cleanString(part.programmer) || [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
     sequence: cleanString(jobInput.exactPart) || partName,
-    price: Number.isFinite(jobPrice) && jobPrice > 0 ? jobPrice : "",
-    payment: cleanString(jobInput.payment),
+    price: "",
+    payment: "",
     tags: ["part-outcome", `outcome-${outcome}`, supplier, make].filter(Boolean),
     notes: [
       `Outcome ${outcomeLabels[outcome] || outcome}`,

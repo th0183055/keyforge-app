@@ -57,6 +57,8 @@ const referenceVaultList = document.querySelector("#referenceVaultList");
 const syncPublicSourcesButton = document.querySelector("#syncPublicSourcesButton");
 const publicSourceStatus = document.querySelector("#publicSourceStatus");
 const publicSourceList = document.querySelector("#publicSourceList");
+const workedJobForm = document.querySelector("#workedJobForm");
+const workedJobStatus = document.querySelector("#workedJobStatus");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -2653,15 +2655,79 @@ function partPayloadFromOffer(offer) {
 }
 
 function savePartOutcome(outcome, offer, extra = {}) {
+  const part = extra.part || partPayloadFromOffer(offer);
   return api("/api/part-outcomes", {
     method: "POST",
     body: JSON.stringify({
       outcome,
       vin: latestVinProfile.vin,
       vehicle: latestVinProfile.vehicle,
-      part: partPayloadFromOffer(offer),
+      part,
       ...extra,
     }),
+  });
+}
+
+function cleanInput(value) {
+  return String(value ?? "").trim();
+}
+
+function workedJobPayloadFromForm(data) {
+  const vin = normalizeVinInput(data.get("vin"));
+  const year = cleanInput(data.get("year"));
+  const make = cleanInput(data.get("make")).toUpperCase();
+  const model = cleanInput(data.get("model"));
+  const trim = cleanInput(data.get("trim"));
+  const exactPart = cleanInput(data.get("exactPart"));
+  const partNumber = cleanInput(data.get("partNumber"));
+  const lishi = cleanInput(data.get("lishi"));
+  const programmer = cleanInput(data.get("programmer"));
+  const buttons = cleanInput(data.get("buttons"));
+  const notes = cleanInput(data.get("notes"));
+  const keyType = cleanInput(data.get("keyType"));
+
+  return {
+    outcome: cleanInput(data.get("outcome")) || "worked",
+    vin,
+    vehicle: { year, make, model, trim },
+    part: {
+      name: exactPart,
+      supplier: "Manual reference",
+      sku: partNumber,
+      oem: "",
+      fcc: "",
+      frequency: "",
+      chip: "",
+      buttons,
+      keyway: lishi,
+      lishi,
+      programmer,
+      family: keyType === "proximity" ? "proximity" : "keyed",
+    },
+    job: {
+      exactPart,
+      partNumber,
+      lishi,
+      programmer,
+      keyType,
+      notes,
+    },
+  };
+}
+
+function validateWorkedJobPayload(payload) {
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(payload.vin)) return "Enter a valid 17-character VIN.";
+  if (!payload.vehicle.year || !payload.vehicle.make || !payload.vehicle.model) return "Enter year, make, and model.";
+  if (!payload.part.name) return "Enter the exact key or part used.";
+  if (!payload.part.lishi) return "Enter the Lishi/keyway used.";
+  if (!payload.part.programmer) return "Enter the programmer used.";
+  return "";
+}
+
+async function saveWorkedJobPayload(payload) {
+  return api("/api/part-outcomes", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -3450,10 +3516,6 @@ function ensureJobSaveModal() {
         <button class="secondary-action small" type="button" data-close-job-save>Close</button>
       </div>
       <label>
-        Customer / reference
-        <input name="customer" value="Shop job" autocomplete="off" />
-      </label>
-      <label>
         Exact part used
         <input name="exactPart" autocomplete="off" />
       </label>
@@ -3491,19 +3553,6 @@ function ensureJobSaveModal() {
         </select>
       </label>
       <label>
-        Customer charge
-        <input name="price" inputmode="decimal" placeholder="240" autocomplete="off" />
-      </label>
-      <label>
-        Payment
-        <select name="payment">
-          <option value="cr">Card</option>
-          <option value="ch">Cash</option>
-          <option value="inv">Invoice</option>
-          <option value="">Not recorded</option>
-        </select>
-      </label>
-      <label>
         Failure reason
         <input name="failureReason" autocomplete="off" />
       </label>
@@ -3526,7 +3575,6 @@ function openJobSaveModal(offer) {
   const lishi = latestVinProfile ? lishiReferenceForProfile(latestVinProfile, snapshot) : null;
   pendingJobOfferId = offerIdentityKey(offer);
   modal.querySelector("#jobSaveTitle").textContent = offer.partName;
-  form.elements.customer.value = "Shop job";
   form.elements.exactPart.value = offer.partName || "";
   form.elements.partNumber.value = [offer.sku, offer.oem, offer.fcc].filter(Boolean).join(" / ");
   form.elements.lishi.value = lishi?.keyways?.[0] || lishi?.primary || "";
@@ -3534,8 +3582,6 @@ function openJobSaveModal(offer) {
   form.elements.tool.value = latestVinProfile?.tools?.[0]?.name || "";
   form.elements.outcome.value = "worked";
   form.elements.keyType.value = selectedKeyFamily === "proximity" ? "proximity" : "keyed";
-  form.elements.price.value = "";
-  form.elements.payment.value = "cr";
   form.elements.failureReason.value = "";
   form.elements.notes.value = `${vehicleTitle}\n${[offer.supplier, offer.sku, offer.oem, offer.fcc, offer.buttons, lishi?.keyways?.[0] ? `Lishi ${lishi.keyways[0]}` : ""].filter(Boolean).join(" | ")}`;
   modal.classList.add("active");
@@ -4051,15 +4097,12 @@ document.addEventListener("submit", async (event) => {
     const result = await savePartOutcome(outcome, offer, {
       part,
       job: {
-        customer: data.get("customer"),
         exactPart: data.get("exactPart"),
         partNumber: data.get("partNumber"),
         lishi: data.get("lishi"),
         programmer: data.get("programmer"),
         tool: data.get("tool"),
         keyType: data.get("keyType"),
-        price: data.get("price"),
-        payment: data.get("payment"),
         failureReason: data.get("failureReason"),
         notes: data.get("notes"),
       },
@@ -4076,6 +4119,32 @@ document.addEventListener("submit", async (event) => {
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = "Save worked job";
+  }
+});
+
+workedJobForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(workedJobForm);
+  const payload = workedJobPayloadFromForm(data);
+  const validation = validateWorkedJobPayload(payload);
+  const submitButton = workedJobForm.querySelector("button[type='submit']");
+  if (validation) {
+    workedJobStatus.textContent = validation;
+    return;
+  }
+  try {
+    submitButton.disabled = true;
+    workedJobStatus.textContent = "Saving reference...";
+    const result = await saveWorkedJobPayload(payload);
+    jobs.unshift(result.job);
+    selectedJobId = result.job.id;
+    renderJobs();
+    workedJobForm.reset();
+    workedJobStatus.textContent = `Saved ${payload.vehicle.year} ${payload.vehicle.make} ${payload.vehicle.model}: ${payload.part.name} / ${payload.part.lishi} / ${payload.part.programmer}.`;
+  } catch (error) {
+    workedJobStatus.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
   }
 });
 
