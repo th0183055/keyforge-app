@@ -5,8 +5,8 @@
   --line: #cfd5dc;
   --panel: rgba(250, 251, 252, 0.96);
   --soft: #edf1f4;
-  --accent: #626d79;
-  --accent-dark: #252b32;
+  --accent: #15181d;
+  --accent-dark: #050608;
   --gold: #a1844b;
   --danger: #7c3538;
   --charcoal: #11151b;
@@ -4258,16 +4258,24 @@ textarea:focus {
 .secondary-action,
 .about-grid span,
 .brand-mark {
-  background: linear-gradient(135deg, #7f8a96, #2b333d);
+  border-color: #050608;
+  background: linear-gradient(135deg, #2a2f36, #050608);
   color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
 }
 
 .nav-item.active {
-  box-shadow: inset 3px 0 0 #c9d1da, 0 8px 18px rgba(12, 18, 24, 0.22);
+  box-shadow: inset 3px 0 0 #d9dee5, 0 8px 18px rgba(12, 18, 24, 0.28);
+}
+
+.primary-action:hover,
+.secondary-action:hover,
+.nav-item:hover {
+  background: linear-gradient(135deg, #3a414a, #101317);
 }
 
 .scan-action {
-  border-color: #cfd5dc;
+  border-color: #15181d;
   background: rgba(255, 255, 255, 0.92);
   color: var(--accent-dark);
 }
@@ -4288,14 +4296,61 @@ textarea:focus {
 .key-package-option.active,
 .part-choice-card.active,
 .job-button.selected {
-  border-color: #48515c;
-  background: #e8edf1;
+  border-color: #050608;
+  background: #f8fafc;
   box-shadow: 0 10px 24px rgba(22, 29, 37, 0.14);
+}
+
+.key-family-option,
+.key-package-option {
+  border-color: #050608;
+  background: linear-gradient(135deg, #2a2f36, #050608);
+  color: #ffffff;
+}
+
+.key-family-option span,
+.key-family-option strong,
+.key-family-option small,
+.key-package-option span,
+.key-package-option strong,
+.key-package-option small {
+  color: #f8fafc;
+}
+
+.key-family-option small,
+.key-package-option small {
+  color: #d9dee5;
+}
+
+.live-filter-group summary,
+.programmer-lane-head span,
+.programmer-compact-option span,
+.programmer-compact-option small,
+.programmer-more summary,
+.programmer-confidence strong {
+  color: #15181d;
+}
+
+.filter-check small,
+.programmer-confidence i,
+.tag-row span,
+.status,
+.supplier-status-strip span,
+.live-filter-chip,
+.badge-row span,
+.offer-chip,
+.mini-tags span {
+  background: #dce2e8;
+  color: #15181d;
+}
+
+.programmer-confidence i::before {
+  background: #15181d;
 }
 
 .programmer-card.selected,
 .supplier-part-tab.in-stock {
-  border-color: #48515c;
+  border-color: #050608;
 }
 
 .workflow-actions {
