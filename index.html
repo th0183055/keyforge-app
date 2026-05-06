@@ -42,7 +42,7 @@
             <p class="eyebrow">VIN to key</p>
             <h2>Scan a VIN. See the vehicle, keys, tools, and programming path.</h2>
           </div>
-          <button class="primary-action" data-view-target="settings">Catalog Setup</button>
+          <button class="primary-action" data-view-target="settings">Parts Setup</button>
         </header>
         <section class="app-status-banner" id="appStatusBanner">
           <span id="connectionStatus">Online</span>
@@ -97,13 +97,13 @@
             <section class="panel vin-side-panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Catalog access</p>
-                  <h3>Private catalog sources</h3>
+                  <p class="eyebrow">Parts access</p>
+                  <h3>Private parts sources</h3>
                 </div>
               </div>
               <div class="assistant-card" id="vinRecommendation">
-                <strong>Catalog source ready</strong>
-                <p>Possible keys come from private catalog sources. Saved access can be added for live reference data.</p>
+                <strong>Parts source ready</strong>
+                <p>Possible keys come from private parts sources. Saved access can be added for live reference data.</p>
               </div>
             </section>
           </div>
@@ -166,8 +166,8 @@
               </label>
               <div class="form-row">
                 <label>
-                  Catalog / part number
-                  <input name="partNumber" placeholder="SKU, OEM, FCC, or catalog part #" autocomplete="off" />
+                  Parts / part number
+                  <input name="partNumber" placeholder="SKU, OEM, FCC, or parts reference #" autocomplete="off" />
                 </label>
                 <label>
                   Buttons / FCC clue
@@ -191,6 +191,23 @@
               <button class="primary-action" type="submit">Save to reference</button>
             </form>
             <div class="form-status" id="workedJobStatus"></div>
+          </section>
+
+          <section class="panel wide worked-import-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Reference engine</p>
+                <h3>Import worked jobs</h3>
+              </div>
+            </div>
+            <form id="workedJobImportForm" class="form-stack">
+              <label>
+                Paste spreadsheet rows
+                <textarea name="spreadsheet" rows="8" placeholder="Timestamp&#9;Year&#9;Make&#9;Model&#9;PartNumber&#9;Programmer&#9;ServiceType&#9;VIN&#9;..."></textarea>
+              </label>
+              <button class="primary-action" type="submit">Import successes</button>
+            </form>
+            <div class="form-status" id="workedJobImportStatus"></div>
           </section>
         </section>
 
@@ -411,10 +428,10 @@
                 </label>
                 <label>
                   Key / part option
-                  <input name="keyName" value="Catalog-grade remote / prox option" />
+                  <input name="keyName" value="Parts-grade remote / prox option" />
                 </label>
                 <label>
-                  Catalog part number
+                  Parts part number
                   <input name="partNumber" value="VERIFY-FCC-AND-BLADE" />
                 </label>
                 <label>
@@ -431,7 +448,7 @@
                 </label>
                 <label>
                   Notes
-                  <textarea name="notes">Verified from shop experience. Confirm catalog data before ordering.</textarea>
+                  <textarea name="notes">Verified from shop experience. Confirm parts data before ordering.</textarea>
                 </label>
                 <button class="primary-action" type="submit">Save Record</button>
               </form>
@@ -534,13 +551,13 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Catalog logins</p>
+                  <p class="eyebrow">Parts logins</p>
                   <h3>Account setup</h3>
                 </div>
               </div>
               <form id="supplierSettingsForm" class="form-stack">
                 <label>
-                  Catalog source
+                  Parts source
                   <select name="supplierId" id="supplierSelect"></select>
                 </label>
                 <label>
@@ -557,9 +574,9 @@
                 </label>
                 <label class="toggle-row">
                   <input name="enabled" type="checkbox" />
-                  Use this account for live catalog lookup
+                  Use this account for live parts lookup
                 </label>
-                <button class="primary-action" type="submit">Save Catalog Login</button>
+                <button class="primary-action" type="submit">Save Parts Login</button>
               </form>
               <div class="form-status" id="supplierSettingsStatus"></div>
             </section>
@@ -567,14 +584,14 @@
             <section class="panel wide">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Connected catalog sources</p>
+                  <p class="eyebrow">Connected parts sources</p>
                   <h3>Account Vault</h3>
                 </div>
               </div>
               <div class="source-list" id="supplierAccountList"></div>
               <div class="assistant-card source-card">
                 <strong>How this fits VIN lookup</strong>
-                <p>When a VIN is decoded, TimLock-App can run enabled private catalog connectors and compare normalized stock, condition, and fitment clues.</p>
+                <p>When a VIN is decoded, TimLock-App can run enabled private parts connectors and compare normalized stock, condition, and fitment clues.</p>
               </div>
             </section>
           </div>
@@ -592,12 +609,12 @@
               <article>
                 <span>1</span>
                 <strong>VIN-first workflow</strong>
-                <p>Start with the vehicle, not a pile of catalog tabs. Decode year, make, model, trim, body, and fitment clues in one place.</p>
+                <p>Start with the vehicle, not a pile of parts tabs. Decode year, make, model, trim, body, and fitment clues in one place.</p>
               </article>
               <article>
                 <span>2</span>
-                <strong>Catalog-backed parts</strong>
-                <p>Use saved catalog access to pull matching key options, pictures, and condition filters directly into the lookup flow.</p>
+                <strong>Parts-backed reference</strong>
+                <p>Use saved parts access to pull matching key options, pictures, and condition filters directly into the lookup flow.</p>
               </article>
               <article>
                 <span>3</span>

@@ -59,6 +59,8 @@ const publicSourceStatus = document.querySelector("#publicSourceStatus");
 const publicSourceList = document.querySelector("#publicSourceList");
 const workedJobForm = document.querySelector("#workedJobForm");
 const workedJobStatus = document.querySelector("#workedJobStatus");
+const workedJobImportForm = document.querySelector("#workedJobImportForm");
+const workedJobImportStatus = document.querySelector("#workedJobImportStatus");
 const fillWorkedJobFromLookupButton = document.querySelector("#fillWorkedJobFromLookup");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
@@ -115,33 +117,37 @@ function catalogSourceLabelFromName(name = "") {
     ),
   ];
   const index = names.indexOf(name);
-  return index >= 0 ? `Catalog source ${index + 1}` : "Catalog source";
+  return index >= 0 ? `Parts source ${index + 1}` : "Parts source";
 }
 
 function catalogAccountLabel(account, fallbackIndex = 0) {
   const index = supplierAccounts.findIndex((item) => item.id === account?.id);
-  return `Catalog source ${(index >= 0 ? index : fallbackIndex) + 1}`;
+  return `Parts source ${(index >= 0 ? index : fallbackIndex) + 1}`;
 }
 
 function customerSafeCatalogText(value = "") {
   const replacements = [
-    [/Key Innovations/gi, "catalog source"],
-    [/Golden Supply Inc\.?/gi, "catalog source"],
-    [/Golden Supply/gi, "catalog source"],
-    [/UHS Hardware/gi, "catalog source"],
-    [/\bUHS\b/g, "catalog source"],
-    [/Transponder Island/gi, "catalog source"],
-    [/\bKey4\b/gi, "catalog source"],
-    [/IDN-H\.?\s*Hoffman/gi, "catalog source"],
-    [/IDN-Hoffman/gi, "catalog source"],
-    [/IDN public/gi, "catalog"],
-    [/\bKI\b/g, "catalog"],
+    [/Key Innovations/gi, "parts source"],
+    [/Golden Supply Inc\.?/gi, "parts source"],
+    [/Golden Supply/gi, "parts source"],
+    [/UHS Hardware/gi, "parts source"],
+    [/\bUHS\b/g, "parts source"],
+    [/Transponder Island/gi, "parts source"],
+    [/\bKey4\b/gi, "parts source"],
+    [/IDN-H\.?\s*Hoffman/gi, "parts source"],
+    [/IDN-Hoffman/gi, "parts source"],
+    [/IDN public/gi, "parts"],
+    [/\bKI\b/g, "parts"],
   ];
   return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), String(value ?? ""))
-    .replace(/\bsuppliers\b/gi, "catalog sources")
-    .replace(/\bsupplier\b/gi, "catalog source")
-    .replace(/catalog source search/gi, "catalog search")
-    .replace(/catalog source lookup/gi, "catalog lookup");
+    .replace(/\bcatalog sources\b/gi, "parts sources")
+    .replace(/\bcatalog source\b/gi, "parts source")
+    .replace(/\bcatalogs\b/gi, "parts")
+    .replace(/\bcatalog\b/gi, "parts")
+    .replace(/\bsuppliers\b/gi, "parts sources")
+    .replace(/\bsupplier\b/gi, "parts source")
+    .replace(/parts source search/gi, "parts search")
+    .replace(/parts source lookup/gi, "parts lookup");
 }
 
 function formatMoney(value, payment) {
@@ -380,7 +386,7 @@ function renderSupplierAccounts() {
   if (!supplierAccountList || !supplierSettingsForm) return;
 
   if (!supplierAccounts.length) {
-    supplierAccountList.innerHTML = `<article class="source-card-row"><strong>No catalog accounts</strong><p>Catalog registry has not loaded yet.</p></article>`;
+    supplierAccountList.innerHTML = `<article class="source-card-row"><strong>No parts accounts</strong><p>Parts registry has not loaded yet.</p></article>`;
     return;
   }
 
@@ -554,7 +560,7 @@ function renderCatalogApplication(application) {
   if (!application) {
     return `
       <section class="option-section">
-        <p class="eyebrow">Local vPIC catalog</p>
+        <p class="eyebrow">Local vPIC parts</p>
         <div class="assistant-card">
           <strong>No local application match</strong>
           <p>Live VIN decode still worked. Run or widen the vPIC sync to add this year/make/model locally.</p>
@@ -565,7 +571,7 @@ function renderCatalogApplication(application) {
 
   return `
     <section class="option-section">
-      <p class="eyebrow">Local vPIC catalog</p>
+      <p class="eyebrow">Local vPIC parts</p>
       <div class="assistant-card">
         <strong>${escapeHtml(application.year)} ${escapeHtml(application.make)} ${escapeHtml(application.model)}</strong>
         <p>${escapeHtml(application.vehicleType)} · ${escapeHtml(application.locksmithDataStatus)} · ${escapeHtml(application.keySystemStatus)}</p>
@@ -632,8 +638,8 @@ function renderSupplierCandidates(candidates = [], compact = false) {
       <section class="option-section">
         <p class="eyebrow">Possible keys</p>
         <div class="assistant-card">
-          <strong>No catalog candidates yet</strong>
-          <p>Add catalog fitment or Key DB part clues to improve candidate matching.</p>
+          <strong>No parts candidates yet</strong>
+          <p>Add parts fitment or Key DB part clues to improve candidate matching.</p>
         </div>
       </section>
     `;
@@ -641,8 +647,8 @@ function renderSupplierCandidates(candidates = [], compact = false) {
 
   return `
     <section class="supplier-candidates">
-      <p class="eyebrow">${compact ? "Step 3" : "Catalog part candidates"}</p>
-      ${compact ? "<h3>Possible catalog matches</h3>" : ""}
+      <p class="eyebrow">${compact ? "Step 3" : "Parts candidates"}</p>
+      ${compact ? "<h3>Possible parts matches</h3>" : ""}
       <div class="supplier-list">
         ${candidates
           .slice(0, compact ? 4 : candidates.length)
@@ -773,7 +779,7 @@ function liveFilterValue(product, group) {
   if (group === "condition") return conditionBucket(product);
   if (group === "stock") return stockBucket(product);
   if (group === "type") return partTypeBucket(product);
-  if (group === "supplier") return catalogSourceLabelFromName(product.supplier || product.brand || "Catalog source");
+  if (group === "supplier") return catalogSourceLabelFromName(product.supplier || product.brand || "Parts source");
   if (group === "buttons") return buttonLayoutBucket(product);
   return "Unlisted";
 }
@@ -1197,8 +1203,8 @@ function renderVerifiedProfileCard(profile) {
                 baseline.frequency,
                 baseline.chip,
                 sourceList.length
-                  ? `Worked catalog sources: ${sourceList.map((item, index) => `${catalogSourceLabelFromName(item.supplier || `source-${index}`)} x${item.workedCount}`).join(", ")}`
-                  : baseline.suppliers?.length ? `${baseline.suppliers.length} catalog source${baseline.suppliers.length === 1 ? "" : "s"} saved` : "",
+                  ? `Worked parts sources: ${sourceList.map((item, index) => `${catalogSourceLabelFromName(item.supplier || `source-${index}`)} x${item.workedCount}`).join(", ")}`
+                  : baseline.suppliers?.length ? `${baseline.suppliers.length} parts source${baseline.suppliers.length === 1 ? "" : "s"} saved` : "",
               ]
                 .filter(Boolean)
                 .join(" | ")
@@ -1221,11 +1227,11 @@ function renderShopVerifiedPicks(offers) {
         <div>
           <p class="eyebrow">Shop verified first</p>
           <strong>Previously worked on this vehicle profile</strong>
-          <span>These matches are boosted above catalog guesses because someone marked the part worked.</span>
+          <span>These matches are boosted above parts guesses because someone marked the part worked.</span>
         </div>
         <small>${escapeHtml(`${groups.length} parts / ${totalWorked || verifiedOffers.length} worked`)}</small>
       </div>
-      ${groups.map((group) => renderExactPartGroup({ ...group, focusMode: "verified", focusNote: "Shop-confirmed part. Compare catalog price, stock, and condition before ordering." }, offers)).join("")}
+      ${groups.map((group) => renderExactPartGroup({ ...group, focusMode: "verified", focusNote: "Shop-confirmed part. Compare parts fitment, stock, and condition before ordering." }, offers)).join("")}
     </div>
   `;
 }
@@ -1245,7 +1251,7 @@ function resetVinWorkflow() {
   ymmForm?.classList.remove("is-hidden");
   vinResult.innerHTML = "";
   vinRecommendation.innerHTML = `
-    <strong>Catalog source ready</strong>
+    <strong>Parts source ready</strong>
     <p>Enter a VIN for identity first, or search year/make/model when the VIN cannot prove key package details.</p>
   `;
 }
@@ -1320,7 +1326,7 @@ function renderLiveFilters(products, visibleProducts) {
       ${renderLiveFilterGroup("Stock", "stock", products)}
       ${renderLiveFilterGroup("Part Style", "type", products)}
       ${renderLiveFilterGroup("Buttons", "buttons", products)}
-      ${renderLiveFilterGroup("Catalog", "supplier", products)}
+      ${renderLiveFilterGroup("Parts Source", "supplier", products)}
     </div>
   `;
 }
@@ -1354,7 +1360,7 @@ function normalizedSupplierOffer(product) {
   const buttons = product.keyInfo?.buttons || buttonCountFromText(product.name);
   return {
     supplier: product.supplier || "Key Innovations",
-    partName: product.name || "Catalog part",
+    partName: product.name || "Parts reference",
     sku: product.keyInfo?.sku || "",
     oem: product.keyInfo?.oem || "",
     fcc: product.keyInfo?.fcc || "",
@@ -1645,8 +1651,8 @@ function gradeABaselineGroups(offers) {
       const summary = buildExactPartGroup(group.key, group.offers, {
         focusMode: "grade-a",
         focusNote: equivalentCount
-          ? "Showing every exact catalog match for this Grade A option, with refurbished/equivalent offers included."
-          : "Showing every exact catalog match for this Grade A option. Verify condition when another catalog source does not publish it.",
+          ? "Showing every exact parts match for this Grade A option, with refurbished/equivalent offers included."
+          : "Showing every exact parts match for this Grade A option. Verify condition when another parts source does not publish it.",
         originalOfferCount: group.offers.length,
       });
       summary.lane = "grade-a";
@@ -1765,7 +1771,7 @@ function alternatesForOffer(offer, offers) {
 
 function renderPartDetail(offer, alternates) {
   const rows = [
-    ["Catalog", catalogSourceLabelFromName(offer.supplier)],
+    ["Parts source", catalogSourceLabelFromName(offer.supplier)],
     ["SKU", offer.sku],
     ["OEM / item", offer.oem],
     ["FCC", offer.fcc],
@@ -1864,7 +1870,7 @@ function renderSupplierComparisonTab(offer, groupOffers) {
           ${offer.profileMatch ? "Worked again" : "Mark worked"}
         </button>
         <button class="secondary-action small" type="button" data-save-job-part="${escapeHtml(offerIdentityKey(offer))}">Save job</button>
-        ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open catalog</a>` : ""}
+        ${offer.productUrl ? `<a class="supplier-tab-link" href="${escapeHtml(offer.productUrl)}" target="_blank" rel="noreferrer">Open parts page</a>` : ""}
       </div>
       <details class="supplier-tab-detail">
         <summary>Details</summary>
@@ -1907,7 +1913,7 @@ function groupDecision(group) {
   const conditions = group.conditions.length ? group.conditions.join(" / ") : "condition verify";
   const why = [
     group.focusMode === "grade-a" ? "Refurbished Grade A baseline" : "",
-    group.supplierCount > 1 ? `${group.supplierCount} catalog sources match` : "single catalog source match",
+    group.supplierCount > 1 ? `${group.supplierCount} parts sources match` : "single parts source match",
     group.fccs.length ? `FCC ${group.fccs[0]}` : "",
     group.buttons.length ? `${group.buttons[0]} button` : "",
     gradeA && group.focusMode !== "grade-a" ? "Grade A available" : "",
@@ -1940,11 +1946,11 @@ function renderDecisionCard(group) {
       <div class="decision-main">
         <span>${gradeAFocus ? "Start here" : "Best field pick"}</span>
         <strong>${escapeHtml(decision.bestFieldPick?.partName || group.bestOffer.partName)}</strong>
-        <p>${escapeHtml(decision.why.join(" + ") || "Best available catalog/ranking match.")}</p>
+        <p>${escapeHtml(decision.why.join(" + ") || "Best available parts/ranking match.")}</p>
       </div>
       <div class="decision-grid">
         <span><small>${gradeAFocus ? "Grade A option" : "Value option"}</small><strong>${escapeHtml(supplierLabel(decision.valueOption))}</strong></span>
-        <span><small>${gradeAFocus ? "Other catalog check" : "Best in stock"}</small><strong>${escapeHtml(supplierLabel(gradeAFocus ? decision.supplierCheck : decision.bestInStock))}</strong></span>
+        <span><small>${gradeAFocus ? "Other parts check" : "Best in stock"}</small><strong>${escapeHtml(supplierLabel(gradeAFocus ? decision.supplierCheck : decision.bestInStock))}</strong></span>
         <span><small>Condition spread</small><strong>${escapeHtml(decision.conditions)}</strong></span>
         <span><small>Verify</small><strong>${escapeHtml(decision.verify.length ? decision.verify.join(", ") : "photo + blade before ordering")}</strong></span>
       </div>
@@ -1955,7 +1961,7 @@ function renderDecisionCard(group) {
 
 function renderExactPartGroup(group, allOffers) {
   const best = group.bestOffer;
-  const sourceCountLabel = `${group.supplierCount} catalog source${group.supplierCount === 1 ? "" : "s"}`;
+  const sourceCountLabel = `${group.supplierCount} parts source${group.supplierCount === 1 ? "" : "s"}`;
   const headerDetails = [
     group.label,
     group.fccs[0],
@@ -1968,9 +1974,9 @@ function renderExactPartGroup(group, allOffers) {
     group.focusMode === "grade-a"
         ? "Grade A baseline"
         : group.supplierCount >= 3
-        ? "Strong catalog agreement"
+        ? "Strong parts agreement"
         : group.supplierCount === 2
-          ? "Catalog agreement"
+          ? "Parts agreement"
           : "Single-source match";
   const className = ["exact-part-group", group.supplierCount > 1 ? "multi-supplier" : "", group.focusMode === "grade-a" ? "grade-a-focus" : "", group.focusMode === "verified" ? "verified-focus" : ""]
     .filter(Boolean)
@@ -1996,7 +2002,7 @@ function renderExactPartGroup(group, allOffers) {
         ${group.focusMode === "grade-a" ? `<span>${escapeHtml(`${group.offers.length} Grade A/equivalent offers`)}</span>` : ""}
       </div>
       ${renderDecisionCard(group)}
-      <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} catalog comparison`)}">
+      <div class="exact-supplier-tabs" aria-label="${escapeHtml(`${group.label} parts comparison`)}">
         ${group.offers.map((offer) => renderSupplierComparisonTab(offer, allOffers)).join("")}
       </div>
     </section>
@@ -2033,7 +2039,7 @@ function renderGradeABaseline(offers) {
         <div>
           <p class="eyebrow">Initial locksmith pick</p>
           <strong>Refurbished Grade A baseline</strong>
-          <span>All Grade A options are shown first, including out-of-stock parts, with equivalent-condition matches from other catalog sources.</span>
+          <span>All Grade A options are shown first, including out-of-stock parts, with equivalent-condition matches from other parts sources.</span>
         </div>
         <small>${escapeHtml(`${gradeAGroups.length} parts / ${totalOffers} offers`)}</small>
       </div>
@@ -2499,7 +2505,7 @@ function renderLishiDecodeScreen(profile) {
                   `,
                 )
                 .join("")
-            : `<article><strong>${escapeHtml(lishi.fallbackPrimary)}</strong><p>Catalog listings did not expose a specific Lishi/keyway. Confirm from the lock, emergency insert, or authorized code source.</p></article>`
+            : `<article><strong>${escapeHtml(lishi.fallbackPrimary)}</strong><p>Parts listings did not expose a specific Lishi/keyway. Confirm from the lock, emergency insert, or authorized code source.</p></article>`
         }
       </section>
       <section class="code-source-panel">
@@ -2571,7 +2577,7 @@ function renderFinalJobSummaryScreen(profile) {
       <div class="workflow-heading">
         <p class="eyebrow">Final rundown</p>
         <h3>What to bring and verify</h3>
-        <p>Basic field summary for this job. No catalog pricing, no shop-history giveaway, just the working reference.</p>
+          <p>Basic field summary for this job. No parts pricing, no shop-history giveaway, just the working reference.</p>
       </div>
       ${renderSelectedKeyMini(snapshot)}
       <section class="job-rundown-grid">
@@ -2959,7 +2965,7 @@ function renderSupplierComparison(lookup, products) {
     return `
       <section class="supplier-compare">
         <article class="assistant-card">
-          <strong>Catalog search running</strong>
+          <strong>Parts search running</strong>
           <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "Parts are loading in the background. You can stay on this screen."))}</p>
         </article>
       </section>
@@ -2993,7 +2999,7 @@ function renderSupplierComparison(lookup, products) {
             <div>
               <p class="eyebrow">Compare price and inventory</p>
               <h3>${filteredProducts.length} offers</h3>
-              <p>${escapeHtml(selectionSummary || "Every matching item is shown. Use filters to narrow condition, stock, type, or catalog source.")}</p>
+              <p>${escapeHtml(selectionSummary || "Every matching item is shown. Use filters to narrow condition, stock, type, or parts source.")}</p>
             </div>
             <span>${filteredProducts.length} of ${products.length} shown</span>
           </div>
@@ -3030,7 +3036,7 @@ function renderSupplierComparison(lookup, products) {
                     .map(
                       (status, index) => `
                         <span class="${status.connectorLive && status.productCount ? "ready" : "planned"}">
-                          ${escapeHtml(`Catalog source ${index + 1}`)}: ${escapeHtml(
+                          ${escapeHtml(`Parts source ${index + 1}`)}: ${escapeHtml(
                             `${visibleSupplierCounts[status.name] || 0} shown${status.productCount ? ` / ${status.productCount} found` : ""}`,
                           )}
                         </span>
@@ -3047,7 +3053,7 @@ function renderSupplierComparison(lookup, products) {
           }
         </div>
       </div>
-      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Catalog matches are live/reference results. Out-of-stock items stay visible so the app works as a reference guide, not just a shopping cart." : "")}</p>
+      <p class="supplier-footnote">${escapeHtml(lookup.searchAttempts?.length ? "Parts matches are live/reference results. Out-of-stock items stay visible so the app works as a reference guide, not just a shopping cart." : "")}</p>
     </section>
   `;
 }
@@ -3062,7 +3068,7 @@ function renderRecommendedProducts(lookup) {
         <div>
           <p class="eyebrow">Recommended parts</p>
           <h3>No live part match yet</h3>
-          <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "Connect a catalog account or verify this vehicle manually."))}</p>
+          <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "Connect a parts account or verify this vehicle manually."))}</p>
         </div>
       </section>
     `;
@@ -3075,7 +3081,7 @@ function renderRecommendedProducts(lookup) {
           <p class="eyebrow">Recommended parts</p>
           <h3>Start with these matches</h3>
         </div>
-        <span>${escapeHtml(`${lookup.products.length} catalog results`)}</span>
+        <span>${escapeHtml(`${lookup.products.length} parts results`)}</span>
       </div>
       <div class="recommended-product-list">
         ${products
@@ -3120,7 +3126,7 @@ function renderLiveSupplierProducts(lookup, baseProducts = null) {
     return `
       <section class="live-products">
         <p class="eyebrow">Step 3</p>
-        <h3>Catalog lookup</h3>
+        <h3>Parts lookup</h3>
         <div class="assistant-card">
           <strong>${escapeHtml(lookup.loginStatus || "No live matches")}</strong>
           <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "No products were returned for this vehicle yet."))}</p>
@@ -3135,7 +3141,7 @@ function renderLiveSupplierProducts(lookup, baseProducts = null) {
       <div>
         <p class="eyebrow">Step 3</p>
         <h3>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</h3>
-        <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "Catalog search complete."))}</p>
+        <p>${escapeHtml(customerSafeCatalogText(lookup.statusMessage || "Parts search complete."))}</p>
       </div>
       <div class="live-product-workspace">
         ${renderLiveFilters(products, visibleProducts)}
@@ -3162,7 +3168,7 @@ function renderLiveSupplierProducts(lookup, baseProducts = null) {
                     <div><dt>Condition</dt><dd>${escapeHtml(product.keyInfo?.condition || "Verify")}</dd></div>
                   </dl>
                   ${product.keyInfo?.fitment ? `<p>${escapeHtml(product.keyInfo.fitment)}</p>` : ""}
-                  ${product.url ? `<a href="${escapeHtml(product.url)}" target="_blank" rel="noreferrer">Open catalog page</a>` : ""}
+                  ${product.url ? `<a href="${escapeHtml(product.url)}" target="_blank" rel="noreferrer">Open parts page</a>` : ""}
                 </div>
               </article>
             `,
@@ -3205,7 +3211,7 @@ function renderKeyFamilyStep(lookup) {
       </div>
       <div class="selected-family-strip">
         <strong>${escapeHtml(keyFamilyLabel(selectedKeyFamily))}</strong>
-        <span>${selectedProducts.length} of ${products.length} catalog parts selected</span>
+        <span>${selectedProducts.length} of ${products.length} parts selected</span>
       </div>
     </section>
   `;
@@ -3310,8 +3316,8 @@ function renderKeyFamilyScreen(profile) {
       <section class="program-screen key-family-step">
         <div class="workflow-heading">
           <p class="eyebrow">Screen 3</p>
-          <h3>No catalog parts returned</h3>
-          <p>Go back and verify the vehicle, catalog login, or reference source.</p>
+          <h3>No parts returned</h3>
+          <p>Go back and verify the vehicle, parts login, or reference source.</p>
         </div>
         ${renderWorkflowActions([
           `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
@@ -3386,7 +3392,7 @@ function renderKeyChoicesScreen(profile) {
   }
   const packageOption = selectedPackageOption();
   const decisionNote = profile.vin
-    ? "VIN identified the vehicle, but FCC, buttons, board, and package still need catalog/vehicle verification."
+    ? "VIN identified the vehicle, but FCC, buttons, board, and package still need parts/vehicle verification."
     : "Year/make/model search broadens the results. Use buttons, FCC, keyway, trim, and customer key style to narrow the exact part.";
   return `
     <section class="program-screen selected-parts-step">
@@ -3520,7 +3526,7 @@ function renderVinProfile(profile) {
     programmer: requirements["Required programmer"]?.value || profile.programmers?.[0]?.name || "Verify",
     tool: requirements["Origination / tool path"]?.value || profile.tools?.[0]?.name || "Verify",
     security: requirements["Security requirements"]?.value || "Verify",
-    part: requirements["Supplier part confidence"]?.value || "Catalog lookup required",
+    part: requirements["Parts confidence"]?.value || "Parts lookup required",
   };
   const bestSupplier = profile.supplierCandidates?.[0];
   ensureSelectedKeyFamily(profile.liveSupplierLookup?.products || []);
@@ -3529,7 +3535,7 @@ function renderVinProfile(profile) {
     : profile.programmingReference
       ? "Programming data match"
       : profile.lookupMode === "ymm"
-        ? "Y/M/M catalog search"
+        ? "Y/M/M parts search"
         : "Needs verification";
 
   const context = { vehicle, title, quick, bestSupplier, sourceBadge };
@@ -3599,9 +3605,9 @@ function renderVinProfile(profile) {
           <p>${escapeHtml(quick.part)}</p>
         </article>
         <article class="wide-answer">
-          <span>Best catalog clue</span>
+          <span>Best parts clue</span>
           <strong>${escapeHtml(bestSupplier?.hlPartNumber || bestSupplier?.supplierSku || "Needs match")}</strong>
-          <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence · FCC ${bestSupplier.fccId || "verify"}` : "No catalog candidate yet")}</p>
+          <p>${escapeHtml(bestSupplier ? `${bestSupplier.confidence} confidence · FCC ${bestSupplier.fccId || "verify"}` : "No parts candidate yet")}</p>
         </article>
       </div>
     </section>
@@ -3655,10 +3661,10 @@ function renderVinProfile(profile) {
   `;
 
   vinRecommendation.innerHTML = `
-    <strong>${escapeHtml(profile.liveSupplierLookup?.loginStatus === "connected" ? "Live catalog connected" : "Catalog search fallback")}</strong>
-    <p>${escapeHtml(customerSafeCatalogText(profile.liveSupplierLookup?.statusMessage || "Current matches use imported catalog labels until live lookup is connected."))}</p>
+    <strong>${escapeHtml(profile.liveSupplierLookup?.loginStatus === "connected" ? "Live parts connected" : "Parts search fallback")}</strong>
+    <p>${escapeHtml(customerSafeCatalogText(profile.liveSupplierLookup?.statusMessage || "Current matches use imported parts labels until live lookup is connected."))}</p>
     <div class="tag-row">
-      <span>Catalog sources</span><span>${escapeHtml(`${profile.liveSupplierLookup?.products?.length || 0} products`)}</span><span>Verify before ordering</span>
+      <span>Parts sources</span><span>${escapeHtml(`${profile.liveSupplierLookup?.products?.length || 0} products`)}</span><span>Verify before ordering</span>
     </div>
   `;
 }
@@ -3683,7 +3689,7 @@ function ensureJobSaveModal() {
         <input name="exactPart" autocomplete="off" />
       </label>
       <label>
-        Catalog / part number
+        Parts / part number
         <input name="partNumber" autocomplete="off" />
       </label>
       <label>
@@ -3886,7 +3892,7 @@ async function startSupplierLookup(profile) {
     latestVinProfile.liveSupplierLookup = {
       ...(latestVinProfile.liveSupplierLookup || {}),
       loginStatus: "error",
-      statusMessage: error.message || "Catalog lookup failed.",
+      statusMessage: error.message || "Parts lookup failed.",
       products: latestVinProfile.liveSupplierLookup?.products || [],
     };
     renderVinProfile(latestVinProfile);
@@ -4352,6 +4358,32 @@ workedJobForm?.addEventListener("submit", async (event) => {
   }
 });
 
+workedJobImportForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(workedJobImportForm);
+  const text = cleanInput(data.get("spreadsheet"));
+  const submitButton = workedJobImportForm.querySelector("button[type='submit']");
+  if (!text) {
+    workedJobImportStatus.textContent = "Paste the spreadsheet rows first.";
+    return;
+  }
+  try {
+    submitButton.disabled = true;
+    workedJobImportStatus.textContent = "Importing worked jobs into the reference engine...";
+    const result = await api("/api/worked-jobs/import", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    await loadJobs();
+    workedJobImportStatus.textContent = `Imported ${result.imported} worked jobs, updated ${result.profilesUpdated} vehicle profiles, skipped ${result.skipped}, duplicates ${result.duplicates}.`;
+    if (result.imported) workedJobImportForm.reset();
+  } catch (error) {
+    workedJobImportStatus.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
 keyIntelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(keyIntelForm);
@@ -4380,7 +4412,7 @@ if (supplierSettingsForm) {
 
     try {
       submitButton.disabled = true;
-      supplierSettingsStatus.textContent = "Saving catalog login...";
+      supplierSettingsStatus.textContent = "Saving parts login...";
       const supplierId = data.get("supplierId") || selectedSupplierId;
       const supplier = supplierAccounts.find((account) => account.id === supplierId);
       const payload = await api(`/api/supplier-accounts/${encodeURIComponent(supplierId)}`, {
@@ -4397,7 +4429,7 @@ if (supplierSettingsForm) {
       if (index >= 0) supplierAccounts[index] = payload.account;
       else supplierAccounts.push(payload.account);
       renderSupplierAccounts();
-      supplierSettingsStatus.textContent = "Catalog login saved. Password stays hidden after save.";
+      supplierSettingsStatus.textContent = "Parts login saved. Password stays hidden after save.";
     } catch (error) {
       supplierSettingsStatus.textContent = customerSafeCatalogText(error.message);
     } finally {
@@ -4529,7 +4561,7 @@ vinForm.addEventListener("submit", async (event) => {
     vinResult.innerHTML = `
       <div class="lookup-loading">
         <article><strong>1. Decoding VIN</strong><p>Reading vehicle identity.</p></article>
-        <article><strong>2. Preparing catalog search</strong><p>Parts will load after the vehicle is shown.</p></article>
+        <article><strong>2. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
       </div>
     `;
     const profile = await api(`/api/vin/${encodeURIComponent(vin)}`);
@@ -4565,7 +4597,7 @@ if (ymmForm) {
       vinResult.innerHTML = `
         <div class="lookup-loading">
           <article><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
-          <article><strong>2. Preparing catalog search</strong><p>Parts will load after the vehicle is shown.</p></article>
+          <article><strong>2. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
         </div>
       `;
       const profile = await api(

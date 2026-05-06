@@ -52,7 +52,7 @@ const supplierRegistry = [
     id: "idn-hoffman",
     name: "IDN-H. Hoffman",
     loginUrl: "https://www.idn-inc.com/",
-    lookupMode: "live public catalog search",
+    lookupMode: "live public parts search",
   },
   {
     id: "golden-supply",
@@ -572,7 +572,7 @@ async function keyInnovationsRequest(pathname, options = {}, cookie = "") {
   const response = await fetch(url, {
     redirect: "manual",
     headers: {
-      "User-Agent": "TimLock-App catalog connector/0.1",
+      "User-Agent": "TimLock-App parts connector/0.1",
       Accept: "text/html,application/xhtml+xml",
       ...(cookie ? { Cookie: cookie } : {}),
       ...(options.headers || {}),
@@ -744,7 +744,7 @@ async function searchKeyInnovationsFitment(vehicle) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "TimLock-App catalog connector/0.1",
+      "User-Agent": "TimLock-App parts connector/0.1",
     },
   });
   if (!response.ok) return { products: [], searchAttempts: [{ query: `fitment ${filter}`, resultCount: 0 }] };
@@ -912,7 +912,7 @@ async function goldenSupplyRequest(query) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "TimLock-App catalog connector/0.1",
+      "User-Agent": "TimLock-App parts connector/0.1",
     },
   });
   if (!response.ok) {
@@ -986,7 +986,7 @@ async function htmlFetch(url) {
   const response = await fetch(url, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
-      "User-Agent": "TimLock-App catalog connector/0.1",
+      "User-Agent": "TimLock-App parts connector/0.1",
     },
   });
   if (!response.ok) throw new Error(`Search returned ${response.status}`);
@@ -1153,7 +1153,7 @@ function parseIdnProducts(html, vehicle, matchedQuery) {
         titleMatch?.[1] || "",
         image,
         "",
-        "IDN public catalog search",
+        "IDN public parts search",
         matchedQuery,
         vehicle,
         { sku, description: stripHtml(block), stock: /in stock/i.test(block) ? "In stock" : "Stock unknown" },
@@ -1169,7 +1169,7 @@ async function searchIdnProducts(vehicle, vin) {
   const products = parseIdnProducts(html, vehicle, query);
   return {
     connected: true,
-    source: "IDN public catalog search",
+    source: "IDN public parts search",
     searchAttempts: [{ query, resultCount: products.length, returnedCount: products.length }],
     products: products.filter((product) => product.score > 0).sort((a, b) => b.score - a.score).slice(0, 30),
   };
@@ -1238,7 +1238,7 @@ async function liveIdnLookup(vehicle, vin) {
   return {
     supplier: "IDN-H. Hoffman",
     loginStatus: "connected",
-    statusMessage: "IDN public catalog search is connected; results may be broad until account/catalog integration is added.",
+    statusMessage: "IDN public parts search is connected; results may be broad until account/parts integration is added.",
     vinLookupAvailable: false,
     ...live,
   };
@@ -1377,7 +1377,7 @@ async function readJsonBody(request) {
   let body = "";
   for await (const chunk of request) {
     body += chunk;
-    if (body.length > 1_000_000) {
+    if (body.length > 12_000_000) {
       throw new Error("Request body too large");
     }
   }
@@ -1573,7 +1573,7 @@ function mergeUsageStat(items = [], value = "", extra = {}) {
   return nextItems.sort((a, b) => (b.count || 0) - (a.count || 0));
 }
 
-async function updateVehicleProfileFromOutcome(input) {
+function applyVehicleProfileOutcome(profiles, input) {
   const outcome = cleanString(input.outcome || "worked").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "worked";
   const vehicle = {
     year: cleanString(input.vehicle?.year),
@@ -1583,7 +1583,7 @@ async function updateVehicleProfileFromOutcome(input) {
   };
   if (!vehicle.year || !vehicle.make || !vehicle.model) return null;
 
-  const profiles = await readVehicleProfiles();
+  profiles.profiles = Array.isArray(profiles.profiles) ? profiles.profiles : [];
   const baseKey = vehicleProfileBaseKey(vehicle);
   const exactKey = vehicleProfileKey(vehicle);
   let profile = profiles.profiles.find((item) => item.key === exactKey) || profiles.profiles.find((item) => item.baseKey === baseKey && !item.trim);
@@ -1650,8 +1650,354 @@ async function updateVehicleProfileFromOutcome(input) {
         ? "shop-confirmed"
         : "learning";
   profile.updatedAt = new Date().toISOString();
+  return profile;
+}
+
+async function updateVehicleProfileFromOutcome(input) {
+  const profiles = await readVehicleProfiles();
+  const profile = applyVehicleProfileOutcome(profiles, input);
+  if (!profile) return null;
   await writeVehicleProfiles(profiles);
   return profile;
+}
+
+function splitDelimitedLine(line, delimiter) {
+  const values = [];
+  let current = "";
+  let quoted = false;
+  const quote = '"';
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === quote && quoted && next === quote) {
+      current += quote;
+      index += 1;
+      continue;
+    }
+    if (char === quote) {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === delimiter && !quoted) {
+      values.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  values.push(current);
+  return values.map((value) => value.trim());
+}
+
+function workedJobHeaderKey(value) {
+  const key = cleanString(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const aliases = {
+    timestamp: "timestamp",
+    date: "timestamp",
+    year: "year",
+    make: "make",
+    model: "model",
+    partnumber: "partNumber",
+    part: "partNumber",
+    programmer: "programmer",
+    servicetype: "serviceType",
+    service: "serviceType",
+    vin: "vin",
+    vehiclenumber: "vin",
+    technician: "technician",
+    tech: "technician",
+    pinrequired: "pinRequired",
+    pinsuccess: "pinSuccess",
+    notes: "notes",
+  };
+  return aliases[key] || key;
+}
+
+function workedJobCleanValue(value) {
+  const text = cleanString(value).replace(/\s+/g, " ");
+  if (!text || /^(?:n\/?a|na|null|none|0)$/i.test(text)) return "";
+  return text;
+}
+
+function normalizeWorkedJobYear(value) {
+  const digits = cleanString(value).replace(/\D/g, "");
+  if (!digits) return "";
+  const raw = Number(digits);
+  if (digits.length === 4 && raw >= 1900 && raw <= 2035) return String(raw);
+  if (digits.length === 3 && digits.startsWith("2")) {
+    const corrected = 2000 + Number(digits.slice(1));
+    if (corrected >= 2000 && corrected <= 2035) return String(corrected);
+  }
+  if (digits.length === 2) {
+    const corrected = raw <= 35 ? 2000 + raw : 1900 + raw;
+    if (corrected >= 1900 && corrected <= 2035) return String(corrected);
+  }
+  return "";
+}
+
+function normalizeWorkedJobMake(value) {
+  const text = workedJobCleanValue(value);
+  const normalized = normalizeVehicleText(text);
+  const aliases = {
+    CHEVY: "CHEVROLET",
+    CHEV: "CHEVROLET",
+    CADILAC: "CADILLAC",
+    VW: "VOLKSWAGEN",
+    "MISC UNIQUE": "MISC/UNIQUE",
+  };
+  return aliases[normalized] || text.toUpperCase();
+}
+
+function normalizeWorkedJobModel(value) {
+  return workedJobCleanValue(value)
+    .replace(/\bF150\b/gi, "F-150")
+    .replace(/\bCRV\b/gi, "CR-V")
+    .replace(/\bRAV4\b/gi, "RAV4")
+    .trim();
+}
+
+function normalizeWorkedJobVin(value) {
+  return normalizeVinCandidate(value) || "";
+}
+
+function workedJobServiceLabel(serviceType) {
+  const code = normalizeVehicleText(serviceType);
+  const labels = {
+    AKL: "All keys lost",
+    ADD: "Add key",
+    DK: "Duplicate key",
+    PCP: "Program/check/procedure",
+    AUL: "Unlock",
+    AUR: "Unlock/referral",
+    ARK: "Aftermarket remote/key service",
+    ILP: "Ignition/lock path",
+    DLP: "Door/lock path",
+    SOK: "Special order key",
+  };
+  return labels[code] || workedJobCleanValue(serviceType) || "Worked locksmith job";
+}
+
+function keyFamilyFromWorkedService(serviceType, partNumber = "") {
+  const text = normalizeVehicleText(`${serviceType} ${partNumber}`);
+  if (/PROX|SMART|PRX|PUSH|PTS|PCP/.test(text)) return "proximity";
+  if (/MECH|NO TP|NO_TP|BLADE|ILP|DLP/.test(text)) return "keyed";
+  return "keyed";
+}
+
+function extractLishiFromWorkedText(...values) {
+  const text = values.map((value) => cleanString(value).toUpperCase()).filter(Boolean).join(" ");
+  if (!text) return "";
+  const tokens = new Set();
+  if (/\bK5\s+LISHI\b|\bLISHI\s+K5\b/.test(text)) tokens.add("K5");
+  for (const match of text.matchAll(/\b([A-Z]{1,4}\s*-?\s*\d{1,4}[A-Z]?)\s*(?:LISHI|DECODER)\b|\b(?:LISHI|DECODER)\s*([A-Z]{1,4}\s*-?\s*\d{1,4}[A-Z]?)\b/g)) {
+    const token = cleanString(match[1] || match[2]).replace(/\s+/g, "").replace("-", "");
+    if (token) tokens.add(token);
+  }
+  for (const match of text.matchAll(/\b(HU|TOY|TR|DAT|NSN|NIS|MIT|MZ|MAZ|BMW|VA|HON|HY|KIA|SUB|CY)\s*-?\s*(\d{1,4}[A-Z]?)\b/g)) {
+    tokens.add(`${match[1]}${match[2]}`);
+  }
+  return Array.from(tokens).slice(0, 3).join(" / ");
+}
+
+function parseWorkedJobRows(text) {
+  const rawLines = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim());
+  if (!rawLines.length) return { rows: [], skipped: [{ line: 0, reason: "No spreadsheet rows were provided." }] };
+
+  const headerIndex = rawLines.findIndex((line) => /timestamp|year/i.test(line) && /make/i.test(line) && /model/i.test(line));
+  if (headerIndex < 0) return { rows: [], skipped: [{ line: 0, reason: "Could not find a header row with Year, Make, and Model." }] };
+
+  const headerLine = rawLines[headerIndex];
+  const delimiter = headerLine.includes("\t") ? "\t" : ",";
+  const headers = splitDelimitedLine(headerLine, delimiter).map(workedJobHeaderKey);
+  const rows = [];
+  const skipped = [];
+
+  rawLines.slice(headerIndex + 1).forEach((line, offset) => {
+    const lineNumber = headerIndex + offset + 2;
+    const values = splitDelimitedLine(line, delimiter);
+    const raw = {};
+    headers.forEach((header, index) => {
+      if (header) raw[header] = values[index] || "";
+    });
+
+    const year = normalizeWorkedJobYear(raw.year);
+    const make = normalizeWorkedJobMake(raw.make);
+    const model = normalizeWorkedJobModel(raw.model);
+    const partNumber = workedJobCleanValue(raw.partNumber);
+    const programmer = workedJobCleanValue(raw.programmer);
+    const serviceType = workedJobCleanValue(raw.serviceType);
+    const notes = workedJobCleanValue(raw.notes);
+    const lishi = extractLishiFromWorkedText(partNumber, notes);
+
+    if (!year || !make || !model) {
+      skipped.push({ line: lineNumber, reason: "Missing or invalid year/make/model." });
+      return;
+    }
+    if (!partNumber && !programmer && !serviceType && !notes) {
+      skipped.push({ line: lineNumber, reason: "No job evidence fields were present." });
+      return;
+    }
+
+    const vin = normalizeWorkedJobVin(raw.vin);
+    const key = createHash("sha1")
+      .update([raw.timestamp, year, make, model, vin, partNumber, programmer, serviceType, notes].map(cleanString).join("|"))
+      .digest("hex")
+      .slice(0, 18);
+
+    rows.push({
+      id: `worked-import-${key}`,
+      sourceLine: lineNumber,
+      timestamp: workedJobCleanValue(raw.timestamp),
+      year,
+      make,
+      model,
+      vin,
+      rawVin: workedJobCleanValue(raw.vin),
+      partNumber,
+      programmer,
+      serviceType,
+      serviceLabel: workedJobServiceLabel(serviceType),
+      keyFamily: keyFamilyFromWorkedService(serviceType, partNumber),
+      lishi,
+      notes,
+      pinRequired: workedJobCleanValue(raw.pinRequired),
+      pinSuccess: workedJobCleanValue(raw.pinSuccess),
+    });
+  });
+
+  return { rows, skipped };
+}
+
+function workedJobOutcomeFromImport(row) {
+  const partName = row.partNumber || row.lishi || row.serviceType || `${row.year} ${row.make} ${row.model} worked job`;
+  return {
+    outcome: "worked",
+    vin: row.vin,
+    vehicle: {
+      year: row.year,
+      make: row.make,
+      model: row.model,
+      trim: "",
+    },
+    part: {
+      name: partName,
+      supplier: "Imported worked jobs",
+      sku: row.partNumber,
+      oem: "",
+      fcc: "",
+      frequency: "",
+      chip: "",
+      buttons: "",
+      keyway: row.lishi,
+      lishi: row.lishi,
+      programmer: row.programmer,
+      family: row.keyFamily,
+    },
+    job: {
+      exactPart: row.partNumber,
+      partNumber: row.partNumber,
+      lishi: row.lishi,
+      programmer: row.programmer,
+      keyType: row.keyFamily,
+      notes: [
+        row.serviceType ? `Service ${row.serviceType} (${row.serviceLabel})` : "",
+        row.pinRequired ? `PIN required ${row.pinRequired}` : "",
+        row.pinSuccess ? `PIN success ${row.pinSuccess}` : "",
+        row.notes,
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    },
+  };
+}
+
+function workedJobStoreEntry(row, outcomeInput) {
+  const job = cleanPartOutcome(outcomeInput);
+  return {
+    ...job,
+    id: row.id,
+    title: `${row.serviceType || "JOB"} ${row.year} ${row.make} ${row.model}`.trim(),
+    customer: "Imported worked job",
+    service: row.serviceLabel,
+    verification: "Imported worked job history",
+    status: "Completed",
+    vin: row.vin || row.rawVin,
+    programmer: row.programmer || job.programmer,
+    sequence: row.partNumber || row.lishi || job.sequence,
+    price: "",
+    payment: "",
+    tags: [...new Set([...(job.tags || []), "worked-import", row.serviceType, row.make, row.programmer].filter(Boolean))],
+    notes: [
+      "Imported worked job",
+      row.rawVin && !row.vin ? `Raw VIN ${row.rawVin}` : "",
+      row.partNumber ? `Part ${row.partNumber}` : "",
+      row.lishi ? `Lishi ${row.lishi}` : "",
+      row.programmer ? `Programmer ${row.programmer}` : "",
+      row.serviceType ? `Service ${row.serviceType} (${row.serviceLabel})` : "",
+      row.pinRequired ? `PIN required ${row.pinRequired}` : "",
+      row.pinSuccess ? `PIN success ${row.pinSuccess}` : "",
+      row.notes,
+    ].filter(Boolean),
+    schedule: row.timestamp,
+    importedAt: new Date().toISOString(),
+    sourceLine: row.sourceLine,
+  };
+}
+
+async function importWorkedJobsFromText(text, store) {
+  const parsed = parseWorkedJobRows(text);
+  const existingIds = new Set((store.jobs || []).map((job) => job.id));
+  const importedJobs = [];
+  const profileInputs = [];
+  let duplicateCount = 0;
+
+  for (const row of parsed.rows) {
+    if (existingIds.has(row.id)) {
+      duplicateCount += 1;
+      continue;
+    }
+    const outcomeInput = workedJobOutcomeFromImport(row);
+    const job = workedJobStoreEntry(row, outcomeInput);
+    importedJobs.push(job);
+    profileInputs.push(outcomeInput);
+    existingIds.add(job.id);
+  }
+
+  if (importedJobs.length) {
+    importedJobs.sort((a, b) => (Date.parse(b.schedule) || 0) - (Date.parse(a.schedule) || 0));
+    store.jobs = [...importedJobs, ...(store.jobs || [])];
+    await writeStore(store);
+  }
+
+  let profilesUpdated = 0;
+  if (profileInputs.length) {
+    const profiles = await readVehicleProfiles();
+    for (const input of profileInputs) {
+      const profile = applyVehicleProfileOutcome(profiles, input);
+      if (profile) profilesUpdated += 1;
+    }
+    if (profilesUpdated) await writeVehicleProfiles(profiles);
+  }
+
+  return {
+    imported: importedJobs.length,
+    duplicates: duplicateCount,
+    skipped: parsed.skipped.length,
+    profilesUpdated,
+    totalParsed: parsed.rows.length,
+    sampleImported: importedJobs.slice(0, 5).map((job) => ({
+      id: job.id,
+      vehicle: job.vehicle,
+      part: job.sequence,
+      programmer: job.programmer,
+    })),
+    skippedSamples: parsed.skipped.slice(0, 10),
+  };
 }
 
 function cleanString(value) {
@@ -2571,7 +2917,7 @@ function buildSelectionSummary(products) {
     topPick;
   const verification = topPick
     ? [...new Set([...(bestPick.selection?.missing || []), ...(bestPick.selection?.warnings || [])])].slice(0, 5)
-    : ["supplier fitment", "FCC/frequency", "button layout", "blade/keyway"];
+    : ["parts fitment", "FCC/frequency", "button layout", "blade/keyway"];
   return {
     ...counts,
     counts,
@@ -2800,7 +3146,7 @@ async function findSupplierCandidates(vehicle, record, programmingReference) {
       supplierSku: linkedLabel?.sku || row.mwLegacyPartNumber || "",
       supplierBrand: linkedLabel?.brand || prefixes[0],
       descriptor: linkedLabel?.descriptor || "",
-      source: linkedLabel ? "Master catalog + Key Innovations label" : "Master catalog",
+      source: linkedLabel ? "Master parts database + imported label" : "Master parts database",
       verify: ["vehicle application", "button layout", "FCC/frequency", "blade/keyway", "supplier stock"],
     };
   });
@@ -3171,7 +3517,7 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.keyway = { primary: "Nissan/Infiniti emergency insert keyway must be confirmed", alternates: ["Prox blade and transponder blade can differ"], confidence: "verify" };
     reference.lishi = { primary: "Nissan/Infiniti keyway-specific Lishi after insert/door verification", alternates: [], confidence: "verify" };
     reference.programming.push("Confirm BCM/security coverage and slot/prox behavior before programming");
-    reference.partVerification.push("Slot/prox behavior, FCC, and hatch/trunk buttons can split catalog matches");
+    reference.partVerification.push("Slot/prox behavior, FCC, and hatch/trunk buttons can split parts matches");
     reference.warnings.push("Nissan prox FCC and button configuration often varies inside the same model year");
     reference.fieldPhotos.push("Slot/prox behavior and hatch/trunk button layout");
   } else if (hyundaiLate) {
@@ -3515,9 +3861,9 @@ async function syncPublicReferenceSources() {
         use: "FCC grantee/product clues after a candidate FCC is known from supplier or field data",
       },
       {
-        id: "supplier-public-catalogs",
-        name: "Supplier public catalogs",
-        type: "public/live catalog facts",
+        id: "supplier-public-parts",
+        name: "Supplier public parts sources",
+        type: "public/live parts facts",
         use: "Product names, fitment, FCC/chip/button clues, images, and stock where access is allowed",
       },
       {
@@ -3622,17 +3968,17 @@ function inferKeyRequirements(vehicle, record, catalogApplication, matchedJobs, 
       source: programmingReference ? "Programming reference" : "Needs verification",
     },
     {
-      label: "Supplier part confidence",
-      value: recordKey?.partNumber && !recordKey.partNumber.startsWith("VERIFY") ? recordKey.partNumber : "Supplier lookup required",
+      label: "Parts confidence",
+      value: recordKey?.partNumber && !recordKey.partNumber.startsWith("VERIFY") ? recordKey.partNumber : "Parts lookup required",
       confidence: recordKey?.partNumber && !recordKey.partNumber.startsWith("VERIFY") ? "high" : "not verified",
-      source: recordKey?.partNumber && !recordKey.partNumber.startsWith("VERIFY") ? "Key DB" : "Needs catalog/API verification",
+      source: recordKey?.partNumber && !recordKey.partNumber.startsWith("VERIFY") ? "Key DB" : "Needs parts/API verification",
     },
   ];
 
   const blockers = [
     "VIN usually does not expose FCC, blade, transponder, or exact remote board by itself",
     "Trim/package can change key system",
-    "Supplier catalog confirmation is required before ordering",
+    "Parts confirmation is required before ordering",
   ];
 
   return {
@@ -4103,7 +4449,7 @@ function buildProgrammerCoverageList(vehicle, programmerItems, programmingRefere
   const oemDetail = [
     oem.detail,
     `Pass-through/interface: ${oem.passThru}`,
-    "If this OEM path is needed, plan on an OEM key about 90% of the time until field/catalog proof says otherwise.",
+    "If this OEM path is needed, plan on an OEM key about 90% of the time until field/parts proof says otherwise.",
     oemWorkedMatches.length
       ? `${oemWorkedMatches.length} saved worked-job outcome${oemWorkedMatches.length === 1 ? "" : "s"} matched this OEM/SPS path.`
       : "",
@@ -4289,8 +4635,8 @@ function sourceReadiness(record, identity = { status: "connected", result: "Used
       result: record ? record.keySystem.name : "Needs verified year/make/model record",
     },
     {
-      sourceId: "supplier-catalogs",
-      label: "Supplier catalogs",
+      sourceId: "supplier-parts",
+      label: "Parts sources",
       status: record?.keyOptions?.some((item) => item.partNumber && !item.partNumber.startsWith("VERIFY"))
         ? "verified"
         : "needed",
@@ -4363,7 +4709,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const publicSources = await readPublicReferenceSources();
   const supplierCandidates = await findSupplierCandidates(vehicle, record, programmingReference);
   const liveSupplierLookup = options.skipSupplierLookup
-    ? await pendingSupplierLookup("Vehicle decoded. Supplier catalogs are searching in the background.")
+    ? await pendingSupplierLookup("Vehicle decoded. Parts sources are searching in the background.")
     : await buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence);
   const vehicleReference = applyVerifiedProfileReference(
     applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries),
@@ -4418,7 +4764,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     catalogApplication,
     source: record
       ? options.source || "Vehicle details from year/make/model; key/programmer/tool guidance from local verified key intelligence database."
-      : options.fallbackSource || "Vehicle details from year/make/model; supplier fitment and locksmith workflow guidance need verification.",
+      : options.fallbackSource || "Vehicle details from year/make/model; parts fitment and locksmith workflow guidance need verification.",
   };
 }
 
@@ -4450,6 +4796,13 @@ async function handleApi(request, response, pathname) {
     await writeStore(store);
     const profile = await updateVehicleProfileFromOutcome(body);
     sendJson(response, 201, { job, profile });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/worked-jobs/import") {
+    const body = await readJsonBody(request);
+    const result = await importWorkedJobsFromText(body.text || body.tsv || body.csv || "", store);
+    sendJson(response, 201, result);
     return;
   }
 
@@ -4500,7 +4853,7 @@ async function handleApi(request, response, pathname) {
         rows: catalog.rows,
       });
     } catch {
-      sendError(response, 404, "vPIC catalog has not been generated. Run npm run sync:vpic first.");
+      sendError(response, 404, "vPIC parts reference has not been generated. Run npm run sync:vpic first.");
     }
     return;
   }
@@ -4676,7 +5029,7 @@ async function handleApi(request, response, pathname) {
         rows,
       });
     } catch {
-      sendError(response, 404, "Key Innovations catalog has not been imported. Run npm run import:key-innovations first.");
+      sendError(response, 404, "Key Innovations parts reference has not been imported. Run npm run import:key-innovations first.");
     }
     return;
   }
@@ -4713,7 +5066,7 @@ async function handleApi(request, response, pathname) {
         .slice(0, 100);
       sendJson(response, 200, { generatedAt: catalog.generatedAt, totalRows: catalog.totalRows, returned: rows.length, rows });
     } catch {
-      sendError(response, 404, "Master catalog has not been imported. Run npm run import:master-catalog first.");
+      sendError(response, 404, "Master parts database has not been imported. Run npm run import:master-catalog first.");
     }
     return;
   }
