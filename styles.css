@@ -4390,6 +4390,37 @@ textarea:focus {
   gap: 14px;
 }
 
+.part-history-recents,
+.history-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.part-history-recents {
+  margin: -2px 0 10px;
+}
+
+.part-history-recents > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.part-history-recents .part-chip {
+  cursor: pointer;
+}
+
+.history-action-bar {
+  justify-content: space-between;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(246, 248, 250, 0.92);
+}
+
 .history-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

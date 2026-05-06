@@ -18,6 +18,8 @@ let supplierLookupRequestId = 0;
 let activeVinScan = null;
 let pendingJobOfferId = "";
 let deferredInstallPrompt = null;
+let latestPartHistory = null;
+const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -65,6 +67,7 @@ const fillWorkedJobFromLookupButton = document.querySelector("#fillWorkedJobFrom
 const partHistoryForm = document.querySelector("#partHistoryForm");
 const partHistoryStatus = document.querySelector("#partHistoryStatus");
 const partHistoryResult = document.querySelector("#partHistoryResult");
+const partHistoryRecents = document.querySelector("#partHistoryRecents");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -2860,6 +2863,35 @@ async function saveWorkedJobPayload(payload) {
   });
 }
 
+function partHistoryRecentSearches() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(partHistoryRecentsKey) || "[]");
+    return Array.isArray(parsed) ? parsed.map(cleanInput).filter(Boolean).slice(0, 10) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePartHistoryRecent(query) {
+  const clean = cleanInput(query).toUpperCase();
+  if (!clean) return;
+  const recent = [clean, ...partHistoryRecentSearches().filter((item) => item.toUpperCase() !== clean)].slice(0, 10);
+  localStorage.setItem(partHistoryRecentsKey, JSON.stringify(recent));
+}
+
+function renderPartHistoryRecents() {
+  if (!partHistoryRecents) return;
+  const recent = partHistoryRecentSearches();
+  if (!recent.length) {
+    partHistoryRecents.innerHTML = "";
+    return;
+  }
+  partHistoryRecents.innerHTML = `
+    <span>Recent</span>
+    ${recent.map((item) => `<button class="part-chip" type="button" data-part-history-search="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}
+  `;
+}
+
 function renderPartChips(values = [], empty = "None") {
   const clean = [...new Set(values.map((value) => cleanInput(value)).filter(Boolean))];
   if (!clean.length) return `<span class="part-chip muted">${escapeHtml(empty)}</span>`;
@@ -2867,6 +2899,64 @@ function renderPartChips(values = [], empty = "None") {
     .slice(0, 10)
     .map((value) => `<span class="part-chip">${escapeHtml(value)}</span>`)
     .join("");
+}
+
+function partHistoryEvidenceBadges(payload = {}) {
+  const identifiers = payload.identifiers || {};
+  const jobs = payload.jobs || [];
+  const evidence = payload.programmerEvidence || {};
+  const hasProgrammerProof = (evidence.programmers || []).some((programmer) => Number(programmer.successes) > 0);
+  return [
+    jobs.length ? "Shop proven" : "No job proof",
+    payload.referenceStats?.matchedReferenceRows ? "Cross-ref linked" : "Direct text only",
+    hasProgrammerProof ? "Programmer proof" : "No programmer proof",
+    identifiers.oe?.length ? "OE linked" : "",
+  ].filter(Boolean);
+}
+
+function partHistoryProofSummary(payload = {}) {
+  const identifiers = payload.identifiers || {};
+  const jobs = payload.jobs || [];
+  const oe = identifiers.oe?.slice(0, 4).join(", ");
+  const topProgrammer = payload.programmerEvidence?.programmers?.[0];
+  const partLabel = payload.primaryIdentifier || payload.query || "Part";
+  const pieces = [`${partLabel}${oe ? ` matched OE ${oe}` : ""}.`];
+  if (jobs.length) {
+    pieces.push(`${jobs.length} saved job${jobs.length === 1 ? "" : "s"} matched this part family.`);
+    if (topProgrammer) {
+      const percent = Number.isFinite(Number(topProgrammer.observedCoveragePercent)) ? `${topProgrammer.observedCoveragePercent}% observed success` : "observed coverage not fully scored";
+      pieces.push(`Top programmer proof: ${topProgrammer.name}, ${topProgrammer.jobs} job${topProgrammer.jobs === 1 ? "" : "s"}, ${percent}.`);
+    }
+  } else {
+    pieces.push("No saved job proof yet. Coverage proof is not established.");
+  }
+  return pieces.join(" ");
+}
+
+async function copyPartHistoryProof() {
+  if (!latestPartHistory) return;
+  const text = partHistoryProofSummary(latestPartHistory);
+  try {
+    await navigator.clipboard.writeText(text);
+    if (partHistoryStatus) partHistoryStatus.textContent = "Proof summary copied.";
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+    if (partHistoryStatus) partHistoryStatus.textContent = "Proof summary copied.";
+  }
+}
+
+function renderPartHistoryActions(payload) {
+  return `
+    <section class="history-action-bar">
+      <div class="badge-row">${partHistoryEvidenceBadges(payload).map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}</div>
+      <button class="secondary-action small" type="button" data-copy-part-proof>Copy Proof Summary</button>
+    </section>
+  `;
 }
 
 function renderPartHistoryCoverage(programmerEvidence = {}) {
@@ -2942,6 +3032,7 @@ function renderPartHistoryJob(job) {
 
 function renderPartHistory(payload) {
   if (!partHistoryResult) return;
+  latestPartHistory = payload;
   const identifiers = payload.identifiers || {};
   const jobs = payload.jobs || [];
   const crossReferences = payload.crossReferences || [];
@@ -2966,6 +3057,7 @@ function renderPartHistory(payload) {
         )
         .join("")}
     </section>
+    ${renderPartHistoryActions(payload)}
     <section class="history-reference-panel">
       <div>
         <p class="eyebrow">Cross-reference family</p>
@@ -4279,6 +4371,19 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const recentPartButton = event.target.closest("[data-part-history-search]");
+  if (recentPartButton && partHistoryForm) {
+    partHistoryForm.elements.partNumber.value = recentPartButton.dataset.partHistorySearch || "";
+    partHistoryForm.requestSubmit();
+    return;
+  }
+
+  const copyPartProofButton = event.target.closest("[data-copy-part-proof]");
+  if (copyPartProofButton) {
+    copyPartHistoryProof();
+    return;
+  }
+
   const backButton = event.target.closest("[data-vin-back]");
   if (backButton && latestVinProfile) {
     vinWorkflowStep = backButton.dataset.vinBack;
@@ -4574,6 +4679,8 @@ partHistoryForm?.addEventListener("submit", async (event) => {
       `;
     }
     const payload = await api(`/api/part-history?q=${encodeURIComponent(query)}`);
+    savePartHistoryRecent(query);
+    renderPartHistoryRecents();
     renderPartHistory(payload);
     partHistoryStatus.textContent = `Found ${payload.jobs?.length || 0} job match${payload.jobs?.length === 1 ? "" : "es"} for ${payload.primaryIdentifier || query}.`;
   } catch (error) {
@@ -4848,6 +4955,7 @@ renderSources();
 renderSupplierAccounts();
 renderReferenceVault();
 renderPublicReferenceSources();
+renderPartHistoryRecents();
 loadJobs();
 loadVehicles();
 loadInsights();
