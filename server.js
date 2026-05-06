@@ -572,7 +572,7 @@ async function keyInnovationsRequest(pathname, options = {}, cookie = "") {
   const response = await fetch(url, {
     redirect: "manual",
     headers: {
-      "User-Agent": "LockForge Systems supplier connector/0.1",
+      "User-Agent": "TimLock-App catalog connector/0.1",
       Accept: "text/html,application/xhtml+xml",
       ...(cookie ? { Cookie: cookie } : {}),
       ...(options.headers || {}),
@@ -744,7 +744,7 @@ async function searchKeyInnovationsFitment(vehicle) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "LockForge Systems supplier connector/0.1",
+      "User-Agent": "TimLock-App catalog connector/0.1",
     },
   });
   if (!response.ok) return { products: [], searchAttempts: [{ query: `fitment ${filter}`, resultCount: 0 }] };
@@ -912,7 +912,7 @@ async function goldenSupplyRequest(query) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "LockForge Systems supplier connector/0.1",
+      "User-Agent": "TimLock-App catalog connector/0.1",
     },
   });
   if (!response.ok) {
@@ -986,7 +986,7 @@ async function htmlFetch(url) {
   const response = await fetch(url, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
-      "User-Agent": "LockForge Systems supplier connector/0.1",
+      "User-Agent": "TimLock-App catalog connector/0.1",
     },
   });
   if (!response.ok) throw new Error(`Search returned ${response.status}`);
@@ -1468,7 +1468,7 @@ function cleanPartOutcome(input) {
     customer: cleanString(jobInput.customer) || "Shop evidence",
     vehicle: [year, make, model, cleanString(vehicle.trim)].filter(Boolean).join(" "),
     service: outcome === "worked" ? "Verified key part" : "Part selection feedback",
-    verification: "Part marked worked in LockForge",
+    verification: "Part marked worked in TimLock-App",
     status: outcome === "worked" ? "Completed" : "Review",
     vin: cleanString(input.vin).toUpperCase(),
     programmer: cleanString(jobInput.programmer) || cleanString(part.programmer) || [part.oem, part.sku, part.fcc].map(cleanString).filter(Boolean).join(" / "),
@@ -3022,6 +3022,11 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
   const hondaOlder = family === "honda" && year <= 2005;
   const toyotaLate = ["toyota", "lexus"].includes(family) && year >= 2018;
   const gmLate = family === "gm" && year >= 2015;
+  const gmHu100Truck =
+    family === "gm" &&
+    year >= 2014 &&
+    year <= 2022 &&
+    /SILVERADO|SIERRA|TAHOE|SUBURBAN|YUKON|ESCALADE/.test(text);
   const chryslerLate = family === "chrysler" && year >= 2011;
   const nissanLate = family === "nissan" && year >= 2013;
   const hyundaiLate = family === "hyundai" && year >= 2015;
@@ -3137,6 +3142,17 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.warnings.push("Hybrid/prox and trim package can change FCC, board, and emergency insert");
     reference.fieldPhotos.push("Hybrid badge/trim clue and push-button area");
     reference.fieldTools.push("TIS/Techstream or equivalent coverage check");
+  } else if (gmHu100Truck) {
+    reference.keyway = { primary: "HU100", alternates: [], confidence: "medium-high" };
+    reference.lishi = { primary: "HU100 Lishi / decoder", alternates: [], confidence: "medium-high" };
+    reference.programming.push("SPS/OEM or security wait may apply depending on platform");
+    reference.origination.push("For this GM truck/SUV range, start with HU100 from key/blank fitment, then confirm on the door or emergency insert before cutting");
+    reference.decodePlan.push("Use HU100 path only unless the actual lock or replacement cylinder proves otherwise");
+    reference.cutting.push("Cut/test HU100 mechanical operation before programming electronics");
+    reference.partVerification.push("Compare PEPS/prox, remote head, FCC, button count, and HU100 emergency insert before selecting the final key");
+    reference.fieldTools.push("HU100 Lishi / decoder");
+    reference.fieldTools.push("Battery support and SPS/GM security path readiness");
+    reference.warnings.push("GM prox and remote-head options can split by trim, tailgate, remote start, and FCC even when the Lishi stays HU100");
   } else if (gmLate) {
     reference.keyway = { primary: "GM side-mill/emergency insert keyway must be confirmed", alternates: ["Blade/prox varies by platform"], confidence: "verify" };
     reference.lishi = { primary: "GM keyway-specific Lishi after lock/insert verification", alternates: [], confidence: "verify" };
@@ -3263,9 +3279,9 @@ function applyReferenceVault(reference, entries) {
   next.referenceVault = {
     matched: entries.length,
     confidence: strongest.confidence || "medium",
-    sourcePolicy: "Original LockForge summaries only; source citations are for audit/verification.",
+    sourcePolicy: "Original TimLock-App summaries only; source citations are for audit/verification.",
   };
-  next.source = `${next.source}; ${entries.length} LockForge vault match${entries.length === 1 ? "" : "es"}`;
+  next.source = `${next.source}; ${entries.length} TimLock-App vault match${entries.length === 1 ? "" : "es"}`;
   return next;
 }
 
@@ -3387,7 +3403,7 @@ function sanitizeReferenceVaultEntry(input) {
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
-    headers: { "user-agent": "LockForge public source indexer", ...(options.headers || {}) },
+    headers: { "user-agent": "TimLock-App public source indexer", ...(options.headers || {}) },
     signal: options.signal || AbortSignal.timeout(20000),
     ...options,
   });
@@ -3413,7 +3429,7 @@ const publicReferenceTargets = [
 async function probePublicReferenceTarget(target) {
   try {
     const response = await fetch(target.url, {
-      headers: { "user-agent": "LockForge public source indexer" },
+      headers: { "user-agent": "TimLock-App public source indexer" },
       signal: AbortSignal.timeout(18000),
     });
     const contentType = response.headers.get("content-type") || "";
@@ -4887,5 +4903,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`LockForge Systems running at http://${host}:${port}/`);
+  console.log(`TimLock-App running at http://${host}:${port}/`);
 });

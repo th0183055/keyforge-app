@@ -1,16 +1,16 @@
 :root {
   color-scheme: light;
-  --ink: #1f1717;
-  --muted: #665d5b;
-  --line: #d8cfca;
-  --panel: #fffdf9;
-  --soft: #f6f0ec;
-  --accent: #d01626;
-  --accent-dark: #8d101b;
-  --gold: #c68b2d;
-  --danger: #b31924;
-  --charcoal: #201414;
-  --shadow: 0 14px 34px rgba(72, 9, 16, 0.18);
+  --ink: #171a1f;
+  --muted: #5e6670;
+  --line: #cfd5dc;
+  --panel: rgba(250, 251, 252, 0.96);
+  --soft: #edf1f4;
+  --accent: #626d79;
+  --accent-dark: #252b32;
+  --gold: #a1844b;
+  --danger: #7c3538;
+  --charcoal: #11151b;
+  --shadow: 0 18px 42px rgba(19, 25, 32, 0.16);
 }
 
 * {
@@ -24,8 +24,9 @@ body {
   overflow: hidden;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.16), transparent 28rem),
-    linear-gradient(135deg, #a90f1b 0%, #d01626 52%, #741019 100%);
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.82), transparent 28rem),
+    radial-gradient(circle at 78% 4%, rgba(255, 255, 255, 0.42), transparent 22rem),
+    linear-gradient(135deg, #7d8792 0%, #d9dee4 42%, #f7f8fa 58%, #5b6570 100%);
   color: var(--ink);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -62,7 +63,9 @@ button:disabled {
   gap: 28px;
   padding: 24px;
   background: rgba(32, 20, 20, 0.94);
+  background: linear-gradient(180deg, rgba(18, 23, 30, 0.98), rgba(44, 51, 60, 0.96));
   color: #f7fbfa;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .brand {
@@ -79,6 +82,7 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
   background: var(--accent);
+  background: linear-gradient(135deg, #87919d, #303842);
   color: white;
   font-weight: 800;
 }
@@ -185,7 +189,7 @@ button:disabled {
 .worked-job-form input:focus,
 .worked-job-form select:focus,
 .worked-job-form textarea:focus {
-  outline: 2px solid rgba(208, 22, 38, 0.25);
+  outline: 2px solid rgba(79, 89, 101, 0.2);
   border-color: var(--accent);
 }
 
@@ -247,6 +251,7 @@ main {
   justify-content: space-between;
   margin-bottom: 24px;
   color: #fffdf9;
+  color: var(--ink);
 }
 
 .topbar h2 {
@@ -256,7 +261,7 @@ main {
 }
 
 .topbar .eyebrow {
-  color: #ffd9a8;
+  color: #4d5661;
 }
 
 .primary-action,
@@ -270,11 +275,14 @@ main {
 
 .primary-action {
   background: var(--accent);
+  background: linear-gradient(135deg, #75808c, #2f3741);
   color: white;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 18px rgba(22, 29, 37, 0.18);
 }
 
 .primary-action:hover {
   background: var(--accent-dark);
+  background: linear-gradient(135deg, #8a949f, #3b444f);
 }
 
 .primary-action.small {
@@ -283,11 +291,13 @@ main {
 
 .secondary-action {
   background: var(--accent);
+  background: linear-gradient(135deg, #75808c, #2f3741);
   color: white;
 }
 
 .secondary-action:hover {
   background: var(--accent-dark);
+  background: linear-gradient(135deg, #8a949f, #3b444f);
 }
 
 .view {
@@ -411,8 +421,8 @@ main {
 
 .job-button:hover,
 .job-button.selected {
-  border-color: rgba(179, 25, 36, 0.55);
-  background: #f8e8e5;
+  border-color: rgba(79, 89, 101, 0.55);
+  background: #e8edf1;
 }
 
 .job-row strong {
@@ -469,8 +479,8 @@ main {
   padding: 12px;
   border: 0;
   border-radius: 12px;
-  background: #fff8f0;
-  box-shadow: 0 12px 26px rgba(72, 9, 16, 0.16);
+  background: #f8fafc;
+  box-shadow: 0 12px 26px rgba(22, 29, 37, 0.14);
 }
 
 .ymm-form {
@@ -480,9 +490,9 @@ main {
   align-items: end;
   margin: -4px 0 16px;
   padding: 12px;
-  border: 1px solid #ead0ca;
+  border: 1px solid #cfd5dc;
   border-radius: 12px;
-  background: rgba(255, 248, 240, 0.72);
+  background: rgba(248, 250, 252, 0.78);
 }
 
 .ymm-form strong {
@@ -500,7 +510,7 @@ main {
 
 .vin-form input {
   min-height: 58px;
-  border: 2px solid #ead0ca;
+  border: 2px solid #cfd5dc;
   border-radius: 10px;
   background: white;
   font-size: 1.25rem;
@@ -517,12 +527,12 @@ main {
 
 .vin-form input:focus {
   border-color: var(--accent);
-  outline: 3px solid rgba(208, 22, 38, 0.16);
+  outline: 3px solid rgba(79, 89, 101, 0.16);
 }
 
 .scan-action {
   min-height: 58px;
-  border: 1px solid #e1c7bf;
+  border: 1px solid #cfd5dc;
   border-radius: 10px;
   padding: 0 16px;
   background: white;
@@ -831,7 +841,7 @@ textarea {
 .key-package-option.active {
   border: 2px solid var(--accent-dark);
   background: var(--accent-dark);
-  box-shadow: 0 12px 24px rgba(208, 22, 38, 0.14);
+  box-shadow: 0 12px 24px rgba(22, 29, 37, 0.14);
 }
 
 .key-family-option span,
@@ -1585,7 +1595,7 @@ textarea {
 
 .supplier-card.best {
   border: 2px solid var(--accent);
-  box-shadow: 0 8px 18px rgba(208, 22, 38, 0.12);
+  box-shadow: 0 8px 18px rgba(22, 29, 37, 0.12);
 }
 
 .supplier-card span {
@@ -2135,7 +2145,7 @@ textarea {
   display: grid;
   gap: 4px;
   padding: 12px;
-  border: 1px solid rgba(208, 22, 38, 0.3);
+  border: 1px solid rgba(79, 89, 101, 0.28);
   border-left: 5px solid var(--accent);
   border-radius: 12px;
   background: #fffdfa;
@@ -2203,7 +2213,7 @@ textarea {
 .programmer-compact-option.active,
 .programmer-compact-option:hover {
   border-color: var(--accent);
-  box-shadow: 0 8px 18px rgba(208, 22, 38, 0.12);
+  box-shadow: 0 8px 18px rgba(22, 29, 37, 0.12);
 }
 
 .programmer-compact-option strong {
@@ -2266,7 +2276,7 @@ textarea {
 .programmer-option.active,
 .programmer-option:hover {
   border-color: var(--accent);
-  box-shadow: 0 10px 22px rgba(208, 22, 38, 0.12);
+  box-shadow: 0 10px 22px rgba(22, 29, 37, 0.12);
 }
 
 .programmer-confidence {
@@ -4154,4 +4164,147 @@ textarea {
     grid-column: 2;
     justify-items: start;
   }
+}
+
+/* TimLock-App steel theme polish */
+.operator-panel,
+.vin-side-panel {
+  display: none;
+}
+
+.vin-layout {
+  grid-template-columns: minmax(0, min(100%, 1180px));
+  justify-content: center;
+}
+
+.panel,
+.metric,
+.vin-main-panel,
+.program-screen,
+.job-save-sheet {
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(232, 237, 242, 0.94));
+  box-shadow: var(--shadow);
+}
+
+.assistant-card,
+.source-card-row,
+.vehicle-card,
+.trust-steps article,
+.detail-item,
+.rank-row,
+.feature-list article,
+.answer-grid article,
+.dossier-section,
+.detail-section,
+.reference-checklist,
+.code-source-panel,
+.key-package-option,
+.part-choice-card,
+.live-product-card,
+.recommended-product,
+.supplier-card,
+.supplier-part-tab,
+.offer-row,
+.exact-part-group,
+.job-kit-card,
+.source-card {
+  border-color: #cfd5dc;
+  background: rgba(246, 248, 250, 0.92);
+}
+
+.assistant-card,
+.job-entry-callout,
+.package-note,
+.decision-summary,
+.selection-engine {
+  border-left-color: #66717d;
+}
+
+.vin-form,
+.ymm-form,
+.mobile-context-header {
+  border-color: rgba(207, 213, 220, 0.9);
+  background: rgba(250, 251, 252, 0.96);
+  box-shadow: 0 14px 28px rgba(22, 29, 37, 0.12);
+}
+
+.worked-job-form input,
+.worked-job-form select,
+.worked-job-form textarea,
+.vin-form input,
+.ymm-form input,
+input,
+select,
+textarea {
+  border-color: #cfd5dc;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.worked-job-form input:focus,
+.worked-job-form select:focus,
+.worked-job-form textarea:focus,
+.vin-form input:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #4f5965;
+  outline: 3px solid rgba(79, 89, 101, 0.18);
+}
+
+.nav-item:hover,
+.nav-item.active,
+.primary-action,
+.secondary-action,
+.about-grid span,
+.brand-mark {
+  background: linear-gradient(135deg, #7f8a96, #2b333d);
+  color: #ffffff;
+}
+
+.nav-item.active {
+  box-shadow: inset 3px 0 0 #c9d1da, 0 8px 18px rgba(12, 18, 24, 0.22);
+}
+
+.scan-action {
+  border-color: #cfd5dc;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--accent-dark);
+}
+
+.tag-row span,
+.status,
+.supplier-status-strip span,
+.live-filter-chip,
+.badge-row span,
+.offer-chip,
+.mini-tags span {
+  background: #e1e6eb;
+  color: #2d3540;
+}
+
+.job-button:hover,
+.job-button.selected,
+.key-package-option.active,
+.part-choice-card.active,
+.job-button.selected {
+  border-color: #48515c;
+  background: #e8edf1;
+  box-shadow: 0 10px 24px rgba(22, 29, 37, 0.14);
+}
+
+.programmer-card.selected,
+.supplier-part-tab.in-stock {
+  border-color: #48515c;
+}
+
+.workflow-actions {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(20, 25, 32, 0.92);
+}
+
+.mobile-context-header small,
+.app-status-banner span {
+  background: var(--charcoal);
+  color: #f8fafc;
 }

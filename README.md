@@ -1,8 +1,6 @@
-# Premier Locksmith AI
+# TimLock-App
 
-A fresh-start prototype for a professional AI locksmith platform.
-
-The app is intentionally brand-neutral while the final name goes through clearance.
+A field-first locksmith reference app for VIN/YMM lookup, key choices, Lishi/keyway guidance, programmer coverage, and shop-proven job memory.
 
 ## Run the Prototype
 
@@ -31,7 +29,7 @@ The included `render.yaml` is a Render Blueprint for the same setup. If the depl
 - Job intake and job board backed by a local API
 - AI Bench assistant route with safety refusals and audit logging
 - Vehicle reference workspace
-- VIN Bench with NHTSA decode, local vPIC catalog matching, and key intelligence recommendations
+- VIN lookup with NHTSA decode, local vPIC catalog matching, key reference guidance, and worked-job learning
 - Trust Center
 - Initial backend resource and route contract
 

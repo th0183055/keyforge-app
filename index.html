@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#d01626" />
+    <meta name="theme-color" content="#4f5965" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="LockForge" />
+    <meta name="apple-mobile-web-app-title" content="TimLock-App" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <title>LockForge Systems</title>
+    <title>TimLock-App</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -15,10 +15,10 @@
     <div class="app-shell">
       <aside class="sidebar" aria-label="Primary">
         <div class="brand">
-          <div class="brand-mark">LF</div>
+          <div class="brand-mark">TL</div>
           <div>
-            <p class="eyebrow">LockForge</p>
-            <h1>LockForge Systems</h1>
+            <p class="eyebrow">TimLock</p>
+            <h1>TimLock-App</h1>
           </div>
         </div>
 
@@ -40,9 +40,9 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">VIN to key</p>
-            <h2>Scan a VIN. See the vehicle, keys, and supplier matches.</h2>
+            <h2>Scan a VIN. See the vehicle, keys, tools, and programming path.</h2>
           </div>
-          <button class="primary-action" data-view-target="settings">Supplier Setup</button>
+          <button class="primary-action" data-view-target="settings">Catalog Setup</button>
         </header>
         <section class="app-status-banner" id="appStatusBanner">
           <span id="connectionStatus">Online</span>
@@ -97,13 +97,13 @@
             <section class="panel vin-side-panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Supplier access</p>
-                  <h3>Key Innovations</h3>
+                  <p class="eyebrow">Catalog access</p>
+                  <h3>Private catalog sources</h3>
                 </div>
               </div>
               <div class="assistant-card" id="vinRecommendation">
                 <strong>Catalog source ready</strong>
-                <p>Possible keys come from the imported Key Innovations catalog. Supplier login can be added for live price and stock.</p>
+                <p>Possible keys come from private catalog sources. Saved access can be added for live reference data.</p>
               </div>
             </section>
           </div>
@@ -113,7 +113,7 @@
           <section class="panel wide worked-job-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Teach LockForge</p>
+                <p class="eyebrow">Teach TimLock-App</p>
                 <h3>Save what actually worked</h3>
               </div>
               <button class="secondary-action small" type="button" id="fillWorkedJobFromLookup">Fill from current lookup</button>
@@ -166,8 +166,8 @@
               </label>
               <div class="form-row">
                 <label>
-                  Supplier / part number
-                  <input name="partNumber" placeholder="KI SKU, OEM, FCC, or supplier part #" autocomplete="off" />
+                  Catalog / part number
+                  <input name="partNumber" placeholder="SKU, OEM, FCC, or catalog part #" autocomplete="off" />
                 </label>
                 <label>
                   Buttons / FCC clue
@@ -254,7 +254,7 @@
               </div>
               <div class="assistant-card source-card">
                 <strong>What this pulls</strong>
-                <p>LockForge can pull free public facts from sources like NHTSA vPIC and public programmer coverage endpoints, then use them as clues behind the job kit. Manual entries below are optional overrides for your own notes.</p>
+                <p>TimLock-App can pull free public facts from sources like NHTSA vPIC and public programmer coverage endpoints, then use them as clues behind the job kit. Manual entries below are optional overrides for your own notes.</p>
               </div>
               <div class="form-status" id="publicSourceStatus"></div>
               <div class="source-list compact" id="publicSourceList"></div>
@@ -284,7 +284,7 @@
                   <input name="title" placeholder="Late Ford truck job kit" autocomplete="off" />
                 </label>
                 <label>
-                  Original LockForge summary
+                  Original TimLock-App summary
                   <textarea name="summary" rows="2" placeholder="Write this in our own words. No copied book text."></textarea>
                 </label>
                 <div class="form-row">
@@ -411,10 +411,10 @@
                 </label>
                 <label>
                   Key / part option
-                  <input name="keyName" value="Supplier-grade remote / prox option" />
+                  <input name="keyName" value="Catalog-grade remote / prox option" />
                 </label>
                 <label>
-                  Supplier part number
+                  Catalog part number
                   <input name="partNumber" value="VERIFY-FCC-AND-BLADE" />
                 </label>
                 <label>
@@ -431,7 +431,7 @@
                 </label>
                 <label>
                   Notes
-                  <textarea name="notes">Verified from shop experience. Confirm supplier catalog data before ordering.</textarea>
+                  <textarea name="notes">Verified from shop experience. Confirm catalog data before ordering.</textarea>
                 </label>
                 <button class="primary-action" type="submit">Save Record</button>
               </form>
@@ -534,13 +534,13 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Supplier logins</p>
+                  <p class="eyebrow">Catalog logins</p>
                   <h3>Account setup</h3>
                 </div>
               </div>
               <form id="supplierSettingsForm" class="form-stack">
                 <label>
-                  Supplier
+                  Catalog source
                   <select name="supplierId" id="supplierSelect"></select>
                 </label>
                 <label>
@@ -557,9 +557,9 @@
                 </label>
                 <label class="toggle-row">
                   <input name="enabled" type="checkbox" />
-                  Use this account for live supplier lookup
+                  Use this account for live catalog lookup
                 </label>
-                <button class="primary-action" type="submit">Save Supplier Login</button>
+                <button class="primary-action" type="submit">Save Catalog Login</button>
               </form>
               <div class="form-status" id="supplierSettingsStatus"></div>
             </section>
@@ -567,14 +567,14 @@
             <section class="panel wide">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Connected suppliers</p>
+                  <p class="eyebrow">Connected catalog sources</p>
                   <h3>Account Vault</h3>
                 </div>
               </div>
               <div class="source-list" id="supplierAccountList"></div>
               <div class="assistant-card source-card">
                 <strong>How this fits VIN lookup</strong>
-                <p>When a VIN is decoded, LockForge can run enabled supplier connectors and compare normalized price, stock, condition, and fitment. Key Innovations is live now; the rest are ready for connector wiring.</p>
+                <p>When a VIN is decoded, TimLock-App can run enabled private catalog connectors and compare normalized stock, condition, and fitment clues.</p>
               </div>
             </section>
           </div>
@@ -584,7 +584,7 @@
           <section class="panel about-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">LockForge Systems</p>
+                <p class="eyebrow">TimLock-App</p>
                 <h3>Built for locksmiths in the field</h3>
               </div>
             </div>
@@ -596,8 +596,8 @@
               </article>
               <article>
                 <span>2</span>
-                <strong>Supplier-backed parts</strong>
-                <p>Use saved supplier access to pull matching key options, pictures, pricing clues, and condition filters directly into the lookup flow.</p>
+                <strong>Catalog-backed parts</strong>
+                <p>Use saved catalog access to pull matching key options, pictures, and condition filters directly into the lookup flow.</p>
               </article>
               <article>
                 <span>3</span>

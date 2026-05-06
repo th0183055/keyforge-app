@@ -1,4 +1,4 @@
-# Premier Locksmith AI Backend Contract
+# TimLock-App Backend Contract
 
 This is the first backend shape for building side by side with the UI. The product name should remain pending until trademark clearance is done.
 

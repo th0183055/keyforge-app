@@ -1,6 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#d01626"/>
-  <rect x="64" y="64" width="384" height="384" rx="72" fill="#201414" opacity=".18"/>
-  <path fill="#fff8e8" d="M122 158h57v172h91v48H122V158Zm178 0h110v48h-55v40h48v46h-48v86h-55V158Z"/>
-  <path fill="#ffd9a8" d="M92 92h328v34H92V92Zm0 294h328v34H92v-34Z"/>
+  <defs>
+    <linearGradient id="steel" x1="78" y1="42" x2="430" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f7f8fa"/>
+      <stop offset=".42" stop-color="#8d96a0"/>
+      <stop offset="1" stop-color="#252b32"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#steel)"/>
+  <rect x="64" y="64" width="384" height="384" rx="72" fill="#11151b" opacity=".24"/>
+  <path fill="#f8fafc" d="M96 140h152v52h-49v178h-55V192H96v-52Zm190 0h58v178h83v52H286V140Z"/>
+  <path fill="#c8d0d8" d="M92 92h328v34H92V92Zm0 294h328v34H92v-34Z"/>
 </svg>
