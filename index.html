@@ -24,6 +24,7 @@
 
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
+          <button class="nav-item" data-view="part-history">Part History</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
           <button class="nav-item" data-view="about">About</button>
@@ -107,6 +108,31 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" id="part-history">
+          <section class="panel wide part-history-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Proof trail</p>
+                <h3>Part history</h3>
+              </div>
+            </div>
+            <form id="partHistoryForm" class="part-history-form">
+              <label>
+                Part number
+                <input name="partNumber" placeholder="LR# ULK123 or MW# TOY-239" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Search History</button>
+            </form>
+            <div class="form-status" id="partHistoryStatus"></div>
+            <div class="part-history-result" id="partHistoryResult">
+              <article class="assistant-card">
+                <strong>Search LR#, MW#, TI#, OE#, FCC, or SKU</strong>
+                <p>Matched saved jobs will show vehicle, part identifiers, programmer, OE sources, and observed coverage proof.</p>
+              </article>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="learn">

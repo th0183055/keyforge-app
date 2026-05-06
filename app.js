@@ -62,6 +62,9 @@ const workedJobStatus = document.querySelector("#workedJobStatus");
 const workedJobImportForm = document.querySelector("#workedJobImportForm");
 const workedJobImportStatus = document.querySelector("#workedJobImportStatus");
 const fillWorkedJobFromLookupButton = document.querySelector("#fillWorkedJobFromLookup");
+const partHistoryForm = document.querySelector("#partHistoryForm");
+const partHistoryStatus = document.querySelector("#partHistoryStatus");
+const partHistoryResult = document.querySelector("#partHistoryResult");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -657,12 +660,13 @@ function renderSupplierCandidates(candidates = [], compact = false) {
               <article class="supplier-card ${index === 0 ? "best" : ""}">
                 <div>
                   <span>${index === 0 ? "Best candidate" : candidate.confidence}</span>
-                  <strong>${escapeHtml(candidate.hlPartNumber || candidate.supplierSku || "Candidate")}</strong>
+                  <strong>${escapeHtml(candidate.preferredPartNumberLabel || candidate.hlPartNumber || candidate.supplierSku || "Candidate")}</strong>
                 </div>
                 <dl>
                   <div><dt>SKU</dt><dd>${escapeHtml(candidate.supplierSku || "Verify")}</dd></div>
                   <div><dt>FCC</dt><dd>${escapeHtml(candidate.fccId || "Verify")}</dd></div>
                   <div><dt>OEM</dt><dd>${escapeHtml((candidate.oemPartNumbers || []).slice(0, 3).join(", ") || "Verify")}</dd></div>
+                  <div><dt>Cross IDs</dt><dd>${escapeHtml((candidate.crossReferenceLabels || candidate.crossReferenceIds || []).slice(0, 4).join(", ") || candidate.activePartNumber || "None")}</dd></div>
                 </dl>
                 <p>${candidate.reasons.map(escapeHtml).join(" · ")}</p>
               </article>
@@ -1337,6 +1341,7 @@ function productBadges(product, index) {
   if (product.keyInfo?.condition) badges.push(product.keyInfo.condition);
   if (product.keyInfo?.stock && product.keyInfo.stock !== "Verify") badges.push(product.keyInfo.stock);
   if (product.keyInfo?.fcc) badges.push("FCC");
+  if (product.keyInfo?.crossReference) badges.push("Cross-ref");
   if (product.keyInfo?.buttons) badges.push(`${product.keyInfo.buttons} button`);
   return badges.slice(0, 5);
 }
@@ -1379,6 +1384,9 @@ function normalizedSupplierOffer(product) {
     chip: product.keyInfo?.chip || "",
     frequency: product.keyInfo?.frequency || "",
     fitment: product.keyInfo?.fitment || product.fitmentLines?.[0] || "",
+    crossReference: product.keyInfo?.crossReference || "",
+    crossReferenceOe: product.keyInfo?.crossReferenceOe || "",
+    crossReferenceAliases: product.keyInfo?.crossReferenceAliases || "",
     shopMatch: product.keyInfo?.shopMatch || "",
     shopWarning: product.keyInfo?.shopWarning || "",
     profileMatch: product.keyInfo?.profileMatch || "",
@@ -2852,6 +2860,164 @@ async function saveWorkedJobPayload(payload) {
   });
 }
 
+function renderPartChips(values = [], empty = "None") {
+  const clean = [...new Set(values.map((value) => cleanInput(value)).filter(Boolean))];
+  if (!clean.length) return `<span class="part-chip muted">${escapeHtml(empty)}</span>`;
+  return clean
+    .slice(0, 10)
+    .map((value) => `<span class="part-chip">${escapeHtml(value)}</span>`)
+    .join("");
+}
+
+function renderPartHistoryCoverage(programmerEvidence = {}) {
+  const programmers = programmerEvidence.programmers || [];
+  if (!programmers.length) {
+    return `
+      <article class="assistant-card">
+        <strong>No programmer proof yet</strong>
+        <p>No saved job matched this part family with a recorded programmer.</p>
+      </article>
+    `;
+  }
+
+  return `
+    <section class="coverage-grid">
+      ${programmers
+        .map((programmer) => {
+          const percent = Number.isFinite(Number(programmer.observedCoveragePercent)) ? Number(programmer.observedCoveragePercent) : null;
+          return `
+            <article class="coverage-card">
+              <div>
+                <span>${escapeHtml(percent === null ? "N/A" : `${percent}%`)}</span>
+                <strong>${escapeHtml(programmer.name)}</strong>
+              </div>
+              <div class="evidence-meter"><i style="width: ${escapeHtml(percent === null ? 0 : percent)}%"></i></div>
+              <p>${escapeHtml(`${programmer.successes} success / ${programmer.warningsOrFailures} warning / ${programmer.unknown} unknown across ${programmer.jobs} job${programmer.jobs === 1 ? "" : "s"}.`)}</p>
+              <div class="part-chip-row">${renderPartChips(programmer.vehicles, "No vehicles")}</div>
+            </article>
+          `;
+        })
+        .join("")}
+    </section>
+  `;
+}
+
+function renderPartHistoryJob(job) {
+  const refs = (job.matchedReferences || []).map((reference) => reference.primaryLabel || reference.primary).filter(Boolean);
+  return `
+    <article class="history-job-card">
+      <div class="history-job-head">
+        <div>
+          <span>${escapeHtml(job.outcome?.label || job.status || "Saved job")}</span>
+          <strong>${escapeHtml(job.title || job.vehicle || "Saved job")}</strong>
+        </div>
+        <span class="status ${job.outcome?.key === "warning" ? "warn" : ""}">${escapeHtml(job.status || "History")}</span>
+      </div>
+      <div class="history-job-grid">
+        <div><small>Vehicle</small><strong>${escapeHtml(job.vehicle || "Not recorded")}</strong></div>
+        <div><small>VIN</small><strong>${escapeHtml(job.vin || "Not recorded")}</strong></div>
+        <div><small>Programmer</small><strong>${escapeHtml(job.programmer || "Not recorded")}</strong></div>
+        <div><small>Total</small><strong>${escapeHtml(formatMoney(job.price, job.payment))}</strong></div>
+      </div>
+      <div class="history-job-section">
+        <small>Part numbers</small>
+        <div class="part-chip-row">${renderPartChips(job.partNumbers, "No part numbers logged")}</div>
+      </div>
+      <div class="history-job-section">
+        <small>Cross-reference match</small>
+        <div class="part-chip-row">${renderPartChips(refs, "Direct job text match")}</div>
+      </div>
+      <div class="history-job-section">
+        <small>OE sources</small>
+        <div class="part-chip-row">${renderPartChips(job.oemSources, "No OE source linked")}</div>
+      </div>
+      <details>
+        <summary>Notes and matched tokens</summary>
+        <p>${escapeHtml((job.notes || []).slice(0, 5).join(" | ") || "No notes saved.")}</p>
+        <div class="part-chip-row">${renderPartChips(job.matchedTokens || [], "No tokens")}</div>
+      </details>
+    </article>
+  `;
+}
+
+function renderPartHistory(payload) {
+  if (!partHistoryResult) return;
+  const identifiers = payload.identifiers || {};
+  const jobs = payload.jobs || [];
+  const crossReferences = payload.crossReferences || [];
+  const summaryCards = [
+    ["Primary", payload.primaryIdentifier],
+    ["LR#", identifiers.lr?.[0]],
+    ["MW#", identifiers.mw?.[0]],
+    ["OE#", identifiers.oe?.[0]],
+  ];
+
+  partHistoryResult.innerHTML = `
+    <section class="history-summary-grid">
+      ${summaryCards
+        .map(
+          ([label, value]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value || "None")}</strong>
+              <p>${escapeHtml(label === "Primary" ? `${jobs.length} matched job${jobs.length === 1 ? "" : "s"}` : payload.query)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    <section class="history-reference-panel">
+      <div>
+        <p class="eyebrow">Cross-reference family</p>
+        <div class="part-chip-row">${renderPartChips(identifiers.all || [], "No cross-reference row found")}</div>
+      </div>
+      <div>
+        <p class="eyebrow">Matched OE numbers</p>
+        <div class="part-chip-row">${renderPartChips(identifiers.oe || [], "No OE numbers")}</div>
+      </div>
+      ${
+        crossReferences.length
+          ? `<div class="part-history-table">${crossReferences
+              .slice(0, 6)
+              .map(
+                (reference) => `
+                  <article>
+                    <strong>${escapeHtml(reference.primaryLabel || reference.primary)}</strong>
+                    <span>${escapeHtml([reference.sourceTable, ...(reference.oemPartNumbers || []).slice(0, 3)].filter(Boolean).join(" | "))}</span>
+                  </article>
+                `,
+              )
+              .join("")}</div>`
+          : ""
+      }
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Programmer proof</p>
+          <h3>${escapeHtml(`${payload.programmerEvidence?.totalJobs || 0} matched jobs`)}</h3>
+        </div>
+      </div>
+      ${renderPartHistoryCoverage(payload.programmerEvidence)}
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Job history</p>
+          <h3>${escapeHtml(payload.primaryIdentifier || payload.query)}</h3>
+        </div>
+      </div>
+      <div class="history-job-list">
+        ${
+          jobs.length
+            ? jobs.map(renderPartHistoryJob).join("")
+            : `<article class="assistant-card"><strong>No matched jobs yet</strong><p>Save or import worked jobs with this part number, OE number, FCC, LR#, or MW# to build coverage proof.</p></article>`
+        }
+      </div>
+    </section>
+  `;
+}
+
 function fillWorkedJobFromCurrentLookup() {
   if (!workedJobForm || !latestVinProfile?.vehicle) {
     if (workedJobStatus) workedJobStatus.textContent = "Run a VIN lookup first, then come back here to prefill the job.";
@@ -2935,6 +3101,8 @@ function renderOfferReference(offer) {
     ["Freq", offer.frequency],
     ["Chip", offer.chip],
     ["Buttons", offer.buttons],
+    ["Cross IDs", offer.crossReference],
+    ["Cross OE", offer.crossReferenceOe],
     ["Fitment", offer.fitment],
   ].filter(([, value]) => value);
 
@@ -2945,7 +3113,7 @@ function renderOfferReference(offer) {
   return `
     <div class="part-reference-grid">
       ${details
-        .slice(0, 5)
+        .slice(0, 6)
         .map(
           ([label, value]) => `
             <span>
@@ -3167,6 +3335,7 @@ function renderLiveSupplierProducts(lookup, baseProducts = null) {
                     <div><dt>Stock</dt><dd>${escapeHtml(product.keyInfo?.stock || "Verify")}</dd></div>
                     <div><dt>Condition</dt><dd>${escapeHtml(product.keyInfo?.condition || "Verify")}</dd></div>
                   </dl>
+                  ${product.keyInfo?.crossReference ? `<p>${escapeHtml(`Cross-ref: ${product.keyInfo.crossReference}`)}</p>` : ""}
                   ${product.keyInfo?.fitment ? `<p>${escapeHtml(product.keyInfo.fitment)}</p>` : ""}
                   ${product.url ? `<a href="${escapeHtml(product.url)}" target="_blank" rel="noreferrer">Open parts page</a>` : ""}
                 </div>
@@ -4379,6 +4548,39 @@ workedJobImportForm?.addEventListener("submit", async (event) => {
     if (result.imported) workedJobImportForm.reset();
   } catch (error) {
     workedJobImportStatus.textContent = error.message;
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+partHistoryForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(partHistoryForm);
+  const query = cleanInput(data.get("partNumber"));
+  const submitButton = partHistoryForm.querySelector("button[type='submit']");
+  if (!query) {
+    partHistoryStatus.textContent = "Enter a part number first.";
+    return;
+  }
+  try {
+    submitButton.disabled = true;
+    partHistoryStatus.textContent = "Searching saved jobs and parts cross-reference...";
+    if (partHistoryResult) {
+      partHistoryResult.innerHTML = `
+        <div class="lookup-loading">
+          <article><strong>1. Expanding part numbers</strong><p>Checking LR#, MW#, TI#, OE#, and aliases.</p></article>
+          <article><strong>2. Reading job proof</strong><p>Matching saved work history and programmer outcomes.</p></article>
+        </div>
+      `;
+    }
+    const payload = await api(`/api/part-history?q=${encodeURIComponent(query)}`);
+    renderPartHistory(payload);
+    partHistoryStatus.textContent = `Found ${payload.jobs?.length || 0} job match${payload.jobs?.length === 1 ? "" : "es"} for ${payload.primaryIdentifier || query}.`;
+  } catch (error) {
+    partHistoryStatus.textContent = error.message;
+    if (partHistoryResult) {
+      partHistoryResult.innerHTML = `<article class="assistant-card"><strong>Part history unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    }
   } finally {
     submitButton.disabled = false;
   }

@@ -17,6 +17,7 @@ const sourceConnectorsPath = path.join(dataDir, "source-connectors.json");
 const keyInnovationsLabelsPath = path.join(dataDir, "key-innovations-labels.json");
 const programmingReferencePath = path.join(dataDir, "programming-reference.json");
 const masterCatalogPath = path.join(dataDir, "master-catalog.json");
+const partsCrossReferencePath = path.join(dataDir, "parts-cross-reference.json");
 const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
 const vehicleProfilesPath = path.join(dataDir, "vehicle-profiles.json");
 const referenceVaultPath = path.join(dataDir, "reference-vault.json");
@@ -1367,8 +1368,9 @@ async function pendingSupplierLookup(statusMessage = "Supplier search is running
 }
 
 async function buildProfileSupplierLookup(vehicle, store, options, programmingReference, verifiedProfile, shopEvidence) {
-  const rawSupplierLookup = await liveSupplierLookups(vehicle, options.vin || "");
-  const evidenceSupplierLookup = applyShopEvidenceToProducts(rawSupplierLookup, shopEvidence);
+  const [rawSupplierLookup, partsReference] = await Promise.all([liveSupplierLookups(vehicle, options.vin || ""), readPartsCrossReference()]);
+  const crossReferencedSupplierLookup = applyPartsCrossReferenceToProducts(rawSupplierLookup, partsReference);
+  const evidenceSupplierLookup = applyShopEvidenceToProducts(crossReferencedSupplierLookup, shopEvidence);
   const profiledSupplierLookup = applyVehicleProfileToProducts(evidenceSupplierLookup, verifiedProfile);
   return applyPartSelectionEngine(profiledSupplierLookup, vehicle, shopEvidence, programmingReference, verifiedProfile);
 }
@@ -2598,6 +2600,268 @@ function buildShopEvidence(vehicle, vin, jobs) {
   };
 }
 
+function partHistoryIdentifierBuckets(referenceRows, query) {
+  const buckets = {
+    lr: [],
+    gsi: [],
+    mw: [],
+    ml: [],
+    ti: [],
+    ki: [],
+    oe: [],
+    aliases: [],
+    all: [],
+  };
+  for (const row of referenceRows || []) {
+    buckets.lr.push(row.lrId);
+    if (/^ULK/i.test(cleanString(row.gsiPartNumber))) buckets.lr.push(row.gsiPartNumber);
+    else buckets.gsi.push(row.gsiPartNumber);
+    buckets.mw.push(row.mwId, row.mwPartNumber);
+    buckets.ml.push(row.mlPartNumber);
+    buckets.ti.push(row.tiPartNumber);
+    buckets.ki.push(row.kiPartNumber);
+    buckets.oe.push(row.oemPartNumbers || []);
+    buckets.aliases.push(row.aliases || []);
+  }
+  Object.keys(buckets).forEach((key) => {
+    buckets[key] = uniqueCleanValues(buckets[key]);
+  });
+  buckets.all = uniqueCleanValues([
+    buckets.lr,
+    buckets.gsi,
+    buckets.mw,
+    buckets.ml,
+    buckets.ti,
+    buckets.ki,
+    buckets.oe,
+    buckets.aliases,
+    query && !referenceRows?.length ? query : "",
+  ]);
+  return buckets;
+}
+
+function partHistoryPrimaryIdentifier(identifiers, query) {
+  const queryToken = compactToken(query);
+  const exactBucket = [
+    ["LR#", identifiers.lr],
+    ["MW#", identifiers.mw],
+    ["GSI#", identifiers.gsi],
+    ["ML#", identifiers.ml],
+    ["TI#", identifiers.ti],
+    ["OE#", identifiers.oe],
+  ].find(([, values]) => (values || []).some((value) => compactToken(value) === queryToken));
+  if (exactBucket) return `${exactBucket[0]} ${exactBucket[1].find((value) => compactToken(value) === queryToken)}`;
+  if (identifiers.lr?.[0]) return `LR# ${identifiers.lr[0]}`;
+  if (identifiers.mw?.[0]) return `MW# ${identifiers.mw[0]}`;
+  if (identifiers.gsi?.[0]) return `GSI# ${identifiers.gsi[0]}`;
+  if (identifiers.ml?.[0]) return `ML# ${identifiers.ml[0]}`;
+  if (identifiers.ti?.[0]) return `TI# ${identifiers.ti[0]}`;
+  if (identifiers.oe?.[0]) return `OE# ${identifiers.oe[0]}`;
+  return cleanString(query) || "Part history";
+}
+
+function partHistoryUsefulToken(token) {
+  const clean = compactToken(token);
+  if (clean.length < 4) return false;
+  if (/^\d+$/.test(clean)) return clean.length >= 5;
+  if (/^(?:FORD|TOYOTA|HONDA|NISSAN|CHEVROLET|DODGE|JEEP|KIA|HYUNDAI|MAZDA|SUBARU|ACURA|LEXUS)$/.test(clean)) return false;
+  return true;
+}
+
+function findPartHistoryReferenceRows(partsReference, query) {
+  const exactRows = lookupPartsCrossReferenceRows(partsReference, [query]);
+  if (exactRows.length) return exactRows;
+  const queryTokens = partReferenceTokenVariants(query).filter((token) => token.length >= 4);
+  if (!queryTokens.length) return [];
+  const matches = [];
+  for (const row of partsReference?.rows || []) {
+    const rowTokens = (row.tokens || []).map((token) => token.normalized || compactToken(token.value)).filter(partHistoryUsefulToken);
+    const matched = rowTokens.some((rowToken) =>
+      queryTokens.some((queryToken) => rowToken === queryToken || (queryToken.length >= 5 && rowToken.includes(queryToken)) || (rowToken.length >= 5 && queryToken.includes(rowToken))),
+    );
+    if (matched) matches.push(row);
+    if (matches.length >= 50) break;
+  }
+  return matches;
+}
+
+function partHistorySearchTokens(query, referenceRows) {
+  const tokens = new Set(partReferenceTokenVariants(query));
+  for (const row of referenceRows || []) {
+    for (const token of row.tokens || []) tokens.add(token.normalized || compactToken(token.value));
+    [
+      row.mlPartNumber,
+      row.lrId,
+      row.gsiPartNumber,
+      row.mwId,
+      row.mwPartNumber,
+      row.kiPartNumber,
+      row.tiPartNumber,
+      row.oemPartNumbers || [],
+      row.aliases || [],
+    ]
+      .flat(Infinity)
+      .forEach((value) => partReferenceTokenVariants(value).forEach((token) => tokens.add(token)));
+  }
+  return Array.from(tokens).filter(partHistoryUsefulToken).sort((a, b) => b.length - a.length || a.localeCompare(b));
+}
+
+function partHistoryJobText(job) {
+  return [
+    job.title,
+    job.vehicle,
+    job.vin,
+    job.service,
+    job.status,
+    job.verification,
+    job.programmer,
+    job.sequence,
+    job.keyCode,
+    job.mileage,
+    job.tags || [],
+    job.notes || [],
+  ]
+    .flat(Infinity)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function partHistoryMatchedTokens(job, searchTokens) {
+  const compactText = compactToken(partHistoryJobText(job));
+  return searchTokens.filter((token) => compactText.includes(token));
+}
+
+function extractPartHistoryJobTokens(job) {
+  const tokens = new Set(jobReferenceTokens(job));
+  const text = partHistoryJobText(job).toUpperCase();
+  const patterns = [
+    /\bTIK-[A-Z]{2,5}-\d{1,4}[A-Z]?\b/g,
+    /\b(?:ULK|FRD|HON|TOY|LEX|NIS|INF|KIA|HYU|MAZ|MIT|SUB|BMW|GM|CAD|CHRY|MOP|FBK|ACU)\d{2,6}[A-Z0-9#-]*\b/g,
+    /\b[A-Z]{2,8}-R?\d{2,6}[A-Z0-9-]*\b/g,
+    /\b\d{3}-R\d{4}R?\b/g,
+    /\b\d{5,}[A-Z0-9-]*\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      if (partHistoryUsefulToken(match[0])) tokens.add(match[0].replace(/,$/, ""));
+    }
+  }
+  return Array.from(tokens).slice(0, 16);
+}
+
+function partHistoryOutcome(job) {
+  const outcome = jobOutcome(job);
+  if (outcome === "worked") return { key: "success", label: "Worked" };
+  if (outcome && !["worked", "ordered-alternate"].includes(outcome)) return { key: "warning", label: outcome.replace(/-/g, " ") };
+  const text = normalizeVehicleText([job.status, job.service, job.verification, job.tags || [], job.notes || []].flat(Infinity).join(" "));
+  if (/DID NOT|FAILED|FAIL|WRONG|REVIEW|CANCEL|HOLD/.test(text)) return { key: "warning", label: "Review" };
+  if (/COMPLETED|VERIFIED|WORKED|IMPORTED WORKED/.test(text)) return { key: "success", label: "Completed" };
+  return { key: "unknown", label: "Unknown" };
+}
+
+function buildProgrammerHistoryEvidence(historyJobs) {
+  const groups = new Map();
+  for (const job of historyJobs) {
+    const name = cleanString(job.programmer) || "Programmer not recorded";
+    if (!groups.has(name)) {
+      groups.set(name, {
+        name,
+        jobs: 0,
+        successes: 0,
+        warningsOrFailures: 0,
+        unknown: 0,
+        vehicles: new Set(),
+        partNumbers: new Set(),
+      });
+    }
+    const group = groups.get(name);
+    group.jobs += 1;
+    if (job.outcome?.key === "success") group.successes += 1;
+    else if (job.outcome?.key === "warning") group.warningsOrFailures += 1;
+    else group.unknown += 1;
+    if (job.vehicle) group.vehicles.add(job.vehicle);
+    (job.partNumbers || []).forEach((part) => group.partNumbers.add(part));
+  }
+  const programmers = Array.from(groups.values())
+    .map((group) => {
+      const denominator = group.successes + group.warningsOrFailures;
+      return {
+        name: group.name,
+        jobs: group.jobs,
+        successes: group.successes,
+        warningsOrFailures: group.warningsOrFailures,
+        unknown: group.unknown,
+        observedCoveragePercent: denominator ? Math.round((group.successes / denominator) * 100) : null,
+        vehicles: Array.from(group.vehicles).slice(0, 6),
+        partNumbers: Array.from(group.partNumbers).slice(0, 10),
+      };
+    })
+    .sort((a, b) => b.jobs - a.jobs || (b.observedCoveragePercent || 0) - (a.observedCoveragePercent || 0) || a.name.localeCompare(b.name));
+  return {
+    totalJobs: historyJobs.length,
+    jobsWithProgrammer: historyJobs.filter((job) => cleanString(job.programmer)).length,
+    programmers,
+    proofNote: "Observed coverage is calculated only from saved TimLock-App job records that matched this part/cross-reference family.",
+  };
+}
+
+function buildPartHistory(query, jobs, partsReference) {
+  const cleanQuery = cleanString(query);
+  const referenceRows = findPartHistoryReferenceRows(partsReference, cleanQuery);
+  const searchTokens = partHistorySearchTokens(cleanQuery, referenceRows);
+  const crossSummaries = referenceRows.map(crossReferenceSummary);
+  const historyJobs = (jobs || [])
+    .map((job) => {
+      const matchedTokens = partHistoryMatchedTokens(job, searchTokens);
+      if (!matchedTokens.length) return null;
+      const matchedReferenceRows = referenceRows.filter((row) =>
+        (row.tokens || []).some((token) => matchedTokens.includes(token.normalized || compactToken(token.value))),
+      );
+      const matchedReferences = (matchedReferenceRows.length ? matchedReferenceRows : referenceRows).map(crossReferenceSummary).slice(0, 5);
+      const oemSources = uniqueCleanValues(matchedReferences.flatMap((item) => item.oemPartNumbers || []));
+      const partNumbers = uniqueCleanValues([
+        extractPartHistoryJobTokens(job),
+        matchedReferences.flatMap((item) => item.labeledIdentifiers?.map((entry) => `${entry.label} ${entry.value}`) || []),
+      ]).slice(0, 18);
+      return {
+        id: job.id,
+        title: job.title || job.vehicle || "Saved job",
+        customer: job.customer || "",
+        vehicle: job.vehicle || "",
+        vin: job.vin || "",
+        service: job.service || "",
+        schedule: job.schedule || job.createdAt || "",
+        status: job.status || "",
+        programmer: job.programmer || "",
+        keyCode: job.keyCode || "",
+        price: job.price || "",
+        payment: job.payment || "",
+        partNumbers,
+        matchedTokens,
+        matchedReferences,
+        oemSources,
+        notes: job.notes || [],
+        outcome: partHistoryOutcome(job),
+      };
+    })
+    .filter(Boolean);
+
+  const identifiers = partHistoryIdentifierBuckets(referenceRows, cleanQuery);
+  return {
+    query: cleanQuery,
+    primaryIdentifier: partHistoryPrimaryIdentifier(identifiers, cleanQuery),
+    identifiers,
+    crossReferences: crossSummaries.slice(0, 12),
+    searchTokens: searchTokens.slice(0, 40),
+    jobs: historyJobs,
+    programmerEvidence: buildProgrammerHistoryEvidence(historyJobs),
+    referenceStats: {
+      totalReferenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
+      matchedReferenceRows: referenceRows.length,
+    },
+  };
+}
+
 function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
   if (!liveSupplierLookup?.products?.length || !shopEvidence?.tokens?.length) return liveSupplierLookup;
   return {
@@ -2638,8 +2902,58 @@ function productText(product) {
     product.keyInfo?.chip,
     product.keyInfo?.productType,
     product.keyInfo?.fitment,
+    product.keyInfo?.crossReference,
+    product.keyInfo?.crossReferenceOe,
+    product.keyInfo?.crossReferenceAliases,
     product.customFields?.description,
   ].filter(Boolean).join(" "));
+}
+
+function referenceValuesForProduct(product = {}) {
+  return uniqueCleanValues([
+    product.name,
+    product.id,
+    product.sku,
+    product.brand,
+    product.source,
+    product.keyInfo?.sku,
+    product.keyInfo?.itemNumber,
+    product.keyInfo?.oem,
+    product.keyInfo?.fcc,
+    product.customFields?.itemId,
+    product.customFields?.displayName,
+    product.customFields?.description,
+  ]);
+}
+
+function applyPartsCrossReferenceToProducts(liveSupplierLookup, partsReference) {
+  if (!liveSupplierLookup?.products?.length || !partsReference?.rows?.length) return liveSupplierLookup;
+  return {
+    ...liveSupplierLookup,
+    products: liveSupplierLookup.products.map((product) => {
+      const crossRows = lookupPartsCrossReferenceRows(partsReference, referenceValuesForProduct(product));
+      if (!crossRows.length) return product;
+      const summaries = crossRows.map(crossReferenceSummary);
+      const crossIds = summaries.flatMap((item) => item.identifiers || []);
+      const crossOems = summaries.flatMap((item) => item.oemPartNumbers || []);
+      const crossAliases = summaries.flatMap((item) => item.aliases || []);
+      return {
+        ...product,
+        score: (product.score || 0) + 30,
+        keyInfo: {
+          ...(product.keyInfo || {}),
+          oem: product.keyInfo?.oem || crossOems[0] || "",
+          crossReference: uniqueCleanValues(crossIds).slice(0, 6).join(", "),
+          crossReferenceOe: uniqueCleanValues(crossOems).slice(0, 5).join(", "),
+          crossReferenceAliases: uniqueCleanValues(crossAliases).slice(0, 6).join(", "),
+        },
+        customFields: {
+          ...(product.customFields || {}),
+          crossReferenceSource: "Parts cross-reference",
+        },
+      };
+    }),
+  };
 }
 
 function productFamily(product) {
@@ -2815,6 +3129,11 @@ function evaluatePartSelection(product, vehicle, shopEvidence, programmingRefere
   if (product.keyInfo?.profileWarning) {
     score -= 35;
     warnings.push(`profile warning: ${product.keyInfo.profileWarning}`);
+  }
+
+  if (product.keyInfo?.crossReference) {
+    score += 14;
+    reasons.push("parts cross-reference linked aliases/OE");
   }
 
   if (expected !== "unknown") {
@@ -3032,6 +3351,14 @@ async function readKeyInnovationsLabels() {
   }
 }
 
+async function readPartsCrossReference() {
+  try {
+    return JSON.parse(await readFile(partsCrossReferencePath, "utf8"));
+  } catch {
+    return { rows: [], tokenIndex: {} };
+  }
+}
+
 const catalogBrandPrefixes = {
   ACURA: ["ACURA", "AC"],
   HONDA: ["HON", "HONDA", "HO"],
@@ -3060,9 +3387,44 @@ function prefixesForMake(make) {
   return catalogBrandPrefixes[String(make || "").toUpperCase()] || [String(make || "").toUpperCase()];
 }
 
+const partsReferenceMakePrefixes = {
+  ACURA: ["ACU", "ACURA", "HA", "HON"],
+  AUDI: ["AUDI", "AUD", "VW"],
+  BMW: ["BMW", "BM"],
+  BUICK: ["GM", "GMP", "GMR", "ULK", "BUK"],
+  CADILLAC: ["CAD", "GM", "GMP", "GMR", "ULK"],
+  CHEVROLET: ["GM", "GMP", "GMR", "CHV", "CHEV"],
+  CHRYSLER: ["CH", "CHRY", "MOP", "FBK", "ULK"],
+  DODGE: ["CH", "DOD", "MOP", "FBK", "ULK"],
+  FORD: ["FD", "FRD", "FORD"],
+  GMC: ["GM", "GMC", "GMP", "GMR", "ULK"],
+  HONDA: ["HA", "HON", "HONDA"],
+  HYUNDAI: ["HG", "HK", "HYU", "HKG"],
+  INFINITI: ["NS", "NIS", "INF", "ULK"],
+  JEEP: ["CH", "JEP", "MOP", "FBK", "ULK"],
+  KIA: ["KA", "HK", "KIA", "ULK"],
+  LEXUS: ["TX", "TOY", "LEX"],
+  LINCOLN: ["FD", "FRD", "FORD", "LIN"],
+  MAZDA: ["MZ", "MAZ"],
+  MITSUBISHI: ["MT", "MIT", "ULK"],
+  NISSAN: ["NS", "NIS", "ULK"],
+  RAM: ["CH", "RAM", "MOP", "FBK", "ULK"],
+  SUBARU: ["SB", "SUB"],
+  TOYOTA: ["TX", "TOY", "LEX"],
+  VOLKSWAGEN: ["VW", "VWP", "VWF", "VWS"],
+  VOLVO: ["VL", "VOLVO"],
+};
+
+function referencePrefixesForMake(make) {
+  const key = String(make || "").toUpperCase();
+  return [...new Set([...(prefixesForMake(key) || []), ...(partsReferenceMakePrefixes[key] || [])])]
+    .map((value) => compactToken(value))
+    .filter(Boolean);
+}
+
 function partNumbersOverlap(left = [], right = []) {
-  const rightSet = new Set(right.map((item) => String(item).toUpperCase()));
-  return left.some((item) => rightSet.has(String(item).toUpperCase()));
+  const rightSet = new Set(right.map(compactToken));
+  return left.some((item) => rightSet.has(compactToken(item)));
 }
 
 function catalogKeyTypeMatches(hlPartNumber, programmingReference) {
@@ -3074,8 +3436,192 @@ function catalogKeyTypeMatches(hlPartNumber, programmingReference) {
   return false;
 }
 
+function uniqueCleanValues(values = []) {
+  return [...new Set(values.flat(Infinity).map(cleanString).filter(Boolean))];
+}
+
+function partReferenceTokenVariants(value) {
+  const compact = compactToken(value);
+  if (!compact || compact.length < 2) return [];
+  const variants = new Set([compact]);
+  if (compact.startsWith("OEM") && compact.length > 5) variants.add(compact.slice(3));
+  if (/^TIK[A-Z]+\d+[RN]$/.test(compact)) variants.add(compact.slice(0, -1));
+  if (/^[A-Z]{2,5}\d{3,5}[RN]$/.test(compact)) variants.add(compact.slice(0, -1));
+  return Array.from(variants);
+}
+
+function lookupPartsCrossReferenceRows(partsReference, values = []) {
+  const rowsById = new Map((partsReference?.rows || []).map((row) => [row.id, row]));
+  const matches = new Map();
+  for (const value of uniqueCleanValues(values)) {
+    for (const token of partReferenceTokenVariants(value)) {
+      for (const rowId of partsReference?.tokenIndex?.[token] || []) {
+        const row = rowsById.get(rowId);
+        if (row) matches.set(row.id, row);
+      }
+    }
+  }
+  return Array.from(matches.values());
+}
+
+function labeledPartsRowIdentifiers(row = {}) {
+  const gsiLabel = /^ULK/i.test(cleanString(row.gsiPartNumber)) ? "LR#" : "GSI#";
+  const entries = [
+    ["LR#", row.lrId],
+    [gsiLabel, row.gsiPartNumber],
+    ["MW#", row.mwId || row.mwPartNumber],
+    ["ML#", row.mlPartNumber],
+    ["KI#", row.kiPartNumber],
+    ["TI#", row.tiPartNumber],
+  ];
+  const seen = new Set();
+  return entries
+    .map(([label, value]) => ({ label, value: cleanString(value) }))
+    .filter((entry) => entry.value)
+    .filter((entry) => {
+      const key = compactToken(entry.value);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function preferredPartsIdentifier(row = {}) {
+  return labeledPartsRowIdentifiers(row)[0] || { label: "Part#", value: "" };
+}
+
+function crossReferenceSummary(row) {
+  const labeledIdentifiers = labeledPartsRowIdentifiers(row);
+  const preferred = preferredPartsIdentifier(row);
+  const identifiers = uniqueCleanValues(labeledIdentifiers.map((item) => item.value)).slice(0, 10);
+  return {
+    id: row.id,
+    sourceTable: row.sourceTable || "Parts cross-reference",
+    primary: preferred.value || row.mlPartNumber || row.mwPartNumber || row.mwId || row.gsiPartNumber || row.lrId || row.tiPartNumber || identifiers[0] || "Cross-reference",
+    primaryLabel: preferred.value ? `${preferred.label} ${preferred.value}` : identifiers[0] || "Cross-reference",
+    identifiers,
+    labeledIdentifiers,
+    oemPartNumbers: uniqueCleanValues(row.oemPartNumbers || []).slice(0, 8),
+    aliases: uniqueCleanValues(row.aliases || []).slice(0, 12),
+  };
+}
+
+function referenceValuesForCandidate(candidate = {}) {
+  return uniqueCleanValues([
+    candidate.hlPartNumber,
+    candidate.legacyPartNumber,
+    candidate.activePartNumber,
+    candidate.supplierSku,
+    candidate.supplierBrand,
+    candidate.fccId,
+    candidate.oemPartNumbers || [],
+    candidate.crossReferences?.flatMap((item) => [item.identifiers || [], item.oemPartNumbers || [], item.aliases || []]) || [],
+  ]);
+}
+
+function referenceValuesForMasterRow(row = {}, linkedLabel = null) {
+  return uniqueCleanValues([
+    row.hlPartNumber,
+    row.fccId,
+    row.mwLegacyPartNumber,
+    row.lrLegacyPartNumber,
+    row.tiActivePartNumber,
+    row.klrActivePartNumber,
+    row.oemPartNumbers || [],
+    linkedLabel?.sku,
+    linkedLabel?.fccIds || [],
+    linkedLabel?.oemPartNumbers || [],
+    linkedLabel?.rawText,
+  ]);
+}
+
+function mergeCrossReferenceIntoCandidate(candidate, crossRows) {
+  if (!crossRows.length) return candidate;
+  const summaries = crossRows.map(crossReferenceSummary);
+  const crossOems = summaries.flatMap((item) => item.oemPartNumbers || []);
+  const crossIds = summaries.flatMap((item) => item.identifiers || []);
+  const crossLabels = summaries.flatMap((item) => (item.labeledIdentifiers || []).map((entry) => `${entry.label} ${entry.value}`));
+  return {
+    ...candidate,
+    score: (candidate.score || 0) + 28,
+    reasons: [...new Set([...(candidate.reasons || []), "parts cross-reference match"])],
+    confidence: (candidate.score || 0) >= 55 ? candidate.confidence : "medium",
+    oemPartNumbers: uniqueCleanValues([candidate.oemPartNumbers || [], crossOems]).slice(0, 12),
+    crossReferenceIds: crossIds.slice(0, 10),
+    crossReferenceLabels: uniqueCleanValues(crossLabels).slice(0, 10),
+    crossReferences: summaries.slice(0, 4),
+    preferredPartNumber: summaries[0]?.primary || candidate.preferredPartNumber || "",
+    preferredPartNumberLabel: summaries[0]?.primaryLabel || candidate.preferredPartNumberLabel || "",
+    source: candidate.source?.includes("parts cross-reference")
+      ? candidate.source
+      : `${candidate.source || "Parts candidate"} + parts cross-reference`,
+  };
+}
+
+function referenceRowMatchesMake(row, make) {
+  const prefixes = referencePrefixesForMake(make);
+  if (!prefixes.length) return false;
+  const tokens = (row.tokens || []).map((token) => token.normalized || compactToken(token.value));
+  return tokens.some((token) =>
+    prefixes.some((prefix) => token.startsWith(prefix) || (prefix.length >= 3 && token.includes(prefix))),
+  );
+}
+
+function candidateFromCrossReferenceRow(row) {
+  const summary = crossReferenceSummary(row);
+  const ids = summary.identifiers;
+  return {
+    score: 44,
+    confidence: "medium",
+    reasons: ["parts cross-reference row"],
+    hlPartNumber: row.mlPartNumber || "",
+    fccId: "",
+    attributes: "",
+    oemPartNumbers: summary.oemPartNumbers,
+    legacyPartNumber: row.mwPartNumber || row.mwId || row.lrId || row.gsiPartNumber || "",
+    activePartNumber: row.tiPartNumber || row.kiPartNumber || "",
+    supplierSku: row.gsiPartNumber || row.lrId || row.kiPartNumber || row.mwPartNumber || row.mwId || row.mlPartNumber || "",
+    supplierBrand: "",
+    descriptor: summary.aliases.slice(0, 3).join(", "),
+    source: "Parts cross-reference",
+    verify: ["vehicle application", "button layout", "FCC/frequency", "blade/keyway", "supplier stock"],
+    crossReferenceIds: ids.slice(0, 10),
+    crossReferenceLabels: (summary.labeledIdentifiers || []).map((entry) => `${entry.label} ${entry.value}`).slice(0, 10),
+    crossReferences: [summary],
+    preferredPartNumber: summary.primary,
+    preferredPartNumberLabel: summary.primaryLabel,
+  };
+}
+
+function mergeSupplierCandidates(candidates) {
+  const merged = [];
+  for (const candidate of candidates) {
+    const tokens = new Set(referenceValuesForCandidate(candidate).flatMap(partReferenceTokenVariants));
+    const existing = merged.find((item) => referenceValuesForCandidate(item).flatMap(partReferenceTokenVariants).some((token) => tokens.has(token)));
+    if (!existing) {
+      merged.push(candidate);
+      continue;
+    }
+    existing.score = Math.max(existing.score || 0, candidate.score || 0) + 8;
+    existing.confidence = existing.score >= 75 ? "medium-high" : existing.score >= 55 ? "medium" : existing.confidence || candidate.confidence || "low";
+    existing.reasons = [...new Set([...(existing.reasons || []), ...(candidate.reasons || [])])];
+    existing.oemPartNumbers = uniqueCleanValues([existing.oemPartNumbers || [], candidate.oemPartNumbers || []]).slice(0, 12);
+    existing.crossReferenceIds = uniqueCleanValues([existing.crossReferenceIds || [], candidate.crossReferenceIds || []]).slice(0, 12);
+    existing.crossReferenceLabels = uniqueCleanValues([existing.crossReferenceLabels || [], candidate.crossReferenceLabels || []]).slice(0, 12);
+    existing.crossReferences = [...(existing.crossReferences || []), ...(candidate.crossReferences || [])].slice(0, 5);
+    existing.preferredPartNumber ||= candidate.preferredPartNumber;
+    existing.preferredPartNumberLabel ||= candidate.preferredPartNumberLabel;
+    existing.legacyPartNumber ||= candidate.legacyPartNumber;
+    existing.activePartNumber ||= candidate.activePartNumber;
+    existing.supplierSku ||= candidate.supplierSku;
+    existing.descriptor ||= candidate.descriptor;
+    if (!existing.source.includes(candidate.source || "")) existing.source = `${existing.source} + ${candidate.source}`;
+  }
+  return merged;
+}
+
 async function findSupplierCandidates(vehicle, record, programmingReference) {
-  const [masterCatalog, keyInnovations] = await Promise.all([readMasterCatalog(), readKeyInnovationsLabels()]);
+  const [masterCatalog, keyInnovations, partsReference] = await Promise.all([readMasterCatalog(), readKeyInnovationsLabels(), readPartsCrossReference()]);
   const prefixes = prefixesForMake(vehicle.make);
   const labelBySku = new Map(keyInnovations.entries.map((entry) => [String(entry.sku).toUpperCase(), entry]));
   const fccHints = new Set((record?.keyOptions || []).flatMap((option) => [option.fccId, option.fcc, option.partNumber]).filter(Boolean));
@@ -3092,7 +3638,7 @@ async function findSupplierCandidates(vehicle, record, programmingReference) {
     return prefixes.some((prefix) => values.some((value) => value.startsWith(`${prefix}-`) || value.startsWith(prefix)));
   });
 
-  const candidates = masterRows.map((row) => {
+  const masterCandidates = masterRows.map((row) => {
     const linkedLabel =
       labelBySku.get(String(row.mwLegacyPartNumber || "").toUpperCase()) ||
       labelBySku.get(String(row.lrLegacyPartNumber || "").toUpperCase()) ||
@@ -3133,7 +3679,7 @@ async function findSupplierCandidates(vehicle, record, programmingReference) {
       }
     }
 
-    return {
+    const candidate = {
       score,
       confidence: score >= 75 ? "medium-high" : score >= 55 ? "medium" : "low",
       reasons,
@@ -3149,7 +3695,13 @@ async function findSupplierCandidates(vehicle, record, programmingReference) {
       source: linkedLabel ? "Master parts database + imported label" : "Master parts database",
       verify: ["vehicle application", "button layout", "FCC/frequency", "blade/keyway", "supplier stock"],
     };
+    return mergeCrossReferenceIntoCandidate(candidate, lookupPartsCrossReferenceRows(partsReference, referenceValuesForMasterRow(row, linkedLabel)));
   });
+
+  const referenceCandidates = (partsReference.rows || [])
+    .filter((row) => referenceRowMatchesMake(row, vehicle.make))
+    .map(candidateFromCrossReferenceRow);
+  const candidates = mergeSupplierCandidates([...masterCandidates, ...referenceCandidates]);
 
   return candidates
     .sort((a, b) => b.score - a.score || String(a.hlPartNumber).localeCompare(String(b.hlPartNumber)))
@@ -4773,6 +5325,18 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/jobs") {
     sendJson(response, 200, { jobs: store.jobs });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/part-history") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const query = cleanString(url.searchParams.get("q"));
+    if (!query) {
+      sendError(response, 400, "Enter an LR#, MW#, OE#, TI#, FCC, or part number.");
+      return;
+    }
+    const partsReference = await readPartsCrossReference();
+    sendJson(response, 200, buildPartHistory(query, store.jobs, partsReference));
     return;
   }
 
