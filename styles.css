@@ -341,7 +341,8 @@ main {
 }
 
 #vin.view.active {
-  overflow: hidden;
+  overflow: auto;
+  padding-bottom: 24px;
 }
 
 .metric-grid {
@@ -1269,6 +1270,14 @@ textarea {
   margin-top: auto;
 }
 
+.workflow-action-shell {
+  display: contents;
+}
+
+.workflow-action-toggle {
+  display: none;
+}
+
 .workflow-actions .primary-action,
 .workflow-actions .secondary-action {
   min-height: 48px;
@@ -1300,7 +1309,7 @@ textarea {
   max-height: 100%;
   flex-direction: column;
   padding: 20px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .vin-side-panel {
@@ -3993,7 +4002,7 @@ textarea {
   .vin-main-panel {
     padding: 10px;
     border-radius: 14px;
-    padding-bottom: 92px;
+    padding-bottom: 18px;
   }
 
   .mobile-context-header {
@@ -4073,10 +4082,49 @@ textarea {
 
   .program-screen {
     min-height: calc(100dvh - 170px);
-    padding-bottom: 92px;
+    padding-bottom: 28px;
   }
 
-  .workflow-actions {
+  .workflow-action-shell {
+    display: block;
+  }
+
+  .workflow-action-toggle {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top));
+    right: 10px;
+    z-index: 45;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(20, 25, 32, 0.92);
+    color: #fff6ef;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(12px);
+  }
+
+  .workflow-action-toggle span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #2f2118;
+    font-size: 0.78rem;
+    font-weight: 900;
+  }
+
+  .workflow-action-shell .workflow-actions {
+    display: none;
+  }
+
+  .workflow-action-shell.is-open .workflow-actions {
     position: fixed;
     right: 8px;
     bottom: calc(64px + env(safe-area-inset-bottom));

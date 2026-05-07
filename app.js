@@ -19,6 +19,7 @@ let activeVinScan = null;
 let pendingJobOfferId = "";
 let deferredInstallPrompt = null;
 let latestPartHistory = null;
+let workflowActionsOpen = false;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const liveProductFilters = {
   condition: new Set(),
@@ -868,7 +869,14 @@ function renderWorkflowActions(actions) {
   const withHome = hasHome
     ? actions
     : [...actions, `<button class="secondary-action" type="button" data-vin-home>Home</button>`];
-  return `<div class="workflow-actions">${withHome.join("")}</div>`;
+  return `
+    <div class="workflow-action-shell${workflowActionsOpen ? " is-open" : ""}">
+      <button class="workflow-action-toggle" type="button" data-toggle-workflow-actions aria-expanded="${workflowActionsOpen ? "true" : "false"}">
+        Actions <span>${withHome.length}</span>
+      </button>
+      <div class="workflow-actions">${withHome.join("")}</div>
+    </div>
+  `;
 }
 
 function stepLabel(step) {
@@ -4348,6 +4356,17 @@ document.addEventListener("click", (event) => {
   if (scannerCloseButton) {
     stopVinScanner();
     return;
+  }
+
+  const workflowActionToggle = event.target.closest("[data-toggle-workflow-actions]");
+  if (workflowActionToggle) {
+    workflowActionsOpen = !workflowActionsOpen;
+    if (latestVinProfile) renderVinProfile(latestVinProfile);
+    return;
+  }
+
+  if (event.target.closest(".workflow-actions button")) {
+    workflowActionsOpen = false;
   }
 
   const scannedVinButton = event.target.closest("[data-use-scanned-vin]");
