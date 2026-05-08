@@ -49,7 +49,11 @@ Attachments work locally without extra setup. For Render production, set Cloudfl
 
 ## Code Desk Imports
 
-Code Desk includes starter public depth-space cards for common systems. Import only authorized code records you are allowed to use. CSV/TSV/JSON imports can include columns such as `system`, `keyway`, `code`, `bitting`, `vehicle`, `partNumber`, `source`, and `notes`.
+Code Desk includes starter residential cards and automotive templates for common families such as Chrysler Y164, Ford H92/H94, GM HU100, Toyota/Lexus, Honda/Acura, and Nissan/Infiniti. Import only authorized code records and exact depth-space cards you are allowed to use.
+
+Code CSV/TSV/JSON imports can include columns such as `system`, `keyway`, `code`, `bitting`, `vehicle`, `partNumber`, `source`, and `notes`.
+
+Depth-space card imports can include `type=system`, `name`, `category`, `family`, `blanks`, `spaces`, `depths`, `cuts`, `stop`, `macs`, `source`, and `notes`. Depths can be JSON or pairs like `1=.329,2=.306,3=.283`.
 
 ## Build Local Vehicle Catalogs
 

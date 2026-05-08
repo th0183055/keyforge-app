@@ -26,10 +26,12 @@ let proofVaultServerAttachments = {};
 let proofVaultStorageMode = "browser-local";
 let proofVaultAttachmentMaxBytes = 1_500_000;
 let codeDeskImportedRecords = [];
+let codeDeskCustomSystems = [];
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
 const codeDeskImportKey = "timlockCodeDeskImportsV1";
+const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -48,6 +50,9 @@ const chatLog = [
 
 const navItems = document.querySelectorAll(".nav-item");
 const views = document.querySelectorAll(".view");
+const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
+const mobileMenuBackdrop = document.querySelector(".mobile-menu-backdrop");
+const primarySidebar = document.querySelector("#primarySidebar");
 const dashboardJobs = document.querySelector("#dashboardJobs");
 const jobBoard = document.querySelector("#jobBoard");
 const vehicleGrid = document.querySelector("#vehicleGrid");
@@ -109,9 +114,21 @@ const chatLogElement = document.querySelector("#chatLog");
 function showView(id) {
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
+  closeMobileMenu();
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "code-desk") renderCodeDesk();
+}
+
+function setMobileMenu(open) {
+  document.body.classList.toggle("mobile-menu-open", open);
+  primarySidebar?.classList.toggle("is-open", open);
+  if (mobileMenuToggle) mobileMenuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (mobileMenuBackdrop) mobileMenuBackdrop.hidden = !open;
+}
+
+function closeMobileMenu() {
+  setMobileMenu(false);
 }
 
 function updateConnectionStatus() {
@@ -3799,9 +3816,12 @@ const codeDeskSystems = [
   {
     id: "kw1",
     name: "KW1 / Kwikset Classic",
+    category: "Residential",
     family: "Residential edge cut",
     source: "Public depth-space reference",
     blanks: ["KW1", "KW10", "1176"],
+    cuts: 5,
+    stop: "Shoulder",
     spaces: [0.247, 0.397, 0.547, 0.697, 0.847],
     depths: {
       1: 0.329,
@@ -3818,9 +3838,12 @@ const codeDeskSystems = [
   {
     id: "sc1",
     name: "SC1 / Schlage Classic",
+    category: "Residential",
     family: "Residential edge cut",
     source: "Public depth-space reference",
     blanks: ["SC1", "SC4", "1145"],
+    cuts: 5,
+    stop: "Shoulder",
     spaces: [0.231, 0.387, 0.543, 0.699, 0.855],
     depths: {
       0: 0.335,
@@ -3837,6 +3860,96 @@ const codeDeskSystems = [
     macs: 7,
     notes: ["Confirm system variant, keyway, and cutter setup before originating.", "Imported records can add authorized code-to-bitting lookup."],
   },
+  {
+    id: "auto-y164",
+    name: "Y164 / Chrysler 8-cut",
+    category: "Automotive",
+    family: "Automotive edge cut",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["Y164", "Y164-PT", "CHRY", "MOPAR"],
+    cuts: 8,
+    stop: "Shoulder",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Template only until an exact Y164 depth-space card is imported.", "Require job authorization/proof before code-originated work."],
+  },
+  {
+    id: "auto-h92",
+    name: "H92/H94 / Ford 8-cut",
+    category: "Automotive",
+    family: "Automotive edge cut",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["H92", "H92-PT", "H94", "H94-PT", "H128", "FORD"],
+    cuts: 8,
+    stop: "Shoulder",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Template only until the exact Ford card/version is imported.", "Confirm blank, chip, and application before cutting."],
+  },
+  {
+    id: "auto-hu100",
+    name: "HU100 / GM side-mill",
+    category: "Automotive",
+    family: "Automotive high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["HU100", "B111", "B111-PT", "GM"],
+    cuts: 10,
+    stop: "Tip / card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["High-security templates need exact spacing, depth, and side/axis rules from your verified card.", "Do not rely on VIN alone for mechanical keyway."],
+  },
+  {
+    id: "auto-toy44",
+    name: "TOY44/TOY48 / Toyota-Lexus",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["TOY44", "TOY44D", "TOY44G", "TOY48", "TR47", "TOYOTA", "LEXUS"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Toyota/Lexus systems split by keyway and generation. Import the exact card before measurement snapping.", "Use part proof and vehicle application notes from saved jobs."],
+  },
+  {
+    id: "auto-honda",
+    name: "HO01/HO03 / Honda-Acura",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["HO01", "HO03", "HO05", "HD103", "HONDA", "ACURA"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Honda/Acura keyways vary by generation and shell/prox package.", "Import your verified card before translating measurements."],
+  },
+  {
+    id: "auto-nissan",
+    name: "NI04/NI07/DA34 / Nissan-Infiniti",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["NI04", "NI07", "DA34", "X237", "NISSAN", "INFINITI"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Nissan/Infiniti systems split by keyway, prox generation, and insert style.", "Use authorized code data only after customer proof is logged."],
+  },
 ];
 
 function loadCodeDeskImports() {
@@ -3851,6 +3964,100 @@ function loadCodeDeskImports() {
 function saveCodeDeskImports(records) {
   codeDeskImportedRecords = (records || []).map(normalizeCodeDeskRecord).filter(Boolean).slice(0, 5000);
   localStorage.setItem(codeDeskImportKey, JSON.stringify(codeDeskImportedRecords));
+}
+
+function loadCodeDeskSystems() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(codeDeskSystemKey) || "[]");
+    return Array.isArray(parsed) ? parsed.map(normalizeCodeDeskSystem).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCodeDeskSystems(systems) {
+  codeDeskCustomSystems = (systems || []).map(normalizeCodeDeskSystem).filter(Boolean).slice(0, 500);
+  localStorage.setItem(codeDeskSystemKey, JSON.stringify(codeDeskCustomSystems));
+}
+
+function codeDeskAvailableSystems() {
+  const map = new Map();
+  [...codeDeskSystems, ...codeDeskCustomSystems].forEach((system) => {
+    if (!system?.id) return;
+    map.set(system.id, system);
+  });
+  return Array.from(map.values());
+}
+
+function splitCodeDeskList(value) {
+  if (Array.isArray(value)) return value.map(cleanInput).filter(Boolean);
+  return cleanInput(value)
+    .split(/[|;,/]+/)
+    .map(cleanInput)
+    .filter(Boolean);
+}
+
+function parseCodeDeskNumbers(value) {
+  if (Array.isArray(value)) return value.map(Number).filter((item) => Number.isFinite(item));
+  return (cleanInput(value).match(/\d+(?:\.\d+)?/g) || [])
+    .map(Number)
+    .map((item) => (item > 1 ? item / 1000 : item))
+    .filter((item) => Number.isFinite(item));
+}
+
+function parseCodeDeskDepths(value, row = {}) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value).map(([cut, depth]) => [cleanInput(cut), Number(depth)]).filter(([, depth]) => Number.isFinite(depth)));
+  }
+  const text = cleanInput(value);
+  const depths = {};
+  if (text.startsWith("{")) {
+    try {
+      return parseCodeDeskDepths(JSON.parse(text));
+    } catch {
+      // Fall through to pair parsing.
+    }
+  }
+  text.split(/[|;,]+/).forEach((pair) => {
+    const match = pair.match(/([0-9A-Z?]+)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+    if (!match) return;
+    const depth = Number(match[2]);
+    if (Number.isFinite(depth)) depths[match[1]] = depth > 1 ? depth / 1000 : depth;
+  });
+  Object.entries(row || {}).forEach(([key, raw]) => {
+    const match = key.match(/^depth([0-9a-z?]+)$/i);
+    const depth = Number(raw);
+    if (match && Number.isFinite(depth)) depths[match[1].toUpperCase()] = depth > 1 ? depth / 1000 : depth;
+  });
+  return depths;
+}
+
+function normalizeCodeDeskSystem(system = {}) {
+  if (!system || typeof system !== "object") return null;
+  const row = Object.fromEntries(Object.entries(system).map(([key, value]) => [normalizeImportHeader(key), value]));
+  const name = pickCodeDeskField(row, ["name", "system", "card", "keyway", "description"]);
+  const id = cleanInput(system.id || row.id) || compactCodeDeskKey(name).toLowerCase();
+  if (!name || !id) return null;
+  const depths = parseCodeDeskDepths(system.depths || row.depths, row);
+  const spaces = parseCodeDeskNumbers(system.spaces || row.spaces || row.space);
+  return {
+    id,
+    name,
+    category: pickCodeDeskField(row, ["category", "type"]) || "Imported",
+    family: pickCodeDeskField(row, ["family", "format", "style"]) || (compactCodeDeskKey(name).includes("HU") || compactCodeDeskKey(name).includes("HIGH") ? "Automotive high security" : "Automotive edge cut"),
+    source: pickCodeDeskField(row, ["source", "origin", "vendor"]) || "Imported depth-space card",
+    blanks: splitCodeDeskList(system.blanks || row.blanks || row.blank || row.keyblank || row.keyway),
+    spaces,
+    depths,
+    macs: pickCodeDeskField(row, ["macs", "mac"]) || "Verify",
+    cuts: cleanInput(system.cuts || row.cuts || row.positions) || spaces.length || "",
+    stop: pickCodeDeskField(row, ["stop", "stoptype", "shoulder", "tip"]) || "Card-specific",
+    cardRequired: !Object.keys(depths).length,
+    custom: true,
+    notes: splitCodeDeskList(system.notes || row.notes || row.note).length
+      ? splitCodeDeskList(system.notes || row.notes || row.note)
+      : ["Imported automotive card. Verify machine setup before cutting."],
+  };
 }
 
 function normalizeCodeDeskKey(value) {
@@ -3934,40 +4141,54 @@ function splitDelimitedLine(line, delimiter) {
   return cells;
 }
 
+function rowLooksLikeCodeDeskSystem(row) {
+  const normalized = Object.fromEntries(Object.entries(row || {}).map(([key, value]) => [normalizeImportHeader(key), value]));
+  const type = compactCodeDeskKey(normalized.type || normalized.recordtype || normalized.kind);
+  if (["SYSTEM", "CARD", "DEPTHSPACECARD", "DSD"].includes(type)) return true;
+  return Boolean((normalized.spaces || normalized.depths || normalized.depth0 || normalized.depth1 || normalized.depth2) && !(normalized.code || normalized.keycode || normalized.lockcode || normalized.factorycode));
+}
+
 function parseCodeDeskImport(text) {
   const trimmed = cleanInput(text);
-  if (!trimmed) return [];
+  if (!trimmed) return { records: [], systems: [] };
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
     const parsed = JSON.parse(trimmed);
     const rows = Array.isArray(parsed) ? parsed : parsed.records || parsed.codes || [];
-    return rows.map(normalizeCodeDeskRecord).filter(Boolean);
+    const systemRows = Array.isArray(parsed) ? parsed.filter(rowLooksLikeCodeDeskSystem) : parsed.systems || parsed.cards || [];
+    return {
+      records: rows.filter((row) => !rowLooksLikeCodeDeskSystem(row)).map(normalizeCodeDeskRecord).filter(Boolean),
+      systems: systemRows.map(normalizeCodeDeskSystem).filter(Boolean),
+    };
   }
   const lines = trimmed
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
-  if (!lines.length) return [];
+  if (!lines.length) return { records: [], systems: [] };
   const delimiter = lines[0].includes("\t") ? "\t" : ",";
   const headers = splitDelimitedLine(lines.shift(), delimiter).map(normalizeImportHeader);
-  return lines
-    .map((line) => {
-      const cells = splitDelimitedLine(line, delimiter);
-      const row = {};
-      headers.forEach((header, index) => {
-        row[header || `column${index}`] = cells[index] || "";
-      });
-      return normalizeCodeDeskRecord(row);
-    })
-    .filter(Boolean);
+  const rows = lines.map((line) => {
+    const cells = splitDelimitedLine(line, delimiter);
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header || `column${index}`] = cells[index] || "";
+    });
+    return row;
+  });
+  return {
+    records: rows.filter((row) => !rowLooksLikeCodeDeskSystem(row)).map(normalizeCodeDeskRecord).filter(Boolean),
+    systems: rows.filter(rowLooksLikeCodeDeskSystem).map(normalizeCodeDeskSystem).filter(Boolean),
+  };
 }
 
 function selectedCodeDeskSystem() {
-  const selected = codeDeskForm?.elements.system?.value || codeDeskSystems[0].id;
-  return codeDeskSystems.find((system) => system.id === selected) || codeDeskSystems[0];
+  const systems = codeDeskAvailableSystems();
+  const selected = codeDeskForm?.elements.system?.value || systems[0]?.id || codeDeskSystems[0].id;
+  return systems.find((system) => system.id === selected) || systems[0] || codeDeskSystems[0];
 }
 
 function codeDeskSystemMatchesRecord(system, record) {
-  const systemTokens = [system.id, system.name, ...(system.blanks || [])].map(compactCodeDeskKey).filter(Boolean);
+  const systemTokens = [system.id, system.name, system.category, system.family, ...(system.blanks || [])].map(compactCodeDeskKey).filter(Boolean);
   const recordTokens = [record.system, record.keyway].map(compactCodeDeskKey).filter(Boolean);
   if (!recordTokens.length) return true;
   return recordTokens.some((token) => systemTokens.some((systemToken) => token.includes(systemToken) || systemToken.includes(token)));
@@ -3984,12 +4205,13 @@ function codeDeskFormatMeasurement(value) {
 }
 
 function codeDeskCutRows(system, bitting = []) {
+  const hasDepthCard = Boolean(Object.keys(system.depths || {}).length);
   return bitting.map((cut, index) => ({
     position: index + 1,
     cut,
     space: system.spaces[index],
     depth: system.depths?.[cut],
-    valid: cut === "?" || Number.isFinite(Number(system.depths?.[cut])),
+    valid: !hasDepthCard || cut === "?" || Number.isFinite(Number(system.depths?.[cut])),
   }));
 }
 
@@ -4001,6 +4223,7 @@ function nearestCodeDeskDepth(system, measurement) {
 }
 
 function codeDeskMeasurementsToCuts(system, query) {
+  if (!codeDeskDepthRows(system).length) return [];
   const measurements = (cleanInput(query).match(/\d+(?:\.\d+)?/g) || [])
     .map(Number)
     .map((value) => (value > 1 ? value / 1000 : value))
@@ -4067,7 +4290,7 @@ function renderCodeDeskResult(result) {
       <article class="metric">
         <span>MACS</span>
         <strong>${escapeHtml(result.system.macs ?? "Verify")}</strong>
-        <p>Machine setup still controls final cut quality.</p>
+        <p>${escapeHtml([result.system.cuts ? `${result.system.cuts} cuts` : "", result.system.stop || ""].filter(Boolean).join(" | ") || "Machine setup controls final cut quality.")}</p>
       </article>
       <article class="metric">
         <span>Imported Codes</span>
@@ -4114,7 +4337,7 @@ function renderCodeDeskResult(result) {
           </div>
         </div>
         <div class="code-depth-table">
-          ${depthRows.map((row) => `<span><strong>${escapeHtml(row.cut)}</strong>${escapeHtml(codeDeskFormatMeasurement(row.depth))}</span>`).join("")}
+          ${depthRows.length ? depthRows.map((row) => `<span><strong>${escapeHtml(row.cut)}</strong>${escapeHtml(codeDeskFormatMeasurement(row.depth))}</span>`).join("") : `<p class="muted-copy">Automotive template loaded. Import the exact depth-space card to enable measurement snapping.</p>`}
         </div>
         <div class="part-chip-row">
           ${(result.system.notes || []).map((note) => `<span class="part-chip">${escapeHtml(note)}</span>`).join("")}
@@ -4172,9 +4395,26 @@ function runCodeDesk() {
 function renderCodeDesk() {
   if (!codeDeskForm || !codeDeskResult) return;
   codeDeskImportedRecords = loadCodeDeskImports();
+  codeDeskCustomSystems = loadCodeDeskSystems();
   const select = codeDeskForm.elements.system;
-  if (select && !select.options.length) {
-    select.innerHTML = codeDeskSystems.map((system) => `<option value="${escapeHtml(system.id)}">${escapeHtml(system.name)}</option>`).join("");
+  if (select) {
+    const current = select.value;
+    const groups = codeDeskAvailableSystems().reduce((map, system) => {
+      const group = system.category || "Other";
+      map[group] ||= [];
+      map[group].push(system);
+      return map;
+    }, {});
+    select.innerHTML = Object.entries(groups)
+      .map(
+        ([group, systems]) => `
+          <optgroup label="${escapeHtml(group)}">
+            ${systems.map((system) => `<option value="${escapeHtml(system.id)}">${escapeHtml(system.name)}</option>`).join("")}
+          </optgroup>
+        `,
+      )
+      .join("");
+    if (current && codeDeskAvailableSystems().some((system) => system.id === current)) select.value = current;
   }
   if (!codeDeskResult.dataset.ready) {
     const starter = selectedCodeDeskSystem();
@@ -4188,7 +4428,7 @@ function renderCodeDesk() {
       matches: [],
     });
     codeDeskResult.dataset.ready = "starter";
-    if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk ready. Public cards are starter references; import authorized records for code lookup.";
+    if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk ready. Automotive templates need your exact depth-space card import before production cutting.";
   }
 }
 
@@ -4197,8 +4437,15 @@ async function importCodeDeskFile(file) {
   try {
     const imported = parseCodeDeskImport(await file.text());
     const existing = new Map(codeDeskImportedRecords.map((record) => [record.id, record]));
-    imported.forEach((record) => existing.set(record.id, record));
+    imported.records.forEach((record) => existing.set(record.id, record));
     saveCodeDeskImports(Array.from(existing.values()));
+    if (imported.systems.length) {
+      const existingSystems = new Map(codeDeskCustomSystems.map((system) => [system.id, system]));
+      imported.systems.forEach((system) => existingSystems.set(system.id, system));
+      saveCodeDeskSystems(Array.from(existingSystems.values()));
+      if (codeDeskResult) codeDeskResult.dataset.ready = "";
+      renderCodeDesk();
+    }
     renderCodeDeskResult({
       system: selectedCodeDeskSystem(),
       mode: "code",
@@ -4206,9 +4453,9 @@ async function importCodeDeskFile(file) {
       bitting: [],
       cutRows: [],
       measurementRows: [],
-      matches: imported.slice(0, 40),
+      matches: imported.records.slice(0, 40),
     });
-    if (codeDeskStatus) codeDeskStatus.textContent = `Imported ${imported.length} authorized code records.`;
+    if (codeDeskStatus) codeDeskStatus.textContent = `Imported ${imported.records.length} code records and ${imported.systems.length} depth-space cards.`;
   } catch (error) {
     if (codeDeskStatus) codeDeskStatus.textContent = `Import failed: ${error.message}`;
   }
@@ -4219,7 +4466,7 @@ function exportCodeDeskRecords() {
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),
     records: codeDeskImportedRecords,
-    systems: codeDeskSystems.map(({ id, name, blanks, spaces, depths, macs }) => ({ id, name, blanks, spaces, depths, macs })),
+    systems: codeDeskAvailableSystems().map(({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom }) => ({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom })),
   });
   if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk records exported.";
 }
@@ -5448,6 +5695,16 @@ async function loadPublicReferenceSources() {
 
 navItems.forEach((item) => {
   item.addEventListener("click", () => showView(item.dataset.view));
+});
+
+mobileMenuToggle?.addEventListener("click", () => {
+  setMobileMenu(!document.body.classList.contains("mobile-menu-open"));
+});
+
+mobileMenuBackdrop?.addEventListener("click", closeMobileMenu);
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMobileMenu();
 });
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {

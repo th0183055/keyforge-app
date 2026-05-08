@@ -17,11 +17,20 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  overflow-x: hidden;
   min-height: 100vh;
   background:
     radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.82), transparent 28rem),
@@ -35,7 +44,9 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
+  max-width: 100%;
   font: inherit;
 }
 
@@ -51,9 +62,20 @@ button:disabled {
 .app-shell {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   min-height: 0;
+  overflow: hidden;
+}
+
+.mobile-menu-toggle,
+.mobile-menu-backdrop {
+  display: none;
+}
+
+body.mobile-menu-open {
   overflow: hidden;
 }
 
@@ -244,14 +266,17 @@ main {
   display: flex;
   min-height: 0;
   min-width: 0;
+  max-width: 100%;
   flex-direction: column;
   overflow: hidden;
+  overflow-x: hidden;
   padding: 28px;
   background: transparent;
 }
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
   justify-content: space-between;
@@ -272,11 +297,14 @@ main {
 
 .primary-action,
 .secondary-action {
+  max-width: 100%;
   border: 0;
   border-radius: 7px;
   padding: 11px 15px;
-  white-space: nowrap;
+  white-space: normal;
   font-weight: 800;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .primary-action {
@@ -313,8 +341,11 @@ main {
 .view.active {
   display: block;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   flex: 1;
   overflow: auto;
+  overflow-x: hidden;
 }
 
 .app-status-banner {
@@ -342,6 +373,7 @@ main {
 
 #vin.view.active {
   overflow: auto;
+  overflow-x: hidden;
   padding-bottom: 24px;
 }
 
@@ -354,6 +386,8 @@ main {
 
 .metric,
 .panel {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel);
@@ -398,9 +432,23 @@ main {
   padding: 18px;
 }
 
+main *,
+.view *,
+.panel * {
+  min-width: 0;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
 .panel-header {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
   justify-content: space-between;
@@ -3630,35 +3678,105 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  .mobile-menu-toggle {
     position: fixed;
-    inset: auto 0 0 0;
-    z-index: 20;
-    display: block;
-    padding: 0;
-    overflow-x: auto;
-    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    top: calc(10px + env(safe-area-inset-top));
+    right: 10px;
+    z-index: 70;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(18, 23, 30, 0.94);
+    color: white;
+    font-size: 0.82rem;
+    font-weight: 900;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(12px);
   }
 
-  .brand {
+  .mobile-menu-toggle span,
+  .mobile-menu-toggle span::before,
+  .mobile-menu-toggle span::after {
+    display: block;
+    width: 16px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    content: "";
+  }
+
+  .mobile-menu-toggle span {
+    position: relative;
+  }
+
+  .mobile-menu-toggle span::before {
+    position: absolute;
+    top: -5px;
+    left: 0;
+  }
+
+  .mobile-menu-toggle span::after {
+    position: absolute;
+    top: 5px;
+    left: 0;
+  }
+
+  .mobile-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    display: block;
+    background: rgba(5, 6, 8, 0.36);
+    backdrop-filter: blur(4px);
+  }
+
+  .mobile-menu-backdrop[hidden] {
     display: none;
   }
 
-  .nav-list {
+  .sidebar {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 60;
     display: flex;
-    grid-template-columns: none;
-    gap: 0;
-    min-width: max-content;
+    width: min(82vw, 320px);
+    max-width: 100%;
+    padding: calc(66px + env(safe-area-inset-top)) 14px 14px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-left: 1px solid rgba(255, 255, 255, 0.16);
+    border-top: 0;
+    transform: translateX(102%);
+    transition: transform 180ms ease;
+    box-shadow: -18px 0 42px rgba(0, 0, 0, 0.24);
+  }
+
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .brand {
+    display: flex;
+  }
+
+  .nav-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    min-width: 0;
   }
 
   .nav-item {
-    flex: 0 0 116px;
-    min-height: 62px;
-    border-radius: 0;
-    padding: 8px 4px;
-    font-size: 0.72rem;
+    min-height: 48px;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 0.92rem;
     line-height: 1.15;
-    text-align: center;
+    text-align: left;
   }
 
   .operator-panel {
@@ -3666,7 +3784,7 @@ textarea {
   }
 
   main {
-    padding: 12px 12px 78px;
+    padding: calc(58px + env(safe-area-inset-top)) 12px 14px;
   }
 
   .topbar {
@@ -3937,7 +4055,7 @@ textarea {
 
 @media (max-width: 620px) {
   main {
-    padding: 8px 8px 76px;
+    padding: calc(56px + env(safe-area-inset-top)) 8px 12px;
   }
 
   .topbar,
@@ -4131,7 +4249,7 @@ textarea {
   .workflow-action-shell.is-open .workflow-actions {
     position: fixed;
     right: 8px;
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    bottom: calc(8px + env(safe-area-inset-bottom));
     left: 8px;
     z-index: 30;
     display: grid;

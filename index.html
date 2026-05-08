@@ -13,7 +13,12 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Primary">
+      <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="primarySidebar">
+        <span></span>
+        Menu
+      </button>
+      <div class="mobile-menu-backdrop" hidden></div>
+      <aside class="sidebar" id="primarySidebar" aria-label="Primary">
         <div class="brand">
           <div class="brand-mark">TL</div>
           <div>
@@ -197,7 +202,7 @@
                 <h3>Code Desk</h3>
               </div>
               <div class="proof-vault-actions">
-                <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes</button>
+                <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes / Cards</button>
                 <button class="secondary-action small" type="button" id="exportCodeDesk">Export Codes</button>
                 <button class="secondary-action small" type="button" id="clearCodeDesk">Clear Codes</button>
                 <input id="codeDeskImportInput" type="file" accept=".csv,.tsv,.json,text/csv,application/json" hidden />
@@ -219,7 +224,7 @@
               </label>
               <label class="wide-field">
                 Code, bitting, or measurements
-                <input name="query" placeholder="24351, .329 .306 .283, or imported code" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                <input name="query" placeholder="Y164 cuts, .329 .306 .283, or authorized code" autocomplete="off" autocapitalize="characters" spellcheck="false" />
               </label>
               <button class="primary-action" type="submit">Run Desk</button>
             </form>
@@ -227,7 +232,7 @@
             <div class="code-desk-result" id="codeDeskResult">
               <article class="assistant-card">
                 <strong>Code Desk ready</strong>
-                <p>Use public cards for bitting and measurement work. Import authorized code records for code lookup.</p>
+                <p>Use starter cards and automotive templates. Import authorized code records or exact depth-space cards for production lookup.</p>
               </article>
             </div>
           </section>
