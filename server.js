@@ -3952,6 +3952,260 @@ async function findProgrammingReference(vehicle) {
   }
 }
 
+function autoCodeTemplateForVehicle(vehicle = {}) {
+  const family = vehicleFamily(vehicle.make, vehicle.model);
+  const year = Number(vehicle.year) || 0;
+  const text = normalizeVehicleText(`${vehicle.make} ${vehicle.model} ${vehicle.trim || ""} ${vehicle.bodyClass || ""}`);
+  if (["chrysler"].includes(family)) {
+    return {
+      id: "auto-y164",
+      name: "Y164 / Chrysler-Dodge-Jeep-Ram 8-cut",
+      blanks: ["Y164", "Y164-PT", "MOPAR"],
+      codeCardStatus: "template-ready",
+      confidence: year >= 2008 ? "medium" : "verify",
+    };
+  }
+  if (family === "ford") {
+    return {
+      id: "auto-h92",
+      name: year >= 2015 || /F150|F 150|EXPEDITION|NAVIGATOR|SUPER DUTY|F250|F350|BRONCO/.test(text) ? "H92/H94/H128 / Ford-Lincoln 8-cut family" : "Ford H-series edge cut family",
+      blanks: ["H92", "H94", "H128", "164-R"],
+      codeCardStatus: "template-ready",
+      confidence: "medium",
+    };
+  }
+  if (family === "gm") {
+    return {
+      id: "auto-hu100",
+      name: year >= 2010 ? "HU100 / GM side-mill family" : "GM B-series edge cut family",
+      blanks: year >= 2010 ? ["HU100", "B111", "B119", "B120"] : ["B86", "B97", "B99", "B106"],
+      codeCardStatus: "template-ready",
+      confidence: year >= 2010 ? "medium" : "verify",
+    };
+  }
+  if (["toyota", "lexus"].includes(family)) {
+    return {
+      id: "auto-toy44",
+      name: year >= 2010 ? "TOY44/TOY48 / Toyota-Lexus family" : "Toyota/Lexus TR/TOY family",
+      blanks: ["TOY44", "TOY48", "TR47", "LXP90"],
+      codeCardStatus: "template-ready",
+      confidence: "medium",
+    };
+  }
+  if (family === "honda") {
+    return {
+      id: "auto-honda",
+      name: year >= 2003 ? "HO03/HO05/HD103 / Honda-Acura family" : "HO01 / Honda-Acura edge cut family",
+      blanks: ["HO01", "HO03", "HO05", "HD103"],
+      codeCardStatus: "template-ready",
+      confidence: "medium",
+    };
+  }
+  if (family === "nissan") {
+    return {
+      id: "auto-nissan",
+      name: "NI04/NI07/DA34 / Nissan-Infiniti family",
+      blanks: ["NI04", "NI07", "DA34", "X237"],
+      codeCardStatus: "template-ready",
+      confidence: "medium",
+    };
+  }
+  if (family === "hyundai") {
+    return {
+      id: "auto-hyundai-kia",
+      name: "HY/KIA laser and edge-cut family",
+      blanks: ["HY15", "HY18", "HY18R", "HY20", "KK12"],
+      codeCardStatus: "template-ready",
+      confidence: "verify",
+    };
+  }
+  if (family === "mazda") {
+    return {
+      id: "auto-mazda",
+      name: "MAZ24/MZ31 Mazda family",
+      blanks: ["MAZ24", "MAZ24R", "MZ31", "X249"],
+      codeCardStatus: "template-ready",
+      confidence: "verify",
+    };
+  }
+  if (family === "subaru") {
+    return {
+      id: "auto-subaru",
+      name: "SUB/DAT Subaru family",
+      blanks: ["SUB4", "DAT17", "B110"],
+      codeCardStatus: "template-ready",
+      confidence: "verify",
+    };
+  }
+  if (family === "vw") {
+    return {
+      id: "auto-vw-audi",
+      name: "HU66/HU162 / VW-Audi family",
+      blanks: ["HU66", "HU66T6", "HU162T"],
+      codeCardStatus: "template-ready",
+      confidence: "verify",
+    };
+  }
+  if (["bmw", "mercedes"].includes(family)) {
+    return {
+      id: "auto-euro-high-security",
+      name: "European high-security family",
+      blanks: family === "bmw" ? ["HU92", "HU100R", "BMW emergency insert"] : ["HU64", "Mercedes emergency insert"],
+      codeCardStatus: "template-ready",
+      confidence: "verify",
+    };
+  }
+  return {
+    id: "auto-generic",
+    name: "Verify keyway/card",
+    blanks: [],
+    codeCardStatus: "needs-template",
+    confidence: "low",
+  };
+}
+
+function autoDatabaseSupport(row = {}, vpicRow = null, jobs = []) {
+  const securityFlags = [
+    row.requiresPin ? "PIN/passcode" : "",
+    row.requiresOnline ? "online/OEM" : "",
+    row.requiresBypass ? "bypass/security procedure" : "",
+  ].filter(Boolean);
+  const vehicle = { year: row.year, make: row.make, model: row.model };
+  const matchingJobs = jobs.filter((job) => jobMatchesVehicle(job, vehicle) || jobMatchesMakeModel(job, vehicle));
+  return [
+    {
+      name: "NHTSA vPIC identity",
+      status: vpicRow ? "available" : "VIN decode only",
+      gives: "VIN/YMM identity, vehicle type, manufacturer model metadata",
+    },
+    {
+      name: "Local programming reference",
+      status: row.vpicOnly ? "needs import" : "available",
+      gives: row.vpicOnly
+        ? "vehicle identity row only; add or import programming coverage to make this production-useful"
+        : [row.ignitionType, row.programMethod, row.immobilizerSystem, securityFlags.join(" + ")].filter(Boolean).join(" | ") || "programming path flags",
+    },
+    {
+      name: "Authorized code database import",
+      status: "import-ready",
+      gives: "code-to-bitting, bitting-to-code, code series, and locksmith notes when you import authorized records",
+    },
+    {
+      name: "Depth-space card import",
+      status: "import-ready",
+      gives: "spaces, depths, MACS, stop, and cutting card details for exact key system",
+    },
+    {
+      name: "Proof Vault / saved jobs",
+      status: matchingJobs.length ? `${matchingJobs.length} observed job${matchingJobs.length === 1 ? "" : "s"}` : "ready",
+      gives: "what worked in your shop, programmer proof, parts proof, photos/docs",
+    },
+  ];
+}
+
+async function buildAutoCodeBaseline(options = {}) {
+  const query = normalizeVehicleText(options.query || options.q || "");
+  const make = normalizeVehicleText(options.make || "");
+  const year = Number(options.year) || 0;
+  const limit = Math.max(25, Math.min(Number(options.limit) || 250, 20000));
+  const [programming, vpic, store] = await Promise.all([
+    readFile(programmingReferencePath, "utf8").then(JSON.parse).catch(() => ({ rows: [] })),
+    readFile(vpicCatalogPath, "utf8").then(JSON.parse).catch(() => ({ rows: [] })),
+    readStore().catch(() => ({ jobs: [] })),
+  ]);
+  const vpicMap = new Map(
+    (vpic.rows || []).map((row) => [`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`, row]),
+  );
+  const programmingRows = (programming.rows || []).map((row) => ({
+    year: Number(row.year) || "",
+    make: cleanString(row.make).toUpperCase(),
+    model: cleanString(row.model),
+    ignitionType: cleanString(row.ignitionType),
+    immobilizerSystem: cleanString(row.immobilizerSystem),
+    programMethod: cleanString(row.programMethod),
+    requiresPin: Boolean(row.requiresPin),
+    requiresBypass: Boolean(row.requiresBypass),
+    requiresOnline: Boolean(row.requiresOnline),
+    allKeysLostSupported: Boolean(row.allKeysLostSupported),
+    notes: cleanString(row.notes),
+    sourceFile: cleanString(row.sourceFile),
+  }));
+  const keyedProgramming = new Set(programmingRows.map((row) => `${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`));
+  const vpicOnlyRows = (vpic.rows || [])
+    .filter((row) => !keyedProgramming.has(`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`))
+    .map((row) => ({
+      year: Number(row.year) || "",
+      make: cleanString(row.make).toUpperCase(),
+      model: cleanString(row.model),
+      ignitionType: "",
+      immobilizerSystem: "",
+      programMethod: "",
+      requiresPin: false,
+      requiresBypass: false,
+      requiresOnline: false,
+      allKeysLostSupported: false,
+      notes: cleanString(row.verifyBeforeDispatch),
+      sourceFile: "vpic-catalog.json",
+      vpicOnly: true,
+    }));
+  const rows = [...programmingRows, ...vpicOnlyRows]
+    .map((row) => {
+      const vehicle = { year: row.year, make: row.make, model: row.model };
+      const vpicRow = vpicMap.get(`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`) || null;
+      const template = autoCodeTemplateForVehicle(vehicle);
+      const databaseSupport = autoDatabaseSupport(row, vpicRow, store.jobs || []);
+      const searchable = normalizeVehicleText([
+        row.year,
+        row.make,
+        row.model,
+        row.ignitionType,
+        row.immobilizerSystem,
+        row.programMethod,
+        template.name,
+        template.blanks,
+        row.sourceFile,
+      ]);
+      return {
+        ...row,
+        vehicleType: vpicRow?.vehicleType || "",
+        template,
+        databaseSupport,
+        security: [
+          row.requiresPin ? "PIN" : "",
+          row.requiresOnline ? "Online/OEM" : "",
+          row.requiresBypass ? "Bypass" : "",
+        ].filter(Boolean),
+        sourceReadiness: {
+          vehicleIdentity: vpicRow ? "available" : "VIN/YMM lookup",
+          programming: row.vpicOnly ? "needs programming data" : "available",
+          depthSpace: template.codeCardStatus === "needs-template" ? "needs template/card" : "template ready; exact card import recommended",
+          codeLookup: "authorized import ready",
+          proof: "saved-job proof ready",
+        },
+        searchable,
+      };
+    })
+    .filter((row) => (!year || Number(row.year) === year) && (!make || normalizeVehicleText(row.make) === make))
+    .filter((row) => !query || row.searchable.includes(query))
+    .sort((a, b) => Number(b.year) - Number(a.year) || a.make.localeCompare(b.make) || a.model.localeCompare(b.model));
+  const makes = [...new Set(rows.map((row) => row.make).filter(Boolean))].sort();
+  const years = [...new Set(rows.map((row) => row.year).filter(Boolean))].sort((a, b) => b - a);
+  return {
+    generatedAt: new Date().toISOString(),
+    source: "Local programming-reference plus vPIC identity catalog",
+    totalRows: rows.length,
+    returnedRows: rows.slice(0, limit).length,
+    limit,
+    makes,
+    years,
+    supportedImports: {
+      codeRecords: ["system", "keyway", "code", "bitting", "vehicle", "partNumber", "source", "notes"],
+      depthSpaceCards: ["type=system", "name", "category", "family", "blanks", "spaces", "depths", "cuts", "stop", "macs", "source", "notes"],
+    },
+    rows: rows.slice(0, limit),
+  };
+}
+
 async function findVerifiedVehicleProfile(vehicle) {
   const profiles = await readVehicleProfiles();
   const baseKey = vehicleProfileBaseKey(vehicle);
@@ -6165,6 +6419,21 @@ async function handleApi(request, response, pathname) {
     } catch {
       sendError(response, 404, "vPIC parts reference has not been generated. Run npm run sync:vpic first.");
     }
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/code-desk/auto-baseline") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    sendJson(
+      response,
+      200,
+      await buildAutoCodeBaseline({
+        q: url.searchParams.get("q"),
+        make: url.searchParams.get("make"),
+        year: url.searchParams.get("year"),
+        limit: url.searchParams.get("limit"),
+      }),
+    );
     return;
   }
 

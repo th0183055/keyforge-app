@@ -32,7 +32,7 @@ The included `render.yaml` is a Render Blueprint for the same setup. If the depl
 - VIN lookup with NHTSA decode, local vPIC catalog matching, key reference guidance, and worked-job learning
 - Part History, Proof Vault, and programmer coverage proof from saved jobs
 - Proof Vault attachments with Cloudflare R2 support and browser/local fallback
-- Code Desk starter depth-space cards plus authorized CSV/JSON code import
+- Code Desk starter depth-space cards, automotive year/make/model baseline, and authorized CSV/JSON code import
 - Trust Center
 - Initial backend resource and route contract
 
@@ -49,7 +49,9 @@ Attachments work locally without extra setup. For Render production, set Cloudfl
 
 ## Code Desk Imports
 
-Code Desk includes starter residential cards and automotive templates for common families such as Chrysler Y164, Ford H92/H94, GM HU100, Toyota/Lexus, Honda/Acura, and Nissan/Infiniti. Import only authorized code records and exact depth-space cards you are allowed to use.
+Code Desk includes starter residential cards and automotive templates for common families such as Chrysler Y164, Ford H92/H94, GM HU100, Toyota/Lexus, Honda/Acura, Nissan/Infiniti, Hyundai/Kia, Mazda, Subaru, VW/Audi, and European high-security inserts. Import only authorized code records and exact depth-space cards you are allowed to use.
+
+The automotive baseline view is generated from the local programming reference plus the local vPIC identity catalog. It shows year/make/model coverage, likely key-system family, programming/security clues, import readiness, and saved-job proof coverage. It does not bundle proprietary code-series data; authorized code records and depth-space cards can be imported when you have the right to use them.
 
 Code CSV/TSV/JSON imports can include columns such as `system`, `keyway`, `code`, `bitting`, `vehicle`, `partNumber`, `source`, and `notes`.
 

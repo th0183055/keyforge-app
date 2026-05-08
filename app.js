@@ -27,6 +27,7 @@ let proofVaultStorageMode = "browser-local";
 let proofVaultAttachmentMaxBytes = 1_500_000;
 let codeDeskImportedRecords = [];
 let codeDeskCustomSystems = [];
+let latestCodeDeskAutoBaseline = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
@@ -100,6 +101,10 @@ const importCodeDeskButton = document.querySelector("#importCodeDesk");
 const exportCodeDeskButton = document.querySelector("#exportCodeDesk");
 const clearCodeDeskButton = document.querySelector("#clearCodeDesk");
 const codeDeskImportInput = document.querySelector("#codeDeskImportInput");
+const codeDeskAutoForm = document.querySelector("#codeDeskAutoForm");
+const codeDeskAutoStatus = document.querySelector("#codeDeskAutoStatus");
+const codeDeskAutoBaseline = document.querySelector("#codeDeskAutoBaseline");
+const exportCodeDeskAutoButton = document.querySelector("#exportCodeDeskAuto");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -117,7 +122,10 @@ function showView(id) {
   closeMobileMenu();
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
-  if (id === "code-desk") renderCodeDesk();
+  if (id === "code-desk") {
+    renderCodeDesk();
+    if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
+  }
 }
 
 function setMobileMenu(open) {
@@ -3950,6 +3958,96 @@ const codeDeskSystems = [
     cardRequired: true,
     notes: ["Nissan/Infiniti systems split by keyway, prox generation, and insert style.", "Use authorized code data only after customer proof is logged."],
   },
+  {
+    id: "auto-hyundai-kia",
+    name: "HY/KIA / Hyundai-Kia",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["HY15", "HY18", "HY18R", "HY20", "KK12", "HYUNDAI", "KIA"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Hyundai/Kia systems split heavily by model year, smart key platform, and emergency insert.", "Import the exact card before measurement snapping."],
+  },
+  {
+    id: "auto-mazda",
+    name: "MAZ24/MZ31 / Mazda",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["MAZ24", "MAZ24R", "MZ31", "X249", "MAZDA"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Mazda key systems vary by prox generation and keyway.", "Use imported cards and saved-job proof before cutting production keys."],
+  },
+  {
+    id: "auto-subaru",
+    name: "SUB/DAT / Subaru",
+    category: "Automotive",
+    family: "Automotive edge/high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["SUB4", "DAT17", "B110", "SUBARU"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["Subaru applications split by blade profile and prox generation.", "Confirm blank and immobilizer path against the saved job or imported data."],
+  },
+  {
+    id: "auto-vw-audi",
+    name: "HU66/HU162 / VW-Audi",
+    category: "Automotive",
+    family: "Automotive high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["HU66", "HU66T6", "HU162T", "VOLKSWAGEN", "AUDI"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["VW/Audi laser systems require exact card, side, and stop setup.", "Treat programming/security data as verify-first unless proven by job history."],
+  },
+  {
+    id: "auto-euro-high-security",
+    name: "European high-security",
+    category: "Automotive",
+    family: "Automotive high security",
+    source: "Automotive template - import exact depth-space card",
+    blanks: ["HU64", "HU92", "HU100R", "Emergency insert"],
+    cuts: "",
+    stop: "Card-specific",
+    spaces: [],
+    depths: {},
+    macs: "Card",
+    cardRequired: true,
+    notes: ["BMW/Mercedes style systems need exact card and strict authorization workflow.", "Use this only as a parking place until the verified system is imported."],
+  },
+  {
+    id: "auto-generic",
+    name: "Verify keyway/card",
+    category: "Automotive",
+    family: "Automotive verify-first",
+    source: "Automotive template placeholder",
+    blanks: [],
+    cuts: "",
+    stop: "Verify",
+    spaces: [],
+    depths: {},
+    macs: "Verify",
+    cardRequired: true,
+    notes: ["Use this when the app knows the vehicle but not enough to suggest a family.", "Import a verified depth-space card and authorized code data before production work."],
+  },
 ];
 
 function loadCodeDeskImports() {
@@ -4469,6 +4567,121 @@ function exportCodeDeskRecords() {
     systems: codeDeskAvailableSystems().map(({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom }) => ({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom })),
   });
   if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk records exported.";
+}
+
+function renderAutoDatabaseSupport(items = []) {
+  return items
+    .slice(0, 5)
+    .map(
+      (item) => `
+        <div>
+          <span>${escapeHtml(item.status || "ready")}</span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <small>${escapeHtml(item.gives || "")}</small>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderCodeDeskAutoRow(row) {
+  const security = row.security?.length ? row.security.join(" + ") : "No PIN/online flag";
+  const readiness = row.sourceReadiness || {};
+  return `
+    <article class="auto-baseline-card">
+      <div class="history-job-head">
+        <div>
+          <span>${escapeHtml([row.ignitionType || "Vehicle", row.programMethod].filter(Boolean).join(" | ") || "Verify")}</span>
+          <strong>${escapeHtml([row.year, row.make, row.model].filter(Boolean).join(" "))}</strong>
+        </div>
+        <span class="status">${escapeHtml(row.template?.confidence || "verify")}</span>
+      </div>
+      <div class="auto-baseline-grid">
+        <div><small>Key system</small><strong>${escapeHtml(row.template?.name || "Verify keyway")}</strong></div>
+        <div><small>Blanks / keyway</small><strong>${escapeHtml((row.template?.blanks || []).join(" / ") || "Import/verify")}</strong></div>
+        <div><small>Security</small><strong>${escapeHtml(security)}</strong></div>
+        <div><small>Program</small><strong>${escapeHtml(row.allKeysLostSupported ? "AKL supported" : "Verify AKL")}</strong></div>
+      </div>
+      <div class="part-chip-row">
+        <span class="part-chip">${escapeHtml(`Identity: ${readiness.vehicleIdentity || "verify"}`)}</span>
+        <span class="part-chip">${escapeHtml(`Programming: ${readiness.programming || "verify"}`)}</span>
+        <span class="part-chip">${escapeHtml(`Code lookup: ${readiness.codeLookup || "import ready"}`)}</span>
+        <span class="part-chip">${escapeHtml(`Depth-space: ${readiness.depthSpace || "import ready"}`)}</span>
+        <button class="secondary-action small" type="button" data-code-system="${escapeHtml(row.template?.id || "auto-generic")}">Open Template</button>
+      </div>
+      <div class="auto-source-list">
+        ${renderAutoDatabaseSupport(row.databaseSupport)}
+      </div>
+      ${row.notes ? `<p class="muted-copy">${escapeHtml(row.notes)}</p>` : ""}
+    </article>
+  `;
+}
+
+function renderCodeDeskAutoBaseline(payload = {}) {
+  if (!codeDeskAutoBaseline) return;
+  latestCodeDeskAutoBaseline = payload;
+  const rows = payload.rows || [];
+  codeDeskAutoBaseline.innerHTML = `
+    <section class="code-desk-summary-grid">
+      <article class="metric">
+        <span>Rows</span>
+        <strong>${escapeHtml(payload.totalRows || 0)}</strong>
+        <p>${escapeHtml(`${payload.returnedRows || rows.length} shown`)}</p>
+      </article>
+      <article class="metric">
+        <span>Makes</span>
+        <strong>${escapeHtml(payload.makes?.length || 0)}</strong>
+        <p>${escapeHtml((payload.makes || []).slice(0, 4).join(" / ") || "No makes")}</p>
+      </article>
+      <article class="metric">
+        <span>Years</span>
+        <strong>${escapeHtml(payload.years?.length || 0)}</strong>
+        <p>${escapeHtml(payload.years?.length ? `${payload.years[payload.years.length - 1]}-${payload.years[0]}` : "No years")}</p>
+      </article>
+      <article class="metric">
+        <span>Code Data</span>
+        <strong>Import-ready</strong>
+        <p>Authorized code records and depth-space cards</p>
+      </article>
+    </section>
+    <div class="auto-baseline-list">
+      ${
+        rows.length
+          ? rows.slice(0, 120).map(renderCodeDeskAutoRow).join("")
+          : `<article class="assistant-card"><strong>No auto baseline rows matched</strong><p>Try a make, model, year, keyway, or programming method.</p></article>`
+      }
+    </div>
+  `;
+}
+
+async function loadCodeDeskAutoBaseline(query = codeDeskAutoForm?.elements.autoQuery?.value || "") {
+  if (!codeDeskAutoBaseline) return;
+  try {
+    if (codeDeskAutoStatus) codeDeskAutoStatus.textContent = "Loading automotive baseline...";
+    const year = cleanInput(codeDeskAutoForm?.elements.autoYear?.value || "");
+    const make = cleanInput(codeDeskAutoForm?.elements.autoMake?.value || "");
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (year) params.set("year", year);
+    if (make) params.set("make", make);
+    params.set("limit", "500");
+    const payload = await api(`/api/code-desk/auto-baseline?${params.toString()}`);
+    renderCodeDeskAutoBaseline(payload);
+    if (codeDeskAutoStatus) codeDeskAutoStatus.textContent = `Loaded ${payload.returnedRows || 0} of ${payload.totalRows || 0} auto baseline rows.`;
+  } catch (error) {
+    if (codeDeskAutoStatus) codeDeskAutoStatus.textContent = error.message;
+    codeDeskAutoBaseline.innerHTML = `<article class="assistant-card"><strong>Auto baseline unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+async function exportCodeDeskAutoBaseline() {
+  try {
+    const payload = await api("/api/code-desk/auto-baseline?limit=20000");
+    downloadJson(`timlock-auto-code-baseline-${new Date().toISOString().slice(0, 10)}.json`, payload);
+    if (codeDeskAutoStatus) codeDeskAutoStatus.textContent = `Exported ${payload.returnedRows || 0} auto baseline rows.`;
+  } catch (error) {
+    if (codeDeskAutoStatus) codeDeskAutoStatus.textContent = `Export failed: ${error.message}`;
+  }
 }
 
 function fillWorkedJobFromCurrentLookup() {
@@ -5739,6 +5952,11 @@ codeDeskImportInput?.addEventListener("change", async () => {
   await importCodeDeskFile(codeDeskImportInput.files?.[0]);
   codeDeskImportInput.value = "";
 });
+codeDeskAutoForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadCodeDeskAutoBaseline();
+});
+exportCodeDeskAutoButton?.addEventListener("click", exportCodeDeskAutoBaseline);
 
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
@@ -5770,6 +5988,20 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const codeSystemButton = event.target.closest("[data-code-system]");
+  if (codeSystemButton) {
+    renderCodeDesk();
+    const systemId = codeSystemButton.dataset.codeSystem;
+    const select = codeDeskForm?.elements.system;
+    if (select && codeDeskAvailableSystems().some((system) => system.id === systemId)) {
+      select.value = systemId;
+      if (codeDeskResult) codeDeskResult.dataset.ready = "";
+      renderCodeDesk();
+      codeDeskForm.elements.query?.focus();
+      if (codeDeskStatus) codeDeskStatus.textContent = `${selectedCodeDeskSystem().name} selected. Import the exact depth-space card before production cutting.`;
+    }
+  }
+
   const scannerCloseButton = event.target.closest("[data-close-scanner]");
   if (scannerCloseButton) {
     stopVinScanner();

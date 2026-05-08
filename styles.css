@@ -4607,7 +4607,23 @@ textarea:focus {
   margin-bottom: 12px;
 }
 
+.code-desk-auto-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #dce2e8;
+}
+
+.code-desk-auto-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(110px, 0.4fr) minmax(150px, 0.6fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
 .code-desk-form label,
+.code-desk-auto-form label,
 .part-history-form label {
   display: grid;
   gap: 7px;
@@ -4620,6 +4636,7 @@ textarea:focus {
 
 .code-desk-form input,
 .code-desk-form select,
+.code-desk-auto-form input,
 .part-history-form input {
   width: 100%;
   border: 1px solid #cfd5dc;
@@ -4634,6 +4651,7 @@ textarea:focus {
 
 .code-desk-form input:focus,
 .code-desk-form select:focus,
+.code-desk-auto-form input:focus,
 .part-history-form input:focus {
   outline: 2px solid rgba(79, 89, 101, 0.2);
   border-color: var(--accent);
@@ -4651,7 +4669,14 @@ textarea:focus {
   gap: 14px;
 }
 
+.code-desk-auto-baseline,
+.auto-baseline-list {
+  display: grid;
+  gap: 14px;
+}
+
 .code-desk-card,
+.auto-baseline-card,
 .code-desk-record {
   display: grid;
   gap: 12px;
@@ -4659,6 +4684,53 @@ textarea:focus {
   border-radius: 6px;
   background: rgba(246, 248, 250, 0.92);
   padding: 14px;
+}
+
+.auto-baseline-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 250, 0.96));
+}
+
+.auto-baseline-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auto-baseline-grid div,
+.auto-source-list div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 10px;
+  background: white;
+}
+
+.auto-baseline-grid small,
+.auto-source-list span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.auto-baseline-grid strong,
+.auto-source-list strong {
+  color: var(--accent-dark);
+  overflow-wrap: anywhere;
+}
+
+.auto-source-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.auto-source-list small {
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .code-cut-table {
@@ -5067,8 +5139,10 @@ textarea:focus {
 @media (max-width: 760px) {
   .part-history-form,
   .code-desk-form,
+  .code-desk-auto-form,
   .code-desk-summary-grid,
   .code-desk-grid,
+  .auto-baseline-grid,
   .history-summary-grid,
   .history-job-grid,
   .coverage-summary-grid,

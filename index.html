@@ -235,6 +235,37 @@
                 <p>Use starter cards and automotive templates. Import authorized code records or exact depth-space cards for production lookup.</p>
               </article>
             </div>
+            <section class="code-desk-auto-panel">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Automotive baseline</p>
+                  <h3>Year / make / model coverage</h3>
+                </div>
+                <button class="secondary-action small" type="button" id="exportCodeDeskAuto">Export Baseline</button>
+              </div>
+              <form id="codeDeskAutoForm" class="code-desk-auto-form">
+                <label>
+                  Search vehicle, keyway, method
+                  <input name="autoQuery" placeholder="2020 Accord, HU100, Ford, all keys lost" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                </label>
+                <label>
+                  Year
+                  <input name="autoYear" inputmode="numeric" maxlength="4" placeholder="Any" autocomplete="off" />
+                </label>
+                <label>
+                  Make
+                  <input name="autoMake" placeholder="Any" autocomplete="off" />
+                </label>
+                <button class="secondary-action" type="submit">Search Auto</button>
+              </form>
+              <div class="form-status" id="codeDeskAutoStatus"></div>
+              <div class="code-desk-auto-baseline" id="codeDeskAutoBaseline">
+                <article class="assistant-card">
+                  <strong>Auto baseline loading</strong>
+                  <p>Year/make/model rows will show available identity, programming, code import, depth-space, and proof coverage.</p>
+                </article>
+              </div>
+            </section>
           </section>
         </section>
 
