@@ -2297,8 +2297,34 @@ function programmerPercent(item, fallback = 50) {
   return fallback;
 }
 
-function programmerOptionKey(item, index) {
-  return String([item.platform || item.name, item.role, item.sourceId, item.confidencePercent, index].filter(Boolean).join("|"))
+function canonicalProgrammerName(value) {
+  const text = cleanInput(value);
+  const normalized = text.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+  if (!normalized) return "";
+  if (/\bSMART\s*PRO\b/.test(normalized) || /ADVANCED DIAGNOSTICS/.test(normalized) || /\bMYKEYS\b/.test(normalized)) return "Advanced Diagnostics Smart Pro";
+  if (/AUTEL|MAXIIM|\bIM508\b|\bIM608\b|\bKM100\b/.test(normalized)) return "Autel MaxiIM";
+  if (/XHORSE|\bVVDI\b|KEY TOOL/.test(normalized)) return "Xhorse VVDI";
+  if (/OBDSTAR|\bX300\b/.test(normalized)) return "OBDSTAR";
+  if (/XTOOL|\bX100\b/.test(normalized)) return "XTOOL";
+  if (/LONSDOR|\bK518\b/.test(normalized)) return "Lonsdor K518";
+  if (/SMARTBOX/.test(normalized)) return "SmartBox";
+  if (/LAUNCH|X431/.test(normalized)) return "Launch X-431";
+  if (/TOPDON/.test(normalized)) return "Topdon";
+  if (/TIS|TECHSTREAM/.test(normalized)) return "Toyota TIS / Techstream";
+  if (/FDRS|FJDS|FORD IDS|MOTORCRAFT/.test(normalized)) return "Ford FDRS / IDS";
+  if (/TECHLINE|SPS|GDS2|GM MDI/.test(normalized)) return "GM Techline / SPS";
+  if (/WITECH|TECHAUTHORITY/.test(normalized)) return "Stellantis wiTECH";
+  if (/\bI HDS\b|\bIHDS\b|HONDA SERVICE EXPRESS/.test(normalized)) return "Honda i-HDS";
+  if (/CONSULT/.test(normalized)) return "Nissan CONSULT";
+  if (/\bGDS\b|HYUNDAI TECHLINE|KIA TECHLINE/.test(normalized)) return "Hyundai/Kia GDS";
+  if (/ODIS/.test(normalized)) return "VW/Audi ODIS";
+  if (/ISTA|BMW AOS|ICOM/.test(normalized)) return "BMW ISTA";
+  if (/XENTRY/.test(normalized)) return "Mercedes-Benz XENTRY";
+  return text;
+}
+
+function programmerOptionKey(item) {
+  return String(canonicalProgrammerName([item.platform, item.name].filter(Boolean).join(" ")) || item.name || item.platform || "Programmer path")
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
@@ -2306,13 +2332,31 @@ function programmerOptionKey(item, index) {
 
 function programmerCoverageOptions(profile) {
   const items = profile.jobKit?.programmerCoverage?.length ? profile.jobKit.programmerCoverage : profile.jobKit?.programmers || [];
-  return items
-    .map((item, index) => ({
+  const merged = new Map();
+  items
+    .map((item) => ({
       ...item,
-      key: programmerOptionKey(item, index),
+      name: canonicalProgrammerName([item.platform, item.name].filter(Boolean).join(" ")) || item.name,
+      key: programmerOptionKey(item),
       confidencePercent: programmerPercent(item),
     }))
-    .sort((a, b) => b.confidencePercent - a.confidencePercent || String(a.name || "").localeCompare(String(b.name || "")));
+    .forEach((item) => {
+      const existing = merged.get(item.key);
+      if (!existing || item.confidencePercent > existing.confidencePercent) {
+        merged.set(item.key, {
+          ...(existing || {}),
+          ...item,
+          evidence: [...new Set([...(existing?.evidence || []), ...(item.evidence || [])].filter(Boolean))],
+          models: [...new Set([...(existing?.models || []), ...(item.models || [])].filter(Boolean))],
+        });
+      } else {
+        existing.evidence = [...new Set([...(existing.evidence || []), ...(item.evidence || [])].filter(Boolean))];
+        existing.models = [...new Set([...(existing.models || []), ...(item.models || [])].filter(Boolean))];
+      }
+    });
+  return Array.from(merged.values()).sort(
+    (a, b) => b.confidencePercent - a.confidencePercent || String(a.name || "").localeCompare(String(b.name || "")),
+  );
 }
 
 function selectedProgrammerOption(profile) {
@@ -2357,10 +2401,13 @@ function programmerEvidenceText(item) {
   return "";
 }
 
-function programmerLane(item) {
-  if (/OEM/i.test(item.role || "")) return "OEM fallback";
-  if (item.platform || /Aftermarket/i.test(`${item.role} ${item.name}`)) return "Aftermarket";
-  return "Saved / verified";
+function programmerBadge(item) {
+  const text = [item.role, item.source, item.confidence].filter(Boolean).join(" ");
+  if (/worked|shop-success|shop evidence|shop-confirmed/i.test(text)) return "Shop proof";
+  if (/OEM/i.test(text)) return "OEM fallback";
+  if (/community/i.test(text)) return "Community clue";
+  if (/public|coverage clue|aftermarket/i.test(text) || item.sourceUrl || item.platform) return "Coverage clue";
+  return "Programmer path";
 }
 
 function renderProgrammerCompactOption(item) {
@@ -2369,7 +2416,7 @@ function renderProgrammerCompactOption(item) {
   return `
     <button class="programmer-compact-option ${selected ? "active" : ""}" type="button" data-select-programmer="${escapeHtml(item.key)}">
       <div>
-        <span>${escapeHtml(programmerLane(item))}</span>
+        <span>${escapeHtml(programmerBadge(item))}</span>
         <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
         <p>${escapeHtml(programmerSummaryText(item))}</p>
         ${programmerEvidenceText(item) ? `<small>${escapeHtml(programmerEvidenceText(item))}</small>` : ""}
@@ -2412,48 +2459,37 @@ function renderProgrammerCoverageScreen(profile) {
     `;
   }
   const options = programmerCoverageOptions(profile);
-  const oemOptions = options.filter((item) => /OEM/i.test(item.role || ""));
-  const savedOptions = options.filter((item) => !oemOptions.includes(item) && !item.platform && !/Aftermarket/i.test(`${item.role} ${item.name}`));
-  const aftermarketOptions = options.filter((item) => !oemOptions.includes(item) && !savedOptions.includes(item));
-  const topAftermarket = aftermarketOptions.slice(0, 6);
-  const extraAftermarket = aftermarketOptions.slice(6);
+  const primaryOptions = options.slice(0, 6);
+  const extraOptions = options.slice(6);
   return `
     <section class="program-screen programmer-step">
       <div class="programmer-command-head">
         <div>
           <p class="eyebrow">Screen 6</p>
           <h3>Choose programmer path</h3>
-          <p>Tap the path you would actually use. Use the form button to teach TimLock-App what worked after the job.</p>
+          <p>Tap the path you would actually use, then record the outcome after the job to improve future confidence.</p>
         </div>
-        <button class="primary-action" type="button" data-save-selected-job>Enter worked job info</button>
+        <button class="primary-action" type="button" data-save-selected-job>Record worked job</button>
       </div>
       ${renderSelectedKeyMini(snapshot)}
       <div class="job-entry-callout">
-        <strong>Where the form is</strong>
-        <p>Tap <b>Enter worked job info</b> to save exact vehicle, key, Lishi/keyway, part number, programmer, and outcome. That data raises future confidence.</p>
+        <strong>Record the outcome</strong>
+        <p>After the job, save the exact vehicle, key, Lishi/keyway, part number, programmer, and outcome. Future coverage percentages use that proof.</p>
       </div>
       ${
         options.length
           ? `
             <div class="programmer-lanes">
+              <section>
+                <div class="programmer-lane-head">
+                  <span>Recommended path</span>
+                  <strong>Ranked programmer options</strong>
+                </div>
+                ${primaryOptions.map(renderProgrammerCompactOption).join("")}
+              </section>
               ${
-                savedOptions.length
-                  ? `<section><div class="programmer-lane-head"><span>Best starting point</span><strong>Saved / verified path</strong></div>${savedOptions.map(renderProgrammerCompactOption).join("")}</section>`
-                  : ""
-              }
-              ${
-                oemOptions.length
-                  ? `<section><div class="programmer-lane-head"><span>100% fallback</span><strong>OEM path</strong></div>${oemOptions.map(renderProgrammerCompactOption).join("")}</section>`
-                  : ""
-              }
-              ${
-                topAftermarket.length
-                  ? `<section><div class="programmer-lane-head"><span>Coverage clues</span><strong>Aftermarket options</strong></div>${topAftermarket.map(renderProgrammerCompactOption).join("")}</section>`
-                  : ""
-              }
-              ${
-                extraAftermarket.length
-                  ? `<details class="programmer-more"><summary>More aftermarket platforms (${extraAftermarket.length})</summary>${extraAftermarket.map(renderProgrammerCompactOption).join("")}</details>`
+                extraOptions.length
+                  ? `<details class="programmer-more"><summary>More platforms (${extraOptions.length})</summary>${extraOptions.map(renderProgrammerCompactOption).join("")}</details>`
                   : ""
               }
             </div>

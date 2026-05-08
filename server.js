@@ -3077,6 +3077,40 @@ function coverageGroup() {
   };
 }
 
+function programmerDisplayName(value) {
+  const text = cleanString(value);
+  const normalized = text.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+  if (!normalized) return "";
+  if (/\bSMART\s*PRO\b/.test(normalized) || /ADVANCED DIAGNOSTICS/.test(normalized) || /\bMYKEYS\b/.test(normalized)) {
+    return "Advanced Diagnostics Smart Pro";
+  }
+  if (/AUTEL|MAXIIM|\bIM508\b|\bIM608\b|\bKM100\b/.test(normalized)) return "Autel MaxiIM";
+  if (/XHORSE|\bVVDI\b|KEY TOOL/.test(normalized)) return "Xhorse VVDI";
+  if (/OBDSTAR|\bX300\b/.test(normalized)) return "OBDSTAR";
+  if (/XTOOL|\bX100\b/.test(normalized)) return "XTOOL";
+  if (/LONSDOR|\bK518\b/.test(normalized)) return "Lonsdor K518";
+  if (/SMARTBOX/.test(normalized)) return "SmartBox";
+  if (/LAUNCH|X431/.test(normalized)) return "Launch X-431";
+  if (/TOPDON/.test(normalized)) return "Topdon";
+  if (/TIS|TECHSTREAM/.test(normalized)) return "Toyota TIS / Techstream";
+  if (/FDRS|FJDS|FORD IDS|MOTORCRAFT/.test(normalized)) return "Ford FDRS / IDS";
+  if (/TECHLINE|SPS|GDS2|GM MDI/.test(normalized)) return "GM Techline / SPS";
+  if (/WITECH|TECHAUTHORITY/.test(normalized)) return "Stellantis wiTECH";
+  if (/\bI HDS\b|\bIHDS\b|HONDA SERVICE EXPRESS/.test(normalized)) return "Honda i-HDS";
+  if (/CONSULT/.test(normalized)) return "Nissan CONSULT";
+  if (/\bGDS\b|HYUNDAI TECHLINE|KIA TECHLINE/.test(normalized)) return "Hyundai/Kia GDS";
+  if (/ODIS/.test(normalized)) return "VW/Audi ODIS";
+  if (/ISTA|BMW AOS|ICOM/.test(normalized)) return "BMW ISTA";
+  if (/XENTRY/.test(normalized)) return "Mercedes-Benz XENTRY";
+  return text;
+}
+
+function isGenericProgrammerName(value) {
+  return /^(ADVANCED AFTERMARKET PROGRAMMER|VALIDATED AFTERMARKET PROGRAMMER|COVERAGE-VERIFIED PROGRAMMER|PROGRAMMING PATH)$/i.test(
+    cleanString(value),
+  );
+}
+
 function addCoverageJob(group, job, vehicle, partNumbers) {
   group.jobs += 1;
   group.jobIds.add(job.id);
@@ -3085,7 +3119,7 @@ function addCoverageJob(group, job, vehicle, partNumbers) {
   else if (outcome === "warning") group.warnings += 1;
   else group.unknown += 1;
   if (vehicle?.label) group.vehicles.add(vehicle.label);
-  if (job.programmer) group.programmers.add(cleanString(job.programmer));
+  if (job.programmer) group.programmers.add(programmerDisplayName(job.programmer));
   for (const part of partNumbers || []) group.partNumbers.add(part);
 }
 
@@ -3151,7 +3185,7 @@ function buildCoverageDashboard(jobs = [], partsReference = {}) {
     if (!makeGroups.has(makeKey)) makeGroups.set(makeKey, coverageGroup());
     addCoverageJob(makeGroups.get(makeKey), job, vehicle, partNumbers);
 
-    const programmerKey = cleanString(job.programmer) || "Programmer not recorded";
+    const programmerKey = programmerDisplayName(job.programmer) || "Programmer not recorded";
     if (!programmerGroups.has(programmerKey)) programmerGroups.set(programmerKey, coverageGroup());
     addCoverageJob(programmerGroups.get(programmerKey), job, vehicle, partNumbers);
 
@@ -5363,10 +5397,8 @@ function confidencePercentFromLabel(value, fallback = 55) {
 }
 
 function programmerCoverageKey(item) {
-  if (item.platform) {
-    return cleanString([item.platform, item.confidencePercent || item.confidence || ""].filter(Boolean).join("|")).toUpperCase();
-  }
-  return cleanString([item.name, item.role].filter(Boolean).join("|")).toUpperCase();
+  const name = programmerDisplayName([item.platform, item.name].filter(Boolean).join(" ")) || cleanString(item.name || item.platform);
+  return cleanString(name).toUpperCase();
 }
 
 function normalizeProgrammerCoverageItem(item, programmingReference) {
@@ -5376,6 +5408,7 @@ function normalizeProgrammerCoverageItem(item, programmingReference) {
     : confidencePercentFromLabel([item.confidence, item.role, item.detail].filter(Boolean).join(" "), programmingReference ? 70 : 55);
   return {
     ...item,
+    name: programmerDisplayName([item.platform, item.name].filter(Boolean).join(" ")) || cleanString(item.name || item.platform || "Programmer path"),
     models: Array.isArray(item.models) ? item.models.filter(Boolean) : [],
     confidence: `${confidencePercent}%`,
     confidencePercent,
@@ -5392,10 +5425,11 @@ function itemMatchesOemProgrammer(item, oem) {
 function mergeProgrammerCoverage(existing, item) {
   const models = [...new Set([...(existing.models || []), ...(item.models || [])].filter(Boolean))];
   const better = item.confidencePercent > existing.confidencePercent ? item : existing;
+  const supporting = better === item ? existing : item;
   return {
     ...existing,
     ...better,
-    detail: cleanString(existing.detail).length >= cleanString(item.detail).length ? existing.detail : item.detail,
+    detail: cleanString(better.detail || supporting.detail),
     models,
     sourceUrl: existing.sourceUrl || item.sourceUrl,
     evidence: [...new Set([...(existing.evidence || []), ...(item.evidence || [])].filter(Boolean))].slice(0, 5),
@@ -5503,14 +5537,17 @@ function buildJobKit(vehicle, selected, record, programmingReference, reference,
   const shopProgrammerItems = shopEvidenceProgrammerItems(shopEvidence);
   const publicProgrammerItems = publicProgrammerCluesFor(vehicle, publicSources);
   const communityProgrammerItems = communityProgrammerCluesFor(vehicle, publicSources);
-  const rawProgrammerItems = [...profileProgrammerItems, ...shopProgrammerItems, ...vaultProgrammerItems, ...communityProgrammerItems, ...publicProgrammerItems, ...(selected.programmers || [])
+  const actionableProgrammerItems = [...profileProgrammerItems, ...shopProgrammerItems, ...vaultProgrammerItems, ...communityProgrammerItems, ...publicProgrammerItems];
+  const selectedProgrammerItems = (selected.programmers || [])
     .map((item) => ({
       name: cleanString(item.name || "Coverage-verified programmer"),
       role: cleanString(item.type || "Programming path"),
       detail: cleanString(item.notes || programmingReference?.programMethod || "Confirm exact year/model/key-system coverage before programming."),
       confidence: cleanString(item.confidence || (programmingReference ? "high" : "verify")),
       evidence: ["Local key-intelligence record matched this vehicle pattern."],
-    }))];
+    }))
+    .filter((item) => !actionableProgrammerItems.length || !isGenericProgrammerName(item.name));
+  const rawProgrammerItems = [...actionableProgrammerItems, ...selectedProgrammerItems];
   const programmerCoverage = buildProgrammerCoverageList(vehicle, rawProgrammerItems, programmingReference);
   const programmerItems = programmerCoverage.slice(0, 4);
   const toolItems = [
