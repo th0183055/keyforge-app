@@ -21,8 +21,10 @@ let deferredInstallPrompt = null;
 let latestPartHistory = null;
 let workflowActionsOpen = false;
 let latestCoverageDashboard = null;
+let latestProofVault = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
+const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -74,6 +76,13 @@ const partHistoryRecents = document.querySelector("#partHistoryRecents");
 const coverageDashboard = document.querySelector("#coverageDashboard");
 const coverageDashboardStatus = document.querySelector("#coverageDashboardStatus");
 const refreshCoverageDashboardButton = document.querySelector("#refreshCoverageDashboard");
+const proofVaultForm = document.querySelector("#proofVaultForm");
+const proofVaultStatus = document.querySelector("#proofVaultStatus");
+const proofVault = document.querySelector("#proofVault");
+const syncProofVaultButton = document.querySelector("#syncProofVault");
+const exportProofVaultButton = document.querySelector("#exportProofVault");
+const importProofVaultButton = document.querySelector("#importProofVault");
+const proofVaultImportInput = document.querySelector("#proofVaultImportInput");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -89,6 +98,7 @@ function showView(id) {
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
+  if (id === "proof-vault" && !latestProofVault) loadProofVault();
 }
 
 function updateConnectionStatus() {
@@ -3353,6 +3363,284 @@ function renderCoverageDashboard(payload = {}) {
   `;
 }
 
+function proofVaultAttachments() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(proofVaultAttachmentsKey) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveProofVaultAttachments(attachments) {
+  localStorage.setItem(proofVaultAttachmentsKey, JSON.stringify(attachments || {}));
+}
+
+function proofVaultAttachmentCount(attachments = proofVaultAttachments()) {
+  return Object.values(attachments).reduce((count, items) => count + (Array.isArray(items) ? items.length : 0), 0);
+}
+
+function attachmentsForJob(jobId, attachments = proofVaultAttachments()) {
+  return Array.isArray(attachments[jobId]) ? attachments[jobId] : [];
+}
+
+function renderProofAttachment(jobId, attachment) {
+  const isImage = /^image\//.test(attachment.type || "");
+  return `
+    <article class="proof-attachment">
+      ${isImage ? `<img src="${escapeHtml(attachment.dataUrl)}" alt="${escapeHtml(attachment.name || "Proof image")}" loading="lazy" />` : `<span>${escapeHtml((attachment.type || "file").split("/").pop().toUpperCase())}</span>`}
+      <div>
+        <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
+        <small>${escapeHtml([Math.round((attachment.size || 0) / 1024) ? `${Math.round((attachment.size || 0) / 1024)} KB` : "", attachment.createdAt ? new Date(attachment.createdAt).toLocaleString() : ""].filter(Boolean).join(" | "))}</small>
+      </div>
+      <button class="icon-action" type="button" data-remove-proof-attachment="${escapeHtml(attachment.id)}" data-proof-job-id="${escapeHtml(jobId)}" title="Remove attachment">x</button>
+    </article>
+  `;
+}
+
+function renderProofVaultRecord(record, attachments) {
+  const refs = (record.matchedReferences || []).map((reference) => reference.primaryLabel || reference.primary).filter(Boolean);
+  const files = attachmentsForJob(record.id, attachments);
+  return `
+    <article class="proof-record-card">
+      <div class="history-job-head">
+        <div>
+          <span>${escapeHtml(record.outcome?.label || record.status || "Saved proof")}</span>
+          <strong>${escapeHtml(record.title || record.vehicle || "Saved job")}</strong>
+        </div>
+        <span class="status ${record.outcome?.key === "warning" ? "warn" : ""}">${escapeHtml(files.length ? `${files.length} file${files.length === 1 ? "" : "s"}` : "No files")}</span>
+      </div>
+      <div class="history-job-grid">
+        <div><small>Vehicle</small><strong>${escapeHtml(record.vehicle || "Not recorded")}</strong></div>
+        <div><small>VIN</small><strong>${escapeHtml(record.vin || "Not recorded")}</strong></div>
+        <div><small>Programmer</small><strong>${escapeHtml(record.programmer || "Not recorded")}</strong></div>
+        <div><small>Total</small><strong>${escapeHtml(formatMoney(record.price, record.payment))}</strong></div>
+      </div>
+      <div class="history-job-section">
+        <small>Part proof</small>
+        <div class="part-chip-row">${renderPartChips(record.partNumbers, "No part numbers logged")}</div>
+      </div>
+      <div class="history-job-section">
+        <small>OE / cross-reference</small>
+        <div class="part-chip-row">${renderPartChips([record.oemSources || [], refs].flat(), "No linked OE")}</div>
+      </div>
+      <div class="proof-attachment-list">
+        ${files.length ? files.map((attachment) => renderProofAttachment(record.id, attachment)).join("") : `<p>No attachments saved for this job.</p>`}
+      </div>
+      <div class="proof-card-actions">
+        <label class="secondary-action small">
+          Attach Proof
+          <input type="file" accept="image/*,.pdf" data-proof-attach="${escapeHtml(record.id)}" hidden />
+        </label>
+        <button class="secondary-action small" type="button" data-proof-search-part="${escapeHtml((record.partNumbers || [])[0] || record.vin || record.vehicle || "")}">Search This Proof</button>
+      </div>
+      <details>
+        <summary>Notes and tokens</summary>
+        <p>${escapeHtml((record.notes || []).slice(0, 6).join(" | ") || "No notes saved.")}</p>
+        <div class="part-chip-row">${renderPartChips(record.matchedTokens || [], "No matched tokens")}</div>
+      </details>
+    </article>
+  `;
+}
+
+function renderProofVault(payload = {}) {
+  if (!proofVault) return;
+  latestProofVault = payload;
+  const summary = payload.summary || {};
+  const attachments = proofVaultAttachments();
+  const summaryCards = [
+    ["Saved Jobs", summary.totalJobs || 0, `${summary.matchingJobs || 0} shown`],
+    ["Proven", summary.provenJobs || 0, `${summary.warningJobs || 0} warnings`],
+    ["Files", proofVaultAttachmentCount(attachments), "Local evidence attachments"],
+    ["Cross-Refs", summary.matchedReferenceRows || 0, `${summary.referenceRows || 0} reference rows`],
+  ];
+
+  proofVault.innerHTML = `
+    <section class="history-summary-grid">
+      ${summaryCards
+        .map(
+          ([label, value, caption]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(caption)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    <section class="history-action-bar">
+      <div class="badge-row">
+        <span>${escapeHtml(payload.query ? `Search: ${payload.query}` : "All proof")}</span>
+        <span>${escapeHtml(`${summary.unknownJobs || 0} unknown outcomes`)}</span>
+        <span>${escapeHtml(`${localArchivedJobs().length} local archived jobs`)}</span>
+      </div>
+      <button class="secondary-action small" type="button" data-copy-proof-vault-summary>Copy Packet Summary</button>
+    </section>
+    ${
+      payload.partHistory?.programmerEvidence?.programmers?.length
+        ? `<section class="history-section"><div class="panel-header tight"><div><p class="eyebrow">Programmer evidence</p><h3>${escapeHtml(payload.partHistory.primaryIdentifier || payload.query)}</h3></div></div>${renderPartHistoryCoverage(payload.partHistory.programmerEvidence)}</section>`
+        : ""
+    }
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Proof records</p>
+          <h3>${escapeHtml(`${payload.records?.length || 0} record${payload.records?.length === 1 ? "" : "s"}`)}</h3>
+        </div>
+      </div>
+      <div class="proof-record-list">
+        ${
+          payload.records?.length
+            ? payload.records.map((record) => renderProofVaultRecord(record, attachments)).join("")
+            : `<article class="assistant-card"><strong>No proof matched</strong><p>Try an LR#, MW#, OE#, FCC, VIN, programmer, or vehicle search.</p></article>`
+        }
+      </div>
+    </section>
+    <article class="assistant-card">
+      <strong>Vault note</strong>
+      <p>${escapeHtml(payload.proofNote || "Proof Vault uses saved jobs and local attachments.")}</p>
+    </article>
+  `;
+}
+
+async function loadProofVault(query = proofVaultForm?.elements.proofQuery?.value || "") {
+  if (!proofVault) return;
+  try {
+    if (proofVaultStatus) proofVaultStatus.textContent = "Loading proof vault...";
+    const payload = await api("/api/proof-vault", {
+      method: "POST",
+      body: JSON.stringify({ q: cleanInput(query), jobs: localArchivedJobs() }),
+    });
+    renderProofVault(payload);
+    if (proofVaultStatus) proofVaultStatus.textContent = `Vault searched ${payload.summary?.totalJobs || 0} jobs and found ${payload.summary?.matchingJobs || 0} records.`;
+  } catch (error) {
+    if (proofVaultStatus) proofVaultStatus.textContent = error.message;
+    proofVault.innerHTML = `<article class="assistant-card"><strong>Proof Vault unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addProofAttachment(jobId, file) {
+  if (!jobId || !file) return;
+  if (file.size > 1_500_000) {
+    if (proofVaultStatus) proofVaultStatus.textContent = "Attachment is over 1.5 MB. Export the photo smaller, then attach it.";
+    return;
+  }
+  const attachments = proofVaultAttachments();
+  const files = attachmentsForJob(jobId, attachments).slice(0, 5);
+  files.unshift({
+    id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    createdAt: new Date().toISOString(),
+    dataUrl: await fileAsDataUrl(file),
+  });
+  attachments[jobId] = files;
+  saveProofVaultAttachments(attachments);
+  renderProofVault(latestProofVault);
+  if (proofVaultStatus) proofVaultStatus.textContent = `Attached proof to ${jobId}.`;
+}
+
+function removeProofAttachment(jobId, attachmentId) {
+  const attachments = proofVaultAttachments();
+  attachments[jobId] = attachmentsForJob(jobId, attachments).filter((attachment) => attachment.id !== attachmentId);
+  if (!attachments[jobId].length) delete attachments[jobId];
+  saveProofVaultAttachments(attachments);
+  renderProofVault(latestProofVault);
+  if (proofVaultStatus) proofVaultStatus.textContent = "Attachment removed.";
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportProofVaultBackup() {
+  const payload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    jobs: mergeJobLists(jobs, localArchivedJobs()),
+    attachments: proofVaultAttachments(),
+    proofVault: latestProofVault,
+    coverage: latestCoverageDashboard,
+  };
+  downloadJson(`timlock-proof-vault-${new Date().toISOString().slice(0, 10)}.json`, payload);
+  if (proofVaultStatus) proofVaultStatus.textContent = "Proof Vault backup exported.";
+}
+
+async function importProofVaultBackup(file) {
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const importedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+    if (importedJobs.length) rememberJobs(importedJobs);
+    const currentAttachments = proofVaultAttachments();
+    const importedAttachments = payload.attachments && typeof payload.attachments === "object" ? payload.attachments : {};
+    for (const [jobId, items] of Object.entries(importedAttachments)) {
+      const existing = new Map(attachmentsForJob(jobId, currentAttachments).map((attachment) => [attachment.id, attachment]));
+      (Array.isArray(items) ? items : []).forEach((attachment) => {
+        if (attachment?.id) existing.set(attachment.id, attachment);
+      });
+      currentAttachments[jobId] = Array.from(existing.values()).slice(0, 8);
+    }
+    saveProofVaultAttachments(currentAttachments);
+    await syncLocalJobsToServer();
+    await loadJobs();
+    await loadCoverageDashboard();
+    await loadProofVault();
+    if (proofVaultStatus) proofVaultStatus.textContent = `Imported ${importedJobs.length} jobs and ${proofVaultAttachmentCount(importedAttachments)} attachments.`;
+  } catch (error) {
+    if (proofVaultStatus) proofVaultStatus.textContent = `Import failed: ${error.message}`;
+  }
+}
+
+function proofVaultPacketSummary() {
+  const payload = latestProofVault || {};
+  const summary = payload.summary || {};
+  const query = payload.query ? ` for ${payload.query}` : "";
+  const topProgrammer = payload.partHistory?.programmerEvidence?.programmers?.[0];
+  return [
+    `Proof Vault${query}: ${summary.matchingJobs || 0} matching job records from ${summary.totalJobs || 0} saved jobs.`,
+    `${summary.provenJobs || 0} proven, ${summary.warningJobs || 0} warnings, ${summary.unknownJobs || 0} unknown.`,
+    `${proofVaultAttachmentCount()} local evidence attachment${proofVaultAttachmentCount() === 1 ? "" : "s"} available in the vault backup.`,
+    topProgrammer ? `Top programmer evidence: ${topProgrammer.name}, ${topProgrammer.jobs} jobs, ${coveragePercentLabel(topProgrammer.observedCoveragePercent)} observed success.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+async function copyProofVaultSummary() {
+  const text = proofVaultPacketSummary();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (proofVaultStatus) proofVaultStatus.textContent = "Proof packet summary copied.";
+}
+
 function fillWorkedJobFromCurrentLookup() {
   if (!workedJobForm || !latestVinProfile?.vehicle) {
     if (workedJobStatus) workedJobStatus.textContent = "Run a VIN lookup first, then come back here to prefill the job.";
@@ -4584,6 +4872,17 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
 });
 
 refreshCoverageDashboardButton?.addEventListener("click", () => loadCoverageDashboard());
+syncProofVaultButton?.addEventListener("click", async () => {
+  if (proofVaultStatus) proofVaultStatus.textContent = "Syncing local proof...";
+  await syncLocalJobsToServer();
+  await loadProofVault();
+});
+exportProofVaultButton?.addEventListener("click", exportProofVaultBackup);
+importProofVaultButton?.addEventListener("click", () => proofVaultImportInput?.click());
+proofVaultImportInput?.addEventListener("change", async () => {
+  await importProofVaultBackup(proofVaultImportInput.files?.[0]);
+  proofVaultImportInput.value = "";
+});
 
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
@@ -4594,6 +4893,14 @@ if (supplierSelect) {
 }
 
 document.addEventListener("change", (event) => {
+  const proofInput = event.target.closest("[data-proof-attach]");
+  if (proofInput) {
+    addProofAttachment(proofInput.dataset.proofAttach, proofInput.files?.[0]).finally(() => {
+      proofInput.value = "";
+    });
+    return;
+  }
+
   const input = event.target.closest("[data-live-filter]");
   if (!input || !latestVinProfile) return;
 
@@ -4661,6 +4968,26 @@ document.addEventListener("click", (event) => {
   const copyCoverageProofButton = event.target.closest("[data-copy-coverage-proof]");
   if (copyCoverageProofButton) {
     copyCoverageProof();
+    return;
+  }
+
+  const copyProofVaultButton = event.target.closest("[data-copy-proof-vault-summary]");
+  if (copyProofVaultButton) {
+    copyProofVaultSummary();
+    return;
+  }
+
+  const removeProofAttachmentButton = event.target.closest("[data-remove-proof-attachment]");
+  if (removeProofAttachmentButton) {
+    removeProofAttachment(removeProofAttachmentButton.dataset.proofJobId, removeProofAttachmentButton.dataset.removeProofAttachment);
+    return;
+  }
+
+  const proofSearchButton = event.target.closest("[data-proof-search-part]");
+  if (proofSearchButton) {
+    const query = proofSearchButton.dataset.proofSearchPart || "";
+    if (proofVaultForm) proofVaultForm.elements.proofQuery.value = query;
+    loadProofVault(query);
     return;
   }
 
@@ -4988,6 +5315,11 @@ partHistoryForm?.addEventListener("submit", async (event) => {
   } finally {
     submitButton.disabled = false;
   }
+});
+
+proofVaultForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadProofVault(proofVaultForm.elements.proofQuery.value);
 });
 
 keyIntelForm.addEventListener("submit", async (event) => {

@@ -3200,6 +3200,88 @@ function buildCoverageDashboard(jobs = [], partsReference = {}) {
   };
 }
 
+function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = []) {
+  const matchedTokens = searchTokens.length ? partHistoryMatchedTokens(job, searchTokens) : [];
+  const directRows = lookupPartsCrossReferenceRows(partsReference, extractPartHistoryJobTokens(job));
+  const matchedReferenceRows = matchedTokens.length
+    ? referenceRows.filter((row) => (row.tokens || []).some((token) => matchedTokens.includes(token.normalized || compactToken(token.value))))
+    : [];
+  const rowsById = new Map([...matchedReferenceRows, ...directRows].filter(Boolean).map((row) => [row.id, row]));
+  const references = Array.from(rowsById.values())
+    .map(crossReferenceSummary)
+    .slice(0, 6);
+  const partNumbers = uniqueCleanValues([
+    extractPartHistoryJobTokens(job),
+    references.flatMap((reference) => reference.labeledIdentifiers?.map((entry) => `${entry.label} ${entry.value}`) || []),
+  ]).slice(0, 24);
+  const vehicle = coverageVehicleForJob(job);
+  return {
+    id: job.id,
+    title: job.title || job.vehicle || "Saved job",
+    customer: job.customer || "",
+    vehicle: job.vehicle || vehicle.label || "",
+    vin: job.vin || "",
+    service: job.service || "",
+    schedule: job.schedule || job.createdAt || "",
+    status: job.status || "",
+    programmer: job.programmer || "",
+    keyCode: job.keyCode || "",
+    price: job.price || "",
+    payment: job.payment || "",
+    partNumbers,
+    oemSources: uniqueCleanValues(references.flatMap((reference) => reference.oemPartNumbers || [])).slice(0, 16),
+    matchedTokens,
+    matchedReferences: references,
+    notes: job.notes || [],
+    outcome: partHistoryOutcome(job),
+    proofText: partHistoryJobText(job),
+  };
+}
+
+function proofVaultJobMatches(record, compactQuery, searchTokens) {
+  if (!compactQuery && !searchTokens.length) return true;
+  const compactText = compactToken([
+    record.proofText,
+    record.partNumbers || [],
+    record.oemSources || [],
+    record.programmer,
+    record.vehicle,
+    record.vin,
+  ].flat(Infinity).join(" "));
+  return compactText.includes(compactQuery) || searchTokens.some((token) => compactText.includes(token));
+}
+
+function buildProofVault(query, jobs = [], partsReference = {}) {
+  const cleanQuery = cleanString(query);
+  const referenceRows = cleanQuery ? findPartHistoryReferenceRows(partsReference, cleanQuery) : [];
+  const searchTokens = cleanQuery ? partHistorySearchTokens(cleanQuery, referenceRows) : [];
+  const compactQuery = compactToken(cleanQuery);
+  const records = (jobs || [])
+    .map((job) => proofVaultJobRecord(job, partsReference, searchTokens, referenceRows))
+    .filter((record) => proofVaultJobMatches(record, compactQuery, searchTokens))
+    .sort((a, b) => (Date.parse(b.schedule) || 0) - (Date.parse(a.schedule) || 0));
+  const history = cleanQuery ? buildPartHistory(cleanQuery, jobs, partsReference) : null;
+  const coverage = buildCoverageDashboard(jobs, partsReference);
+  return {
+    generatedAt: new Date().toISOString(),
+    query: cleanQuery,
+    summary: {
+      totalJobs: jobs?.length || 0,
+      matchingJobs: records.length,
+      referenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
+      matchedReferenceRows: referenceRows.length,
+      provenJobs: records.filter((record) => record.outcome?.key === "success").length,
+      warningJobs: records.filter((record) => record.outcome?.key === "warning").length,
+      unknownJobs: records.filter((record) => record.outcome?.key === "unknown").length,
+    },
+    records: records.slice(0, 80),
+    coverage,
+    partHistory: history,
+    proofNote:
+      "Proof Vault searches saved jobs, local browser proof, and the parts cross-reference. Attachments live in the browser backup until a full file store is added.",
+  };
+}
+
 function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
   if (!liveSupplierLookup?.products?.length || !shopEvidence?.tokens?.length) return liveSupplierLookup;
   return {
@@ -5683,6 +5765,15 @@ async function handleApi(request, response, pathname) {
     const body = request.method === "POST" ? await readJsonBody(request) : {};
     const partsReference = await readPartsCrossReference();
     sendJson(response, 200, buildCoverageDashboard(mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/proof-vault") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
+    const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
+    const partsReference = await readPartsCrossReference();
+    sendJson(response, 200, buildProofVault(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 

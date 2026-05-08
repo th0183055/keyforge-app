@@ -25,6 +25,7 @@
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
           <button class="nav-item" data-view="part-history">Part History</button>
+          <button class="nav-item" data-view="proof-vault">Proof Vault</button>
           <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -151,6 +152,37 @@
               <article class="assistant-card">
                 <strong>Building proof from saved jobs</strong>
                 <p>Coverage will show observed success by make, programmer, part number, and missing proof gaps.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="proof-vault">
+          <section class="panel wide proof-vault-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Evidence locker</p>
+                <h3>Proof Vault</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="syncProofVault">Sync</button>
+                <button class="secondary-action small" type="button" id="exportProofVault">Export Backup</button>
+                <button class="secondary-action small" type="button" id="importProofVault">Import Backup</button>
+                <input id="proofVaultImportInput" type="file" accept="application/json" hidden />
+              </div>
+            </div>
+            <form id="proofVaultForm" class="part-history-form">
+              <label>
+                Search proof
+                <input name="proofQuery" placeholder="Part, VIN, vehicle, programmer, OE, FCC" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Search Vault</button>
+            </form>
+            <div class="form-status" id="proofVaultStatus"></div>
+            <div class="proof-vault-result" id="proofVault">
+              <article class="assistant-card">
+                <strong>Proof Vault ready</strong>
+                <p>Saved jobs, aliases, programmer evidence, and attachments will appear here.</p>
               </article>
             </div>
           </section>

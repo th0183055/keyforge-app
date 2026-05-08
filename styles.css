@@ -4428,6 +4428,26 @@ textarea:focus {
   margin: 0 auto;
 }
 
+.proof-vault-panel {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.proof-vault-actions,
+.proof-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.proof-vault-result,
+.proof-record-list {
+  display: grid;
+  gap: 14px;
+}
+
 .coverage-dashboard {
   display: grid;
   gap: 14px;
@@ -4501,6 +4521,7 @@ textarea:focus {
 
 .history-reference-panel,
 .history-job-card,
+.proof-record-card,
 .coverage-card,
 .coverage-gap-card {
   border: 1px solid #cfd5dc;
@@ -4659,6 +4680,81 @@ textarea:focus {
   gap: 12px;
 }
 
+.proof-record-card {
+  display: grid;
+  gap: 12px;
+}
+
+.proof-attachment-list {
+  display: grid;
+  gap: 8px;
+}
+
+.proof-attachment-list > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.proof-attachment {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.proof-attachment img,
+.proof-attachment > span {
+  width: 54px;
+  height: 42px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #dce2e8;
+}
+
+.proof-attachment > span {
+  display: grid;
+  place-items: center;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.proof-attachment strong,
+.proof-attachment small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.proof-attachment small {
+  color: var(--muted);
+}
+
+.icon-action {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid #cfd5dc;
+  border-radius: 999px;
+  background: white;
+  color: var(--accent-dark);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.proof-card-actions {
+  justify-content: flex-start;
+}
+
+.proof-card-actions label.secondary-action {
+  cursor: pointer;
+}
+
 .history-job-head {
   display: flex;
   gap: 12px;
@@ -4718,5 +4814,19 @@ textarea:focus {
 
   .history-job-head {
     flex-direction: column;
+  }
+
+  .proof-vault-actions,
+  .proof-card-actions {
+    justify-content: stretch;
+  }
+
+  .proof-vault-actions > *,
+  .proof-card-actions > * {
+    flex: 1 1 140px;
+  }
+
+  .proof-attachment {
+    grid-template-columns: 46px minmax(0, 1fr) auto;
   }
 }
