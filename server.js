@@ -9,7 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "0.0.0.0";
 const dataDir = path.join(__dirname, "data");
-const storePath = path.join(dataDir, "store.json");
+const mutableDataDir = process.env.TIMLOCK_DATA_DIR ? path.resolve(process.env.TIMLOCK_DATA_DIR) : dataDir;
+const storePath = path.join(mutableDataDir, "store.json");
 const keyIntelligencePath = path.join(dataDir, "key-intelligence.json");
 const vinReferencePath = path.join(dataDir, "vin-reference.json");
 const vpicCatalogPath = path.join(dataDir, "vpic-catalog.json");
@@ -18,11 +19,11 @@ const keyInnovationsLabelsPath = path.join(dataDir, "key-innovations-labels.json
 const programmingReferencePath = path.join(dataDir, "programming-reference.json");
 const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const partsCrossReferencePath = path.join(dataDir, "parts-cross-reference.json");
-const supplierAccountsPath = path.join(dataDir, "supplier-accounts.local.json");
-const vehicleProfilesPath = path.join(dataDir, "vehicle-profiles.json");
-const referenceVaultPath = path.join(dataDir, "reference-vault.json");
-const publicReferenceSourcesPath = path.join(dataDir, "public-reference-sources.json");
-const localSecretPath = path.join(dataDir, ".lockforge-secret");
+const supplierAccountsPath = path.join(mutableDataDir, "supplier-accounts.local.json");
+const vehicleProfilesPath = path.join(mutableDataDir, "vehicle-profiles.json");
+const referenceVaultPath = path.join(mutableDataDir, "reference-vault.json");
+const publicReferenceSourcesPath = path.join(mutableDataDir, "public-reference-sources.json");
+const localSecretPath = path.join(mutableDataDir, ".lockforge-secret");
 
 const supplierRegistry = [
   {
@@ -248,7 +249,7 @@ const mimeTypes = {
 };
 
 async function ensureStore() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(storePath)) {
     await writeStore(seedStore);
   }
@@ -260,12 +261,12 @@ async function readStore() {
 }
 
 async function writeStore(store) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`);
 }
 
 async function readVehicleProfiles() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(vehicleProfilesPath)) {
     return { generatedAt: new Date().toISOString(), profiles: [] };
   }
@@ -273,12 +274,12 @@ async function readVehicleProfiles() {
 }
 
 async function writeVehicleProfiles(profiles) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   await writeFile(vehicleProfilesPath, `${JSON.stringify({ ...profiles, updatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
 async function readReferenceVault() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(referenceVaultPath)) {
     return { version: 1, updatedAt: new Date().toISOString(), entries: [] };
   }
@@ -291,12 +292,12 @@ async function readReferenceVault() {
 }
 
 async function writeReferenceVault(vault) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   await writeFile(referenceVaultPath, `${JSON.stringify({ ...vault, updatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
 async function readPublicReferenceSources() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(publicReferenceSourcesPath)) {
     return { generatedAt: "", sources: [], autel: { products: [], coverage: [] }, communityEvidence: [], nhtsa: {} };
   }
@@ -304,7 +305,7 @@ async function readPublicReferenceSources() {
 }
 
 async function writePublicReferenceSources(payload) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   await writeFile(publicReferenceSourcesPath, `${JSON.stringify({ ...payload, generatedAt: new Date().toISOString() }, null, 2)}\n`);
 }
 
@@ -321,7 +322,7 @@ async function writeKeyIntelligence(intelligence) {
 }
 
 async function localVaultKey() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   let secret = process.env.LOCKFORGE_SECRET;
   if (!secret) {
     if (existsSync(localSecretPath)) {
@@ -358,7 +359,7 @@ async function decryptSecret(cipherPayload) {
 }
 
 async function readSupplierAccounts() {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(supplierAccountsPath)) {
     const seed = {
       generatedAt: new Date().toISOString(),
@@ -378,7 +379,7 @@ async function readSupplierAccounts() {
 }
 
 async function writeSupplierAccounts(accounts) {
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(mutableDataDir, { recursive: true });
   await writeFile(supplierAccountsPath, `${JSON.stringify(accounts, null, 2)}\n`);
 }
 
@@ -1491,6 +1492,85 @@ function cleanPartOutcome(input) {
   };
 }
 
+const syncedJobScalarFields = [
+  "id",
+  "title",
+  "customer",
+  "vehicle",
+  "service",
+  "verification",
+  "status",
+  "schedule",
+  "locationName",
+  "address",
+  "phone",
+  "contact",
+  "vin",
+  "mileage",
+  "keyCode",
+  "price",
+  "payment",
+  "programmer",
+  "sequence",
+  "createdAt",
+  "importedAt",
+  "sourceLine",
+];
+
+function cleanSyncedJob(input = {}) {
+  if (!input || typeof input !== "object") return null;
+  const job = {};
+  for (const field of syncedJobScalarFields) {
+    if (input[field] !== undefined && input[field] !== null) job[field] = cleanString(input[field]);
+  }
+  job.id = job.id || randomUUID();
+  job.tags = listFromText(input.tags).slice(0, 24);
+  job.notes = listFromText(input.notes).slice(0, 80);
+  const usefulText = [job.title, job.vehicle, job.service, job.verification, job.programmer, job.sequence, job.keyCode, job.vin, job.tags, job.notes]
+    .flat(Infinity)
+    .map(cleanString)
+    .filter(Boolean)
+    .join(" ");
+  if (!usefulText) return null;
+  return job;
+}
+
+function mergeSyncedJobs(store, incomingJobs = []) {
+  const existing = new Map((store.jobs || []).map((job) => [cleanString(job.id), job]));
+  const merged = [...(store.jobs || [])];
+  let imported = 0;
+  let updated = 0;
+
+  for (const raw of incomingJobs.slice(0, 1000)) {
+    const job = cleanSyncedJob(raw);
+    if (!job) continue;
+    const existingJob = existing.get(job.id);
+    if (existingJob) {
+      const nextJob = { ...existingJob, ...job, tags: uniqueCleanValues([existingJob.tags || [], job.tags || []]), notes: uniqueCleanValues([existingJob.notes || [], job.notes || []]) };
+      const index = merged.findIndex((item) => item.id === job.id);
+      if (JSON.stringify(merged[index]) !== JSON.stringify(nextJob)) {
+        merged[index] = nextJob;
+        updated += 1;
+      }
+    } else {
+      existing.set(job.id, job);
+      merged.unshift(job);
+      imported += 1;
+    }
+  }
+
+  if (imported || updated) {
+    store.jobs = merged.sort((a, b) => (Date.parse(b.createdAt || b.schedule) || 0) - (Date.parse(a.createdAt || a.schedule) || 0));
+  }
+  return { imported, updated, total: store.jobs?.length || 0 };
+}
+
+function mergedSearchJobs(storeJobs = [], extraJobs = []) {
+  const store = { jobs: [...storeJobs] };
+  mergeSyncedJobs(store, extraJobs);
+  return store.jobs || [];
+}
+
 function vehicleProfileKey(vehicle) {
   return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim]
     .map((item) => normalizeVehicleText(item).replace(/\s+/g, "-"))
@@ -2525,7 +2605,7 @@ function tokenMatchesProduct(token, product) {
 
 function jobReferenceTokens(job) {
   const tokens = new Set();
-  const text = [job.programmer, job.sequence, job.keyCode, ...(job.notes || [])].filter(Boolean).join(" ");
+  const text = partHistoryJobText(job);
   for (const match of text.matchAll(/\b(?:[A-Z]{2,5}\d{3,5}|\d{3}-R\d{4}R?|[A-Z0-9]{3,}-[A-Z0-9]{3,})\b/gi)) {
     tokens.add(match[0].toUpperCase());
   }
@@ -2706,8 +2786,15 @@ function partHistorySearchTokens(query, referenceRows) {
   return Array.from(tokens).filter(partHistoryUsefulToken).sort((a, b) => b.length - a.length || a.localeCompare(b));
 }
 
+function flattenSearchValues(value, depth = 0) {
+  if (depth > 3 || value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => flattenSearchValues(item, depth + 1));
+  if (typeof value === "object") return Object.values(value).flatMap((item) => flattenSearchValues(item, depth + 1));
+  return [cleanString(value)];
+}
+
 function partHistoryJobText(job) {
-  return [
+  const knownValues = [
     job.title,
     job.vehicle,
     job.vin,
@@ -2718,17 +2805,29 @@ function partHistoryJobText(job) {
     job.sequence,
     job.keyCode,
     job.mileage,
+    job.exactPart,
+    job.partNumber,
+    job.sku,
+    job.oem,
+    job.fcc,
     job.tags || [],
     job.notes || [],
-  ]
+    job.part || {},
+    job.parts || [],
+    job.reference || {},
+    job.outcome || {},
+    job.job || {},
+  ];
+  return knownValues
     .flat(Infinity)
+    .flatMap((value) => flattenSearchValues(value))
     .filter(Boolean)
     .join(" ");
 }
 
 function partHistoryMatchedTokens(job, searchTokens) {
   const compactText = compactToken(partHistoryJobText(job));
-  return searchTokens.filter((token) => compactText.includes(token));
+  return searchTokens.filter((token) => compactText.includes(token) || (token.length >= 6 && compactText.includes(token.replace(/^OEM/, ""))));
 }
 
 function extractPartHistoryJobTokens(job) {
@@ -2746,7 +2845,7 @@ function extractPartHistoryJobTokens(job) {
       if (partHistoryUsefulToken(match[0])) tokens.add(match[0].replace(/,$/, ""));
     }
   }
-  return Array.from(tokens).slice(0, 16);
+  return Array.from(tokens).slice(0, 32);
 }
 
 function partHistoryOutcome(job) {
@@ -2858,6 +2957,7 @@ function buildPartHistory(query, jobs, partsReference) {
     referenceStats: {
       totalReferenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
       matchedReferenceRows: referenceRows.length,
+      searchableJobCount: jobs?.length || 0,
     },
   };
 }
@@ -5566,21 +5666,23 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
-  if (request.method === "GET" && pathname === "/api/part-history") {
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/part-history") {
     const url = new URL(request.url, `http://${request.headers.host}`);
-    const query = cleanString(url.searchParams.get("q"));
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
+    const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
     if (!query) {
       sendError(response, 400, "Enter an LR#, MW#, OE#, TI#, FCC, or part number.");
       return;
     }
     const partsReference = await readPartsCrossReference();
-    sendJson(response, 200, buildPartHistory(query, store.jobs, partsReference));
+    sendJson(response, 200, buildPartHistory(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 
-  if (request.method === "GET" && pathname === "/api/coverage-dashboard") {
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/coverage-dashboard") {
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
     const partsReference = await readPartsCrossReference();
-    sendJson(response, 200, buildCoverageDashboard(store.jobs, partsReference));
+    sendJson(response, 200, buildCoverageDashboard(mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 
@@ -5594,6 +5696,14 @@ async function handleApi(request, response, pathname) {
     store.jobs.unshift(job);
     await writeStore(store);
     sendJson(response, 201, { job });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/jobs/sync") {
+    const body = await readJsonBody(request);
+    const result = mergeSyncedJobs(store, Array.isArray(body.jobs) ? body.jobs : []);
+    if (result.imported || result.updated) await writeStore(store);
+    sendJson(response, 200, { ...result, jobs: store.jobs });
     return;
   }
 

@@ -22,6 +22,7 @@ let latestPartHistory = null;
 let workflowActionsOpen = false;
 let latestCoverageDashboard = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
+const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -2817,6 +2818,52 @@ function cleanInput(value) {
   return String(value ?? "").trim();
 }
 
+function jobSortTime(job = {}) {
+  return Date.parse(job.createdAt || job.importedAt || job.schedule || "") || 0;
+}
+
+function mergeJobLists(...lists) {
+  const map = new Map();
+  lists.flat().forEach((job) => {
+    if (!job || typeof job !== "object") return;
+    const id = cleanInput(job.id) || `${cleanInput(job.title)}-${cleanInput(job.vehicle)}-${cleanInput(job.createdAt || job.schedule)}`;
+    if (!id) return;
+    map.set(id, { ...(map.get(id) || {}), ...job, id });
+  });
+  return Array.from(map.values()).sort((a, b) => jobSortTime(b) - jobSortTime(a));
+}
+
+function localArchivedJobs() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(localJobArchiveKey) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((job) => job && typeof job === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberJobs(items = []) {
+  const merged = mergeJobLists(localArchivedJobs(), items).slice(0, 1000);
+  localStorage.setItem(localJobArchiveKey, JSON.stringify(merged));
+  return merged;
+}
+
+async function syncLocalJobsToServer() {
+  const archived = localArchivedJobs();
+  if (!archived.length) return;
+  try {
+    const result = await api("/api/jobs/sync", {
+      method: "POST",
+      body: JSON.stringify({ jobs: archived }),
+    });
+    jobs = mergeJobLists(result.jobs || [], archived);
+    rememberJobs(jobs);
+    renderJobs();
+  } catch {
+    // Local proof still feeds part-history searches even when the server sync is unavailable.
+  }
+}
+
 function workedJobPayloadFromForm(data) {
   const vin = normalizeVinInput(data.get("vin"));
   const year = cleanInput(data.get("year"));
@@ -4462,16 +4509,21 @@ function normalizeVinInput(value) {
 
 async function loadJobs() {
   const payload = await api("/api/jobs");
-  jobs = payload.jobs;
+  jobs = mergeJobLists(payload.jobs || [], localArchivedJobs());
   selectedJobId = jobs[0]?.id || null;
+  rememberJobs(jobs);
   renderJobs();
+  syncLocalJobsToServer();
 }
 
 async function loadCoverageDashboard() {
   if (!coverageDashboard) return;
   try {
     if (coverageDashboardStatus) coverageDashboardStatus.textContent = "Calculating observed coverage proof...";
-    const payload = await api("/api/coverage-dashboard");
+    const payload = await api("/api/coverage-dashboard", {
+      method: "POST",
+      body: JSON.stringify({ jobs: localArchivedJobs() }),
+    });
     renderCoverageDashboard(payload);
     if (coverageDashboardStatus) coverageDashboardStatus.textContent = `Updated coverage from ${payload.summary?.automotiveJobs || 0} automotive jobs.`;
   } catch (error) {
@@ -4713,6 +4765,7 @@ document.addEventListener("click", (event) => {
         if (result.job) {
           jobs.unshift(result.job);
           selectedJobId = result.job.id;
+          rememberJobs([result.job]);
           renderJobs();
           loadCoverageDashboard();
         }
@@ -4773,6 +4826,7 @@ jobForm.addEventListener("submit", async (event) => {
     });
     jobs.unshift(payload.job);
     selectedJobId = payload.job.id;
+    rememberJobs([payload.job]);
     renderJobs();
     loadCoverageDashboard();
     jobForm.reset();
@@ -4829,6 +4883,7 @@ document.addEventListener("submit", async (event) => {
     if (result.profile) latestVinProfile.verifiedProfile = result.profile;
     jobs.unshift(result.job);
     selectedJobId = result.job.id;
+    rememberJobs([result.job]);
     renderJobs();
     loadCoverageDashboard();
     closeJobSaveModal();
@@ -4857,6 +4912,7 @@ workedJobForm?.addEventListener("submit", async (event) => {
     const result = await saveWorkedJobPayload(payload);
     jobs.unshift(result.job);
     selectedJobId = result.job.id;
+    rememberJobs([result.job]);
     renderJobs();
     loadCoverageDashboard();
     await refreshProfileAfterWorkedJob(result, payload.part.programmer);
@@ -4916,11 +4972,14 @@ partHistoryForm?.addEventListener("submit", async (event) => {
         </div>
       `;
     }
-    const payload = await api(`/api/part-history?q=${encodeURIComponent(query)}`);
+    const payload = await api("/api/part-history", {
+      method: "POST",
+      body: JSON.stringify({ q: query, jobs: localArchivedJobs() }),
+    });
     savePartHistoryRecent(query);
     renderPartHistoryRecents();
     renderPartHistory(payload);
-    partHistoryStatus.textContent = `Found ${payload.jobs?.length || 0} job match${payload.jobs?.length === 1 ? "" : "es"} for ${payload.primaryIdentifier || query}.`;
+    partHistoryStatus.textContent = `Found ${payload.jobs?.length || 0} job match${payload.jobs?.length === 1 ? "" : "es"} for ${payload.primaryIdentifier || query}; searched ${payload.referenceStats?.searchableJobCount || 0} saved jobs.`;
   } catch (error) {
     partHistoryStatus.textContent = error.message;
     if (partHistoryResult) {
