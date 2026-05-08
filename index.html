@@ -26,6 +26,7 @@
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
           <button class="nav-item" data-view="part-history">Part History</button>
           <button class="nav-item" data-view="proof-vault">Proof Vault</button>
+          <button class="nav-item" data-view="code-desk">Code Desk</button>
           <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -183,6 +184,50 @@
               <article class="assistant-card">
                 <strong>Proof Vault ready</strong>
                 <p>Saved jobs, aliases, programmer evidence, and attachments will appear here.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="code-desk">
+          <section class="panel wide code-desk-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Lock decode</p>
+                <h3>Code Desk</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes</button>
+                <button class="secondary-action small" type="button" id="exportCodeDesk">Export Codes</button>
+                <button class="secondary-action small" type="button" id="clearCodeDesk">Clear Codes</button>
+                <input id="codeDeskImportInput" type="file" accept=".csv,.tsv,.json,text/csv,application/json" hidden />
+              </div>
+            </div>
+            <form id="codeDeskForm" class="code-desk-form">
+              <label>
+                System
+                <select name="system"></select>
+              </label>
+              <label>
+                Lookup
+                <select name="mode">
+                  <option value="bitting">Bitting / cuts</option>
+                  <option value="measurements">Measurements</option>
+                  <option value="code">Imported code</option>
+                  <option value="reverse">Bitting to code</option>
+                </select>
+              </label>
+              <label class="wide-field">
+                Code, bitting, or measurements
+                <input name="query" placeholder="24351, .329 .306 .283, or imported code" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Run Desk</button>
+            </form>
+            <div class="form-status" id="codeDeskStatus"></div>
+            <div class="code-desk-result" id="codeDeskResult">
+              <article class="assistant-card">
+                <strong>Code Desk ready</strong>
+                <p>Use public cards for bitting and measurement work. Import authorized code records for code lookup.</p>
               </article>
             </div>
           </section>

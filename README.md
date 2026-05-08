@@ -30,8 +30,26 @@ The included `render.yaml` is a Render Blueprint for the same setup. If the depl
 - AI Bench assistant route with safety refusals and audit logging
 - Vehicle reference workspace
 - VIN lookup with NHTSA decode, local vPIC catalog matching, key reference guidance, and worked-job learning
+- Part History, Proof Vault, and programmer coverage proof from saved jobs
+- Proof Vault attachments with Cloudflare R2 support and browser/local fallback
+- Code Desk starter depth-space cards plus authorized CSV/JSON code import
 - Trust Center
 - Initial backend resource and route contract
+
+## Proof Vault Attachments
+
+Attachments work locally without extra setup. For Render production, set Cloudflare R2 variables so photos and documents survive deploys and follow users across devices:
+
+- `R2_ACCOUNT_ID`
+- `R2_BUCKET`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- Optional: `R2_PUBLIC_BASE_URL`
+- Optional: `TIMLOCK_ATTACHMENT_MAX_BYTES`
+
+## Code Desk Imports
+
+Code Desk includes starter public depth-space cards for common systems. Import only authorized code records you are allowed to use. CSV/TSV/JSON imports can include columns such as `system`, `keyway`, `code`, `bitting`, `vehicle`, `partNumber`, `source`, and `notes`.
 
 ## Build Local Vehicle Catalogs
 

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,10 @@ const supplierAccountsPath = path.join(mutableDataDir, "supplier-accounts.local.
 const vehicleProfilesPath = path.join(mutableDataDir, "vehicle-profiles.json");
 const referenceVaultPath = path.join(mutableDataDir, "reference-vault.json");
 const publicReferenceSourcesPath = path.join(mutableDataDir, "public-reference-sources.json");
+const proofAttachmentsPath = path.join(mutableDataDir, "proof-attachments.json");
+const proofAttachmentFileDir = path.join(mutableDataDir, "proof-attachments");
 const localSecretPath = path.join(mutableDataDir, ".lockforge-secret");
+const attachmentUploadMaxBytes = Number(process.env.TIMLOCK_ATTACHMENT_MAX_BYTES || 5_000_000);
 
 const supplierRegistry = [
   {
@@ -1391,7 +1394,7 @@ function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Content-Type": "application/json; charset=utf-8",
   });
   response.end(JSON.stringify(payload));
@@ -1399,6 +1402,180 @@ function sendJson(response, statusCode, payload) {
 
 function sendError(response, statusCode, message) {
   sendJson(response, statusCode, { error: message });
+}
+
+function sendBuffer(response, statusCode, buffer, contentType = "application/octet-stream", headers = {}) {
+  response.writeHead(statusCode, {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Cache-Control": "private, max-age=300",
+    "Content-Type": contentType,
+    ...headers,
+  });
+  response.end(buffer);
+}
+
+function sanitizeStorageSegment(value) {
+  return cleanString(value)
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96);
+}
+
+function attachmentPublicFields(attachment) {
+  const publicBase = cleanString(process.env.R2_PUBLIC_BASE_URL).replace(/\/$/, "");
+  return {
+    id: attachment.id,
+    jobId: attachment.jobId,
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    createdAt: attachment.createdAt,
+    storage: attachment.storage,
+    previewUrl: publicBase && attachment.storage === "r2" ? `${publicBase}/${attachment.key.split("/").map(encodeURIComponent).join("/")}` : `/api/proof-vault/attachments/${attachment.id}/file`,
+  };
+}
+
+function groupAttachmentsByJob(attachments = []) {
+  return attachments.reduce((groups, attachment) => {
+    const jobId = attachment.jobId || "unlinked";
+    groups[jobId] ||= [];
+    groups[jobId].push(attachmentPublicFields(attachment));
+    return groups;
+  }, {});
+}
+
+function proofAttachmentStorageMode() {
+  if (r2Config()) return "cloudflare-r2";
+  return "local-file";
+}
+
+async function readProofAttachments() {
+  await mkdir(mutableDataDir, { recursive: true });
+  if (!existsSync(proofAttachmentsPath)) {
+    return { version: 1, updatedAt: new Date().toISOString(), attachments: [] };
+  }
+  const vault = JSON.parse(await readFile(proofAttachmentsPath, "utf8"));
+  return {
+    version: vault.version || 1,
+    updatedAt: vault.updatedAt || "",
+    attachments: Array.isArray(vault.attachments) ? vault.attachments : [],
+  };
+}
+
+async function writeProofAttachments(vault) {
+  await mkdir(mutableDataDir, { recursive: true });
+  await writeFile(proofAttachmentsPath, `${JSON.stringify({ ...vault, updatedAt: new Date().toISOString() }, null, 2)}\n`);
+}
+
+function dataUrlToBuffer(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+  if (!match) throw new Error("Attachment upload must include a data URL.");
+  const type = cleanString(match[1] || "application/octet-stream");
+  const payload = match[2] ? Buffer.from(match[3], "base64") : Buffer.from(decodeURIComponent(match[3]), "utf8");
+  return { type, buffer: payload };
+}
+
+function r2Config() {
+  const accountId = cleanString(process.env.R2_ACCOUNT_ID || process.env.CLOUDFLARE_R2_ACCOUNT_ID);
+  const bucket = cleanString(process.env.R2_BUCKET || process.env.CLOUDFLARE_R2_BUCKET);
+  const accessKeyId = cleanString(process.env.R2_ACCESS_KEY_ID || process.env.CLOUDFLARE_R2_ACCESS_KEY_ID);
+  const secretAccessKey = cleanString(process.env.R2_SECRET_ACCESS_KEY || process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY);
+  if (!accountId || !bucket || !accessKeyId || !secretAccessKey) return null;
+  const host = cleanString(process.env.R2_ENDPOINT || `${accountId}.r2.cloudflarestorage.com`).replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return { accountId, bucket, accessKeyId, secretAccessKey, host };
+}
+
+function sha256Hex(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function hmac(key, value, encoding) {
+  return createHmac("sha256", key).update(value).digest(encoding);
+}
+
+function r2ObjectPath(config, key) {
+  return `/${encodeURIComponent(config.bucket)}/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function r2SignedHeaders(config, method, key, body = Buffer.alloc(0), contentType = "") {
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const canonicalUri = r2ObjectPath(config, key);
+  const payloadHash = sha256Hex(body);
+  const headers = {
+    host: config.host,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+  };
+  if (contentType) headers["content-type"] = contentType;
+  const signedHeaders = Object.keys(headers).sort().join(";");
+  const canonicalHeaders = Object.keys(headers)
+    .sort()
+    .map((name) => `${name}:${headers[name]}\n`)
+    .join("");
+  const canonicalRequest = [method, canonicalUri, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
+  const credentialScope = `${dateStamp}/auto/s3/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, credentialScope, sha256Hex(canonicalRequest)].join("\n");
+  const dateKey = hmac(`AWS4${config.secretAccessKey}`, dateStamp);
+  const regionKey = hmac(dateKey, "auto");
+  const serviceKey = hmac(regionKey, "s3");
+  const signingKey = hmac(serviceKey, "aws4_request");
+  const signature = hmac(signingKey, stringToSign, "hex");
+  return {
+    headers: {
+      ...headers,
+      Authorization: `AWS4-HMAC-SHA256 Credential=${config.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+    },
+    url: `https://${config.host}${canonicalUri}`,
+  };
+}
+
+async function r2Request(method, key, body = Buffer.alloc(0), contentType = "") {
+  const config = r2Config();
+  if (!config) throw new Error("Cloudflare R2 is not configured.");
+  const signed = r2SignedHeaders(config, method, key, body, contentType);
+  const response = await fetch(signed.url, {
+    method,
+    headers: signed.headers,
+    body: method === "GET" || method === "DELETE" ? undefined : body,
+  });
+  if (!response.ok) {
+    throw new Error(`R2 ${method} failed with ${response.status}`);
+  }
+  return response;
+}
+
+async function storeProofAttachmentFile(attachment, buffer) {
+  const config = r2Config();
+  if (config) {
+    await r2Request("PUT", attachment.key, buffer, attachment.type);
+    return { ...attachment, storage: "r2" };
+  }
+  await mkdir(proofAttachmentFileDir, { recursive: true });
+  const filePath = path.join(proofAttachmentFileDir, attachment.key);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, buffer);
+  return { ...attachment, storage: "local" };
+}
+
+async function readProofAttachmentFile(attachment) {
+  if (attachment.storage === "r2") {
+    const response = await r2Request("GET", attachment.key);
+    return Buffer.from(await response.arrayBuffer());
+  }
+  return readFile(path.join(proofAttachmentFileDir, attachment.key));
+}
+
+async function deleteProofAttachmentFile(attachment) {
+  try {
+    if (attachment.storage === "r2") await r2Request("DELETE", attachment.key);
+    else await unlink(path.join(proofAttachmentFileDir, attachment.key));
+  } catch {
+    // Missing file/object should not leave stale metadata behind.
+  }
 }
 
 function jobStatus(verification) {
@@ -5814,6 +5991,93 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/proof-vault/attachments") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const jobId = cleanString(url.searchParams.get("jobId"));
+    const vault = await readProofAttachments();
+    const attachments = vault.attachments
+      .filter((attachment) => !jobId || attachment.jobId === jobId)
+      .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+    sendJson(response, 200, {
+      storage: proofAttachmentStorageMode(),
+      maxBytes: attachmentUploadMaxBytes,
+      attachments: attachments.map(attachmentPublicFields),
+      byJob: groupAttachmentsByJob(attachments),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/proof-vault/attachments") {
+    const body = await readJsonBody(request);
+    const jobId = cleanString(body.jobId);
+    if (!jobId) {
+      sendError(response, 400, "Attachment needs a saved job id.");
+      return;
+    }
+    const parsed = dataUrlToBuffer(body.dataUrl);
+    if (!parsed.buffer.length) {
+      sendError(response, 400, "Attachment file is empty.");
+      return;
+    }
+    if (parsed.buffer.length > attachmentUploadMaxBytes) {
+      sendError(response, 413, `Attachment is over ${Math.round(attachmentUploadMaxBytes / 1_000_000)} MB.`);
+      return;
+    }
+    const id = randomUUID();
+    const name = sanitizeStorageSegment(body.name) || `proof-${id}`;
+    const type = cleanString(body.type || parsed.type || "application/octet-stream");
+    const attachment = await storeProofAttachmentFile(
+      {
+        id,
+        jobId,
+        name,
+        type,
+        size: parsed.buffer.length,
+        key: `proof-vault/${sanitizeStorageSegment(jobId) || "unlinked"}/${id}-${name}`,
+        createdAt: new Date().toISOString(),
+      },
+      parsed.buffer,
+    );
+    const vault = await readProofAttachments();
+    vault.attachments.unshift(attachment);
+    await writeProofAttachments(vault);
+    sendJson(response, 201, {
+      storage: proofAttachmentStorageMode(),
+      attachment: attachmentPublicFields(attachment),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && pathname.startsWith("/api/proof-vault/attachments/") && pathname.endsWith("/file")) {
+    const id = decodeURIComponent(pathname.replace("/api/proof-vault/attachments/", "").replace(/\/file$/, ""));
+    const vault = await readProofAttachments();
+    const attachment = vault.attachments.find((item) => item.id === id);
+    if (!attachment) {
+      sendError(response, 404, "Attachment not found.");
+      return;
+    }
+    const file = await readProofAttachmentFile(attachment);
+    sendBuffer(response, 200, file, attachment.type || "application/octet-stream", {
+      "Content-Disposition": `inline; filename="${sanitizeStorageSegment(attachment.name) || "proof"}"`,
+    });
+    return;
+  }
+
+  if (request.method === "DELETE" && pathname.startsWith("/api/proof-vault/attachments/")) {
+    const id = decodeURIComponent(pathname.replace("/api/proof-vault/attachments/", ""));
+    const vault = await readProofAttachments();
+    const index = vault.attachments.findIndex((item) => item.id === id);
+    if (index < 0) {
+      sendError(response, 404, "Attachment not found.");
+      return;
+    }
+    const [attachment] = vault.attachments.splice(index, 1);
+    await deleteProofAttachmentFile(attachment);
+    await writeProofAttachments(vault);
+    sendJson(response, 200, { deleted: true, id });
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/vehicle-profiles") {
     sendJson(response, 200, await readVehicleProfiles());
     return;
@@ -6284,7 +6548,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
       });
       response.end();
       return;

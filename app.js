@@ -22,9 +22,14 @@ let latestPartHistory = null;
 let workflowActionsOpen = false;
 let latestCoverageDashboard = null;
 let latestProofVault = null;
+let proofVaultServerAttachments = {};
+let proofVaultStorageMode = "browser-local";
+let proofVaultAttachmentMaxBytes = 1_500_000;
+let codeDeskImportedRecords = [];
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
+const codeDeskImportKey = "timlockCodeDeskImportsV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -83,6 +88,13 @@ const syncProofVaultButton = document.querySelector("#syncProofVault");
 const exportProofVaultButton = document.querySelector("#exportProofVault");
 const importProofVaultButton = document.querySelector("#importProofVault");
 const proofVaultImportInput = document.querySelector("#proofVaultImportInput");
+const codeDeskForm = document.querySelector("#codeDeskForm");
+const codeDeskStatus = document.querySelector("#codeDeskStatus");
+const codeDeskResult = document.querySelector("#codeDeskResult");
+const importCodeDeskButton = document.querySelector("#importCodeDesk");
+const exportCodeDeskButton = document.querySelector("#exportCodeDesk");
+const clearCodeDeskButton = document.querySelector("#clearCodeDesk");
+const codeDeskImportInput = document.querySelector("#codeDeskImportInput");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -99,6 +111,7 @@ function showView(id) {
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
+  if (id === "code-desk") renderCodeDesk();
 }
 
 function updateConnectionStatus() {
@@ -3399,7 +3412,7 @@ function renderCoverageDashboard(payload = {}) {
   `;
 }
 
-function proofVaultAttachments() {
+function proofVaultLocalAttachments() {
   try {
     const parsed = JSON.parse(localStorage.getItem(proofVaultAttachmentsKey) || "{}");
     return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
@@ -3412,6 +3425,33 @@ function saveProofVaultAttachments(attachments) {
   localStorage.setItem(proofVaultAttachmentsKey, JSON.stringify(attachments || {}));
 }
 
+function normalizeProofAttachment(attachment, storage = "browser") {
+  return {
+    ...attachment,
+    storage: attachment.storage || storage,
+  };
+}
+
+function mergeProofAttachmentMaps(...maps) {
+  const merged = {};
+  maps.forEach((map) => {
+    Object.entries(map || {}).forEach(([jobId, items]) => {
+      if (!Array.isArray(items)) return;
+      const existing = new Map((merged[jobId] || []).map((attachment) => [attachment.id, attachment]));
+      items.forEach((attachment) => {
+        if (!attachment?.id) return;
+        existing.set(attachment.id, normalizeProofAttachment(attachment, attachment.storage || "browser"));
+      });
+      merged[jobId] = Array.from(existing.values()).sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0));
+    });
+  });
+  return merged;
+}
+
+function proofVaultAttachments() {
+  return mergeProofAttachmentMaps(proofVaultServerAttachments, proofVaultLocalAttachments());
+}
+
 function proofVaultAttachmentCount(attachments = proofVaultAttachments()) {
   return Object.values(attachments).reduce((count, items) => count + (Array.isArray(items) ? items.length : 0), 0);
 }
@@ -3420,14 +3460,33 @@ function attachmentsForJob(jobId, attachments = proofVaultAttachments()) {
   return Array.isArray(attachments[jobId]) ? attachments[jobId] : [];
 }
 
+function proofVaultStorageCaption() {
+  if (proofVaultStorageMode === "cloudflare-r2") return "Cloud evidence files";
+  if (proofVaultStorageMode === "local-file") return "Server local files";
+  return "Browser fallback files";
+}
+
+function proofVaultStorageLabel(attachment = {}) {
+  if (attachment.storage === "r2") return "Cloud";
+  if (attachment.storage === "local") return "Server";
+  return "Browser";
+}
+
 function renderProofAttachment(jobId, attachment) {
   const isImage = /^image\//.test(attachment.type || "");
+  const url = attachment.previewUrl || attachment.url || attachment.dataUrl || "";
+  const fileType = (attachment.type || "file").split("/").pop().toUpperCase();
+  const media = isImage && url
+    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"><img src="${escapeHtml(url)}" alt="${escapeHtml(attachment.name || "Proof image")}" loading="lazy" /></a>`
+    : url
+      ? `<a class="proof-file-tile" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(fileType)}</a>`
+      : `<span>${escapeHtml(fileType)}</span>`;
   return `
     <article class="proof-attachment">
-      ${isImage ? `<img src="${escapeHtml(attachment.dataUrl)}" alt="${escapeHtml(attachment.name || "Proof image")}" loading="lazy" />` : `<span>${escapeHtml((attachment.type || "file").split("/").pop().toUpperCase())}</span>`}
+      ${media}
       <div>
         <strong>${escapeHtml(attachment.name || "Attachment")}</strong>
-        <small>${escapeHtml([Math.round((attachment.size || 0) / 1024) ? `${Math.round((attachment.size || 0) / 1024)} KB` : "", attachment.createdAt ? new Date(attachment.createdAt).toLocaleString() : ""].filter(Boolean).join(" | "))}</small>
+        <small>${escapeHtml([proofVaultStorageLabel(attachment), Math.round((attachment.size || 0) / 1024) ? `${Math.round((attachment.size || 0) / 1024)} KB` : "", attachment.createdAt ? new Date(attachment.createdAt).toLocaleString() : ""].filter(Boolean).join(" | "))}</small>
       </div>
       <button class="icon-action" type="button" data-remove-proof-attachment="${escapeHtml(attachment.id)}" data-proof-job-id="${escapeHtml(jobId)}" title="Remove attachment">x</button>
     </article>
@@ -3487,7 +3546,7 @@ function renderProofVault(payload = {}) {
   const summaryCards = [
     ["Saved Jobs", summary.totalJobs || 0, `${summary.matchingJobs || 0} shown`],
     ["Proven", summary.provenJobs || 0, `${summary.warningJobs || 0} warnings`],
-    ["Files", proofVaultAttachmentCount(attachments), "Local evidence attachments"],
+    ["Files", proofVaultAttachmentCount(attachments), proofVaultStorageCaption()],
     ["Cross-Refs", summary.matchedReferenceRows || 0, `${summary.referenceRows || 0} reference rows`],
   ];
 
@@ -3510,6 +3569,7 @@ function renderProofVault(payload = {}) {
         <span>${escapeHtml(payload.query ? `Search: ${payload.query}` : "All proof")}</span>
         <span>${escapeHtml(`${summary.unknownJobs || 0} unknown outcomes`)}</span>
         <span>${escapeHtml(`${localArchivedJobs().length} local archived jobs`)}</span>
+        <span>${escapeHtml(proofVaultStorageCaption())}</span>
       </div>
       <button class="secondary-action small" type="button" data-copy-proof-vault-summary>Copy Packet Summary</button>
     </section>
@@ -3535,19 +3595,36 @@ function renderProofVault(payload = {}) {
     </section>
     <article class="assistant-card">
       <strong>Vault note</strong>
-      <p>${escapeHtml(payload.proofNote || "Proof Vault uses saved jobs and local attachments.")}</p>
+      <p>${escapeHtml(payload.proofNote || "Proof Vault uses saved jobs, cross references, programmer evidence, and attachment proof.")}</p>
     </article>
   `;
+}
+
+async function loadProofVaultAttachments(jobId = "") {
+  try {
+    const suffix = jobId ? `?jobId=${encodeURIComponent(jobId)}` : "";
+    const payload = await api(`/api/proof-vault/attachments${suffix}`);
+    proofVaultServerAttachments = payload.byJob || {};
+    proofVaultStorageMode = payload.storage || "local-file";
+    proofVaultAttachmentMaxBytes = Number(payload.maxBytes) || proofVaultAttachmentMaxBytes;
+    return payload;
+  } catch {
+    proofVaultServerAttachments = {};
+    proofVaultStorageMode = "browser-local";
+    return null;
+  }
 }
 
 async function loadProofVault(query = proofVaultForm?.elements.proofQuery?.value || "") {
   if (!proofVault) return;
   try {
     if (proofVaultStatus) proofVaultStatus.textContent = "Loading proof vault...";
+    const attachmentLoad = loadProofVaultAttachments();
     const payload = await api("/api/proof-vault", {
       method: "POST",
       body: JSON.stringify({ q: cleanInput(query), jobs: localArchivedJobs() }),
     });
+    await attachmentLoad;
     renderProofVault(payload);
     if (proofVaultStatus) proofVaultStatus.textContent = `Vault searched ${payload.summary?.totalJobs || 0} jobs and found ${payload.summary?.matchingJobs || 0} records.`;
   } catch (error) {
@@ -3567,28 +3644,67 @@ function fileAsDataUrl(file) {
 
 async function addProofAttachment(jobId, file) {
   if (!jobId || !file) return;
-  if (file.size > 1_500_000) {
-    if (proofVaultStatus) proofVaultStatus.textContent = "Attachment is over 1.5 MB. Export the photo smaller, then attach it.";
+  if (file.size > proofVaultAttachmentMaxBytes) {
+    if (proofVaultStatus) proofVaultStatus.textContent = `Attachment is over ${Math.round(proofVaultAttachmentMaxBytes / 1_000_000)} MB. Export the photo smaller, then attach it.`;
     return;
   }
-  const attachments = proofVaultAttachments();
-  const files = attachmentsForJob(jobId, attachments).slice(0, 5);
+  const dataUrl = await fileAsDataUrl(file);
+  try {
+    const payload = await api("/api/proof-vault/attachments", {
+      method: "POST",
+      body: JSON.stringify({
+        jobId,
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        dataUrl,
+      }),
+    });
+    proofVaultStorageMode = payload.storage || proofVaultStorageMode;
+    const current = attachmentsForJob(jobId, proofVaultServerAttachments).filter((attachment) => attachment.id !== payload.attachment?.id);
+    proofVaultServerAttachments[jobId] = [payload.attachment, ...current].filter(Boolean).slice(0, 20);
+    renderProofVault(latestProofVault);
+    if (proofVaultStatus) proofVaultStatus.textContent = `Attached server-backed proof to ${jobId}.`;
+    return;
+  } catch (serverError) {
+    if (file.size > 1_500_000) {
+      if (proofVaultStatus) proofVaultStatus.textContent = `Server upload failed: ${serverError.message}. Browser fallback is limited to 1.5 MB.`;
+      return;
+    }
+  }
+
+  const attachments = proofVaultLocalAttachments();
+  const files = attachmentsForJob(jobId, attachments).slice(0, 7);
   files.unshift({
     id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     name: file.name,
     type: file.type || "application/octet-stream",
     size: file.size,
     createdAt: new Date().toISOString(),
-    dataUrl: await fileAsDataUrl(file),
+    dataUrl,
+    storage: "browser",
   });
   attachments[jobId] = files;
   saveProofVaultAttachments(attachments);
   renderProofVault(latestProofVault);
-  if (proofVaultStatus) proofVaultStatus.textContent = `Attached proof to ${jobId}.`;
+  if (proofVaultStatus) proofVaultStatus.textContent = `Attached browser-local proof to ${jobId}.`;
 }
 
-function removeProofAttachment(jobId, attachmentId) {
-  const attachments = proofVaultAttachments();
+async function removeProofAttachment(jobId, attachmentId) {
+  const serverFiles = attachmentsForJob(jobId, proofVaultServerAttachments);
+  if (serverFiles.some((attachment) => attachment.id === attachmentId)) {
+    try {
+      await api(`/api/proof-vault/attachments/${encodeURIComponent(attachmentId)}`, { method: "DELETE" });
+      proofVaultServerAttachments[jobId] = serverFiles.filter((attachment) => attachment.id !== attachmentId);
+      if (!proofVaultServerAttachments[jobId].length) delete proofVaultServerAttachments[jobId];
+      renderProofVault(latestProofVault);
+      if (proofVaultStatus) proofVaultStatus.textContent = "Server attachment removed.";
+    } catch (error) {
+      if (proofVaultStatus) proofVaultStatus.textContent = `Could not remove attachment: ${error.message}`;
+    }
+    return;
+  }
+
+  const attachments = proofVaultLocalAttachments();
   attachments[jobId] = attachmentsForJob(jobId, attachments).filter((attachment) => attachment.id !== attachmentId);
   if (!attachments[jobId].length) delete attachments[jobId];
   saveProofVaultAttachments(attachments);
@@ -3613,7 +3729,9 @@ function exportProofVaultBackup() {
     schemaVersion: 1,
     exportedAt: new Date().toISOString(),
     jobs: mergeJobLists(jobs, localArchivedJobs()),
-    attachments: proofVaultAttachments(),
+    attachments: proofVaultLocalAttachments(),
+    serverAttachments: proofVaultServerAttachments,
+    attachmentStorage: proofVaultStorageMode,
     proofVault: latestProofVault,
     coverage: latestCoverageDashboard,
   };
@@ -3632,7 +3750,7 @@ async function importProofVaultBackup(file) {
     for (const [jobId, items] of Object.entries(importedAttachments)) {
       const existing = new Map(attachmentsForJob(jobId, currentAttachments).map((attachment) => [attachment.id, attachment]));
       (Array.isArray(items) ? items : []).forEach((attachment) => {
-        if (attachment?.id) existing.set(attachment.id, attachment);
+        if (attachment?.id && attachment.dataUrl) existing.set(attachment.id, normalizeProofAttachment(attachment, "browser"));
       });
       currentAttachments[jobId] = Array.from(existing.values()).slice(0, 8);
     }
@@ -3655,7 +3773,7 @@ function proofVaultPacketSummary() {
   return [
     `Proof Vault${query}: ${summary.matchingJobs || 0} matching job records from ${summary.totalJobs || 0} saved jobs.`,
     `${summary.provenJobs || 0} proven, ${summary.warningJobs || 0} warnings, ${summary.unknownJobs || 0} unknown.`,
-    `${proofVaultAttachmentCount()} local evidence attachment${proofVaultAttachmentCount() === 1 ? "" : "s"} available in the vault backup.`,
+    `${proofVaultAttachmentCount()} evidence attachment${proofVaultAttachmentCount() === 1 ? "" : "s"} available through ${proofVaultStorageCaption().toLowerCase()}.`,
     topProgrammer ? `Top programmer evidence: ${topProgrammer.name}, ${topProgrammer.jobs} jobs, ${coveragePercentLabel(topProgrammer.observedCoveragePercent)} observed success.` : "",
   ]
     .filter(Boolean)
@@ -3675,6 +3793,435 @@ async function copyProofVaultSummary() {
     area.remove();
   }
   if (proofVaultStatus) proofVaultStatus.textContent = "Proof packet summary copied.";
+}
+
+const codeDeskSystems = [
+  {
+    id: "kw1",
+    name: "KW1 / Kwikset Classic",
+    family: "Residential edge cut",
+    source: "Public depth-space reference",
+    blanks: ["KW1", "KW10", "1176"],
+    spaces: [0.247, 0.397, 0.547, 0.697, 0.847],
+    depths: {
+      1: 0.329,
+      2: 0.306,
+      3: 0.283,
+      4: 0.260,
+      5: 0.237,
+      6: 0.214,
+      7: 0.191,
+    },
+    macs: 4,
+    notes: ["Verify cutter card and shoulder stop before cutting customer keys.", "Use authorized job proof for code-originated work."],
+  },
+  {
+    id: "sc1",
+    name: "SC1 / Schlage Classic",
+    family: "Residential edge cut",
+    source: "Public depth-space reference",
+    blanks: ["SC1", "SC4", "1145"],
+    spaces: [0.231, 0.387, 0.543, 0.699, 0.855],
+    depths: {
+      0: 0.335,
+      1: 0.320,
+      2: 0.305,
+      3: 0.290,
+      4: 0.275,
+      5: 0.260,
+      6: 0.245,
+      7: 0.230,
+      8: 0.215,
+      9: 0.200,
+    },
+    macs: 7,
+    notes: ["Confirm system variant, keyway, and cutter setup before originating.", "Imported records can add authorized code-to-bitting lookup."],
+  },
+];
+
+function loadCodeDeskImports() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(codeDeskImportKey) || "[]");
+    return Array.isArray(parsed) ? parsed.map(normalizeCodeDeskRecord).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCodeDeskImports(records) {
+  codeDeskImportedRecords = (records || []).map(normalizeCodeDeskRecord).filter(Boolean).slice(0, 5000);
+  localStorage.setItem(codeDeskImportKey, JSON.stringify(codeDeskImportedRecords));
+}
+
+function normalizeCodeDeskKey(value) {
+  return cleanInput(value).toUpperCase();
+}
+
+function compactCodeDeskKey(value) {
+  return normalizeCodeDeskKey(value).replace(/[^A-Z0-9?]/g, "");
+}
+
+function normalizeBittingInput(value) {
+  const text = cleanInput(value);
+  if (!text) return [];
+  const compact = text.replace(/[^0-9?]/g, "");
+  if (compact && !/[\s,;/-]/.test(text)) return compact.split("");
+  return text
+    .split(/[\s,;/-]+/)
+    .map((part) => part.replace(/[^0-9?]/g, ""))
+    .filter(Boolean);
+}
+
+function normalizeImportHeader(value) {
+  return cleanInput(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function pickCodeDeskField(row, names) {
+  for (const name of names) {
+    const value = row[normalizeImportHeader(name)];
+    if (cleanInput(value)) return cleanInput(value);
+  }
+  return "";
+}
+
+function normalizeCodeDeskRecord(record = {}) {
+  if (!record || typeof record !== "object") return null;
+  const row = Object.fromEntries(Object.entries(record).map(([key, value]) => [normalizeImportHeader(key), value]));
+  const system = pickCodeDeskField(row, ["system", "keyway", "blank", "key blank", "card"]);
+  const code = pickCodeDeskField(row, ["code", "key code", "lock code", "factory code"]);
+  const bitting = normalizeBittingInput(pickCodeDeskField(row, ["bitting", "cuts", "cut", "depths"])).join("");
+  const keyway = pickCodeDeskField(row, ["keyway", "blank", "key blank"]);
+  const vehicle = pickCodeDeskField(row, ["vehicle", "application", "make model", "year make model"]);
+  const partNumber = pickCodeDeskField(row, ["part", "part number", "partnumber", "pn", "sku"]);
+  const source = pickCodeDeskField(row, ["source", "origin", "vendor"]);
+  const notes = pickCodeDeskField(row, ["notes", "note", "memo"]);
+  if (!code && !bitting) return null;
+  return {
+    id: cleanInput(record.id) || `${compactCodeDeskKey(system)}-${compactCodeDeskKey(code)}-${bitting || Date.now()}`,
+    system,
+    keyway,
+    code,
+    bitting,
+    vehicle,
+    partNumber,
+    source,
+    notes,
+    importedAt: cleanInput(record.importedAt) || new Date().toISOString(),
+  };
+}
+
+function splitDelimitedLine(line, delimiter) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"') {
+      if (quoted && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === delimiter && !quoted) {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function parseCodeDeskImport(text) {
+  const trimmed = cleanInput(text);
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    const parsed = JSON.parse(trimmed);
+    const rows = Array.isArray(parsed) ? parsed : parsed.records || parsed.codes || [];
+    return rows.map(normalizeCodeDeskRecord).filter(Boolean);
+  }
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  if (!lines.length) return [];
+  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  const headers = splitDelimitedLine(lines.shift(), delimiter).map(normalizeImportHeader);
+  return lines
+    .map((line) => {
+      const cells = splitDelimitedLine(line, delimiter);
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header || `column${index}`] = cells[index] || "";
+      });
+      return normalizeCodeDeskRecord(row);
+    })
+    .filter(Boolean);
+}
+
+function selectedCodeDeskSystem() {
+  const selected = codeDeskForm?.elements.system?.value || codeDeskSystems[0].id;
+  return codeDeskSystems.find((system) => system.id === selected) || codeDeskSystems[0];
+}
+
+function codeDeskSystemMatchesRecord(system, record) {
+  const systemTokens = [system.id, system.name, ...(system.blanks || [])].map(compactCodeDeskKey).filter(Boolean);
+  const recordTokens = [record.system, record.keyway].map(compactCodeDeskKey).filter(Boolean);
+  if (!recordTokens.length) return true;
+  return recordTokens.some((token) => systemTokens.some((systemToken) => token.includes(systemToken) || systemToken.includes(token)));
+}
+
+function codeDeskDepthRows(system) {
+  return Object.entries(system.depths || {})
+    .map(([cut, depth]) => ({ cut, depth }))
+    .sort((a, b) => Number(a.cut) - Number(b.cut));
+}
+
+function codeDeskFormatMeasurement(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : "";
+}
+
+function codeDeskCutRows(system, bitting = []) {
+  return bitting.map((cut, index) => ({
+    position: index + 1,
+    cut,
+    space: system.spaces[index],
+    depth: system.depths?.[cut],
+    valid: cut === "?" || Number.isFinite(Number(system.depths?.[cut])),
+  }));
+}
+
+function nearestCodeDeskDepth(system, measurement) {
+  const rows = codeDeskDepthRows(system);
+  return rows
+    .map((row) => ({ ...row, difference: Math.abs(row.depth - measurement) }))
+    .sort((a, b) => a.difference - b.difference)[0];
+}
+
+function codeDeskMeasurementsToCuts(system, query) {
+  const measurements = (cleanInput(query).match(/\d+(?:\.\d+)?/g) || [])
+    .map(Number)
+    .map((value) => (value > 1 ? value / 1000 : value))
+    .filter((value) => Number.isFinite(value));
+  return measurements.map((measurement, index) => {
+    const nearest = nearestCodeDeskDepth(system, measurement);
+    return {
+      position: index + 1,
+      measurement,
+      cut: nearest?.cut || "?",
+      depth: nearest?.depth,
+      difference: nearest?.difference,
+    };
+  });
+}
+
+function findCodeDeskRecords(system, query, mode) {
+  const compactQuery = compactCodeDeskKey(query);
+  const bittingQuery = normalizeBittingInput(query).join("");
+  return codeDeskImportedRecords
+    .filter((record) => codeDeskSystemMatchesRecord(system, record))
+    .filter((record) => {
+      const code = compactCodeDeskKey(record.code);
+      const bitting = compactCodeDeskKey(record.bitting);
+      if (mode === "code") return compactQuery && code.includes(compactQuery);
+      if (mode === "reverse") return bittingQuery && bitting === bittingQuery;
+      if (mode === "bitting") return bittingQuery && bitting === bittingQuery;
+      return [code, bitting, compactCodeDeskKey(record.vehicle), compactCodeDeskKey(record.partNumber)].some((value) => compactQuery && value.includes(compactQuery));
+    })
+    .slice(0, 40);
+}
+
+function renderCodeDeskRecord(record) {
+  return `
+    <article class="code-desk-record">
+      <div>
+        <span>${escapeHtml(record.code || "Imported record")}</span>
+        <strong>${escapeHtml(record.bitting || "No bitting")}</strong>
+      </div>
+      <p>${escapeHtml([record.system || record.keyway, record.vehicle, record.partNumber, record.source].filter(Boolean).join(" | ") || "Imported authorized code data")}</p>
+      ${record.notes ? `<small>${escapeHtml(record.notes)}</small>` : ""}
+    </article>
+  `;
+}
+
+function renderCodeDeskResult(result) {
+  if (!codeDeskResult) return;
+  const depthRows = codeDeskDepthRows(result.system);
+  const cutRows = result.cutRows || [];
+  const measurementRows = result.measurementRows || [];
+  codeDeskResult.dataset.ready = "result";
+  codeDeskResult.innerHTML = `
+    <section class="code-desk-summary-grid">
+      <article class="metric">
+        <span>System</span>
+        <strong>${escapeHtml(result.system.name)}</strong>
+        <p>${escapeHtml(result.system.family)}</p>
+      </article>
+      <article class="metric">
+        <span>Blanks</span>
+        <strong>${escapeHtml((result.system.blanks || []).join(" / "))}</strong>
+        <p>${escapeHtml(result.system.source)}</p>
+      </article>
+      <article class="metric">
+        <span>MACS</span>
+        <strong>${escapeHtml(result.system.macs ?? "Verify")}</strong>
+        <p>Machine setup still controls final cut quality.</p>
+      </article>
+      <article class="metric">
+        <span>Imported Codes</span>
+        <strong>${escapeHtml(codeDeskImportedRecords.length)}</strong>
+        <p>${escapeHtml(`${result.matches.length} matched this lookup`)}</p>
+      </article>
+    </section>
+    <section class="code-desk-grid">
+      <article class="code-desk-card">
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">Cut plan</p>
+            <h3>${escapeHtml(result.bitting?.length ? result.bitting.join("") : "No cuts yet")}</h3>
+          </div>
+        </div>
+        ${
+          cutRows.length
+            ? `<div class="code-cut-table">${cutRows
+                .map(
+                  (row) => `
+                    <div class="${row.valid ? "" : "warn"}">
+                      <span>${escapeHtml(row.position)}</span>
+                      <strong>${escapeHtml(row.cut)}</strong>
+                      <small>${escapeHtml(row.depth ? `${codeDeskFormatMeasurement(row.depth)} depth` : "Verify cut")} ${escapeHtml(row.space ? `| ${codeDeskFormatMeasurement(row.space)} space` : "")}</small>
+                    </div>
+                  `,
+                )
+                .join("")}</div>`
+            : `<p class="muted-copy">Enter bitting, measurements, or import a code record to build cuts.</p>`
+        }
+        ${
+          measurementRows.length
+            ? `<div class="code-measure-table">${measurementRows
+                .map((row) => `<span>${escapeHtml(codeDeskFormatMeasurement(row.measurement))} -> ${escapeHtml(row.cut)} (${escapeHtml(codeDeskFormatMeasurement(row.difference))} off)</span>`)
+                .join("")}</div>`
+            : ""
+        }
+      </article>
+      <article class="code-desk-card">
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">Depth card</p>
+            <h3>${escapeHtml(result.system.name)}</h3>
+          </div>
+        </div>
+        <div class="code-depth-table">
+          ${depthRows.map((row) => `<span><strong>${escapeHtml(row.cut)}</strong>${escapeHtml(codeDeskFormatMeasurement(row.depth))}</span>`).join("")}
+        </div>
+        <div class="part-chip-row">
+          ${(result.system.notes || []).map((note) => `<span class="part-chip">${escapeHtml(note)}</span>`).join("")}
+        </div>
+      </article>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Imported code records</p>
+          <h3>${escapeHtml(`${result.matches.length} match${result.matches.length === 1 ? "" : "es"}`)}</h3>
+        </div>
+      </div>
+      <div class="code-desk-record-list">
+        ${result.matches.length ? result.matches.map(renderCodeDeskRecord).join("") : `<article class="assistant-card"><strong>No imported code match</strong><p>Use bitting/measurements now, or import authorized CSV code data for code lookup.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function runCodeDesk() {
+  if (!codeDeskForm) return;
+  const data = new FormData(codeDeskForm);
+  const system = selectedCodeDeskSystem();
+  const mode = data.get("mode") || "bitting";
+  const query = cleanInput(data.get("query"));
+  let bitting = [];
+  let measurementRows = [];
+  let matches = [];
+
+  if (mode === "measurements") {
+    measurementRows = codeDeskMeasurementsToCuts(system, query);
+    bitting = measurementRows.map((row) => row.cut);
+    matches = findCodeDeskRecords(system, bitting.join(""), "reverse");
+  } else if (mode === "code") {
+    matches = findCodeDeskRecords(system, query, "code");
+    bitting = normalizeBittingInput(matches[0]?.bitting || "");
+  } else {
+    bitting = normalizeBittingInput(query);
+    matches = findCodeDeskRecords(system, query, mode);
+  }
+
+  renderCodeDeskResult({
+    system,
+    mode,
+    query,
+    bitting,
+    cutRows: codeDeskCutRows(system, bitting),
+    measurementRows,
+    matches,
+  });
+  if (codeDeskStatus) codeDeskStatus.textContent = `${system.name}: ${bitting.length ? `cut plan ${bitting.join("")}` : `${matches.length} imported records matched`}.`;
+}
+
+function renderCodeDesk() {
+  if (!codeDeskForm || !codeDeskResult) return;
+  codeDeskImportedRecords = loadCodeDeskImports();
+  const select = codeDeskForm.elements.system;
+  if (select && !select.options.length) {
+    select.innerHTML = codeDeskSystems.map((system) => `<option value="${escapeHtml(system.id)}">${escapeHtml(system.name)}</option>`).join("");
+  }
+  if (!codeDeskResult.dataset.ready) {
+    const starter = selectedCodeDeskSystem();
+    renderCodeDeskResult({
+      system: starter,
+      mode: "bitting",
+      query: "",
+      bitting: [],
+      cutRows: [],
+      measurementRows: [],
+      matches: [],
+    });
+    codeDeskResult.dataset.ready = "starter";
+    if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk ready. Public cards are starter references; import authorized records for code lookup.";
+  }
+}
+
+async function importCodeDeskFile(file) {
+  if (!file) return;
+  try {
+    const imported = parseCodeDeskImport(await file.text());
+    const existing = new Map(codeDeskImportedRecords.map((record) => [record.id, record]));
+    imported.forEach((record) => existing.set(record.id, record));
+    saveCodeDeskImports(Array.from(existing.values()));
+    renderCodeDeskResult({
+      system: selectedCodeDeskSystem(),
+      mode: "code",
+      query: "",
+      bitting: [],
+      cutRows: [],
+      measurementRows: [],
+      matches: imported.slice(0, 40),
+    });
+    if (codeDeskStatus) codeDeskStatus.textContent = `Imported ${imported.length} authorized code records.`;
+  } catch (error) {
+    if (codeDeskStatus) codeDeskStatus.textContent = `Import failed: ${error.message}`;
+  }
+}
+
+function exportCodeDeskRecords() {
+  downloadJson(`timlock-code-desk-${new Date().toISOString().slice(0, 10)}.json`, {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    records: codeDeskImportedRecords,
+    systems: codeDeskSystems.map(({ id, name, blanks, spaces, depths, macs }) => ({ id, name, blanks, spaces, depths, macs })),
+  });
+  if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk records exported.";
 }
 
 function fillWorkedJobFromCurrentLookup() {
@@ -4919,6 +5466,22 @@ proofVaultImportInput?.addEventListener("change", async () => {
   await importProofVaultBackup(proofVaultImportInput.files?.[0]);
   proofVaultImportInput.value = "";
 });
+codeDeskForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  runCodeDesk();
+});
+importCodeDeskButton?.addEventListener("click", () => codeDeskImportInput?.click());
+exportCodeDeskButton?.addEventListener("click", exportCodeDeskRecords);
+clearCodeDeskButton?.addEventListener("click", () => {
+  saveCodeDeskImports([]);
+  if (codeDeskResult) codeDeskResult.dataset.ready = "";
+  renderCodeDesk();
+  if (codeDeskStatus) codeDeskStatus.textContent = "Imported Code Desk records cleared.";
+});
+codeDeskImportInput?.addEventListener("change", async () => {
+  await importCodeDeskFile(codeDeskImportInput.files?.[0]);
+  codeDeskImportInput.value = "";
+});
 
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
@@ -5621,6 +6184,7 @@ renderSupplierAccounts();
 renderReferenceVault();
 renderPublicReferenceSources();
 renderPartHistoryRecents();
+renderCodeDesk();
 loadJobs();
 loadCoverageDashboard();
 loadVehicles();

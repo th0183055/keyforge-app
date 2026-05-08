@@ -3636,6 +3636,7 @@ textarea {
     z-index: 20;
     display: block;
     padding: 0;
+    overflow-x: auto;
     border-top: 1px solid rgba(255, 255, 255, 0.14);
   }
 
@@ -3644,11 +3645,14 @@ textarea {
   }
 
   .nav-list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: flex;
+    grid-template-columns: none;
     gap: 0;
+    min-width: max-content;
   }
 
   .nav-item {
+    flex: 0 0 116px;
     min-height: 62px;
     border-radius: 0;
     padding: 8px 4px;
@@ -3948,7 +3952,7 @@ textarea {
   }
 
   .nav-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: none;
   }
 
   .prompt-row {
@@ -4433,6 +4437,11 @@ textarea:focus {
   margin: 0 auto;
 }
 
+.code-desk-panel {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
 .proof-vault-actions,
 .proof-card-actions {
   display: flex;
@@ -4443,7 +4452,9 @@ textarea:focus {
 }
 
 .proof-vault-result,
-.proof-record-list {
+.proof-record-list,
+.code-desk-result,
+.code-desk-record-list {
   display: grid;
   gap: 14px;
 }
@@ -4468,6 +4479,135 @@ textarea:focus {
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.code-desk-form {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.7fr) minmax(170px, 0.7fr) minmax(280px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.code-desk-form label,
+.part-history-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.code-desk-form input,
+.code-desk-form select,
+.part-history-form input {
+  width: 100%;
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  padding: 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.code-desk-form input:focus,
+.code-desk-form select:focus,
+.part-history-form input:focus {
+  outline: 2px solid rgba(79, 89, 101, 0.2);
+  border-color: var(--accent);
+}
+
+.code-desk-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.code-desk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 14px;
+}
+
+.code-desk-card,
+.code-desk-record {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  background: rgba(246, 248, 250, 0.92);
+  padding: 14px;
+}
+
+.code-cut-table {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(94px, 1fr));
+  gap: 8px;
+}
+
+.code-cut-table div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 10px;
+  background: white;
+}
+
+.code-cut-table div.warn {
+  border-color: #c98f62;
+  background: #fff8ee;
+}
+
+.code-cut-table span,
+.code-desk-record span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.code-cut-table strong {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.code-cut-table small,
+.code-desk-record small,
+.code-desk-record p,
+.muted-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.code-depth-table,
+.code-measure-table {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.code-depth-table span,
+.code-measure-table span {
+  border: 1px solid #dce2e8;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.code-depth-table strong {
+  margin-right: 6px;
+  color: var(--accent-dark);
 }
 
 .part-history-result,
@@ -4708,7 +4848,8 @@ textarea:focus {
 }
 
 .proof-attachment img,
-.proof-attachment > span {
+.proof-attachment > span,
+.proof-file-tile {
   width: 54px;
   height: 42px;
   border-radius: 4px;
@@ -4716,12 +4857,14 @@ textarea:focus {
   background: #dce2e8;
 }
 
-.proof-attachment > span {
+.proof-attachment > span,
+.proof-file-tile {
   display: grid;
   place-items: center;
   color: var(--accent-dark);
   font-size: 0.72rem;
   font-weight: 900;
+  text-decoration: none;
 }
 
 .proof-attachment strong,
@@ -4805,6 +4948,9 @@ textarea:focus {
 
 @media (max-width: 760px) {
   .part-history-form,
+  .code-desk-form,
+  .code-desk-summary-grid,
+  .code-desk-grid,
   .history-summary-grid,
   .history-job-grid,
   .coverage-summary-grid,
