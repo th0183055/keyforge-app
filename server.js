@@ -2862,6 +2862,244 @@ function buildPartHistory(query, jobs, partsReference) {
   };
 }
 
+const coverageMakeAliases = [
+  ["LAND ROVER", "Land Rover"],
+  ["RANGE ROVER", "Land Rover"],
+  ["CHEVROLET", "Chevrolet"],
+  ["CHEVY", "Chevrolet"],
+  ["CADILLAC", "Cadillac"],
+  ["BUICK", "Buick"],
+  ["GMC", "GMC"],
+  ["CHRYSLER", "Chrysler"],
+  ["DODGE", "Dodge"],
+  ["JEEP", "Jeep"],
+  ["RAM", "Ram"],
+  ["FORD", "Ford"],
+  ["LINCOLN", "Lincoln"],
+  ["TOYOTA", "Toyota"],
+  ["LEXUS", "Lexus"],
+  ["HONDA", "Honda"],
+  ["ACURA", "Acura"],
+  ["NISSAN", "Nissan"],
+  ["INFINITI", "Infiniti"],
+  ["HYUNDAI", "Hyundai"],
+  ["KIA", "Kia"],
+  ["MAZDA", "Mazda"],
+  ["SUBARU", "Subaru"],
+  ["MITSUBISHI", "Mitsubishi"],
+  ["BMW", "BMW"],
+  ["MINI", "Mini"],
+  ["VOLVO", "Volvo"],
+  ["VOLKSWAGEN", "Volkswagen"],
+  ["VW", "Volkswagen"],
+  ["AUDI", "Audi"],
+  ["JAGUAR", "Jaguar"],
+  ["FIAT", "Fiat"],
+  ["TESLA", "Tesla"],
+];
+
+const coverageModelStopWords = new Set([
+  "A",
+  "ADD",
+  "AKL",
+  "ALL",
+  "AUTO",
+  "BLACK",
+  "BLK",
+  "BLUE",
+  "CUSTOMER",
+  "DEALER",
+  "DK",
+  "DUP",
+  "GRAY",
+  "GREY",
+  "GRY",
+  "KEY",
+  "KEYS",
+  "LOCK",
+  "RED",
+  "REMOTE",
+  "SMART",
+  "THE",
+  "UNLOCK",
+  "WHITE",
+  "WHT",
+]);
+
+function coverageOutcome(job) {
+  const outcome = partHistoryOutcome(job);
+  return outcome?.key || "unknown";
+}
+
+function coveragePercent(successes, warnings) {
+  const denominator = Number(successes || 0) + Number(warnings || 0);
+  return denominator ? Math.round((Number(successes || 0) / denominator) * 100) : null;
+}
+
+function coverageVehicleForJob(job = {}) {
+  const source = [job.vehicle, job.title].filter(Boolean).join(" ");
+  const text = normalizeVehicleText(source);
+  const year = text.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
+  const alias = coverageMakeAliases.find(([needle]) => text.includes(needle));
+  const make = alias?.[1] || "";
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const aliasTokens = alias?.[0]?.split(/\s+/) || [];
+  let start = -1;
+  if (aliasTokens.length) {
+    start = tokens.findIndex((_, index) => aliasTokens.every((part, offset) => tokens[index + offset] === part));
+    if (start >= 0) start += aliasTokens.length;
+  }
+  if (start < 0 && year) start = tokens.indexOf(year) + 1;
+  const model = tokens
+    .slice(Math.max(start, 0))
+    .filter((token) => token !== year && !aliasTokens.includes(token) && !coverageModelStopWords.has(token))
+    .slice(0, 3)
+    .join(" ");
+  return {
+    year,
+    make,
+    model,
+    label: [year, make, model].filter(Boolean).join(" ") || cleanString(job.vehicle || job.title || "Unknown vehicle"),
+    automotive: Boolean(make || normalizeVinCandidate(job.vin) || jobVins(job).length),
+  };
+}
+
+function coverageGroup() {
+  return {
+    jobs: 0,
+    successes: 0,
+    warnings: 0,
+    unknown: 0,
+    vehicles: new Set(),
+    programmers: new Set(),
+    partNumbers: new Set(),
+    jobIds: new Set(),
+  };
+}
+
+function addCoverageJob(group, job, vehicle, partNumbers) {
+  group.jobs += 1;
+  group.jobIds.add(job.id);
+  const outcome = coverageOutcome(job);
+  if (outcome === "success") group.successes += 1;
+  else if (outcome === "warning") group.warnings += 1;
+  else group.unknown += 1;
+  if (vehicle?.label) group.vehicles.add(vehicle.label);
+  if (job.programmer) group.programmers.add(cleanString(job.programmer));
+  for (const part of partNumbers || []) group.partNumbers.add(part);
+}
+
+function serializeCoverageGroup(key, group) {
+  return {
+    key,
+    jobs: group.jobs,
+    successes: group.successes,
+    warnings: group.warnings,
+    unknown: group.unknown,
+    observedCoveragePercent: coveragePercent(group.successes, group.warnings),
+    vehicles: Array.from(group.vehicles).slice(0, 8),
+    programmers: Array.from(group.programmers).slice(0, 8),
+    partNumbers: Array.from(group.partNumbers).slice(0, 12),
+  };
+}
+
+function coveragePartNumbersForJob(job, partsReference) {
+  const tokens = extractPartHistoryJobTokens(job);
+  const rows = lookupPartsCrossReferenceRows(partsReference, tokens);
+  const references = rows.map(crossReferenceSummary);
+  return uniqueCleanValues([
+    references.map((reference) => reference.primaryLabel || reference.primary),
+    references.flatMap((reference) => reference.identifiers || []),
+    tokens,
+  ]).slice(0, 16);
+}
+
+function buildCoverageDashboard(jobs = [], partsReference = {}) {
+  const automotiveJobs = [];
+  const makeGroups = new Map();
+  const programmerGroups = new Map();
+  const partGroups = new Map();
+  const missingProgrammer = [];
+  const missingPart = [];
+  const needsOutcome = [];
+  let jobsWithProgrammer = 0;
+  let jobsWithPartNumbers = 0;
+  let crossReferenceLinkedJobs = 0;
+  let successes = 0;
+  let warnings = 0;
+  let unknown = 0;
+
+  for (const job of jobs || []) {
+    const vehicle = coverageVehicleForJob(job);
+    if (!vehicle.automotive) continue;
+    automotiveJobs.push(job);
+    const outcome = coverageOutcome(job);
+    if (outcome === "success") successes += 1;
+    else if (outcome === "warning") warnings += 1;
+    else unknown += 1;
+
+    const partNumbers = coveragePartNumbersForJob(job, partsReference);
+    const hasProgrammer = Boolean(cleanString(job.programmer));
+    if (hasProgrammer) jobsWithProgrammer += 1;
+    else missingProgrammer.push({ id: job.id, title: job.title || vehicle.label, vehicle: vehicle.label });
+    if (partNumbers.length) jobsWithPartNumbers += 1;
+    else missingPart.push({ id: job.id, title: job.title || vehicle.label, vehicle: vehicle.label });
+    if (lookupPartsCrossReferenceRows(partsReference, partNumbers).length) crossReferenceLinkedJobs += 1;
+    if (outcome === "unknown") needsOutcome.push({ id: job.id, title: job.title || vehicle.label, vehicle: vehicle.label });
+
+    const makeKey = vehicle.make || "Unknown make";
+    if (!makeGroups.has(makeKey)) makeGroups.set(makeKey, coverageGroup());
+    addCoverageJob(makeGroups.get(makeKey), job, vehicle, partNumbers);
+
+    const programmerKey = cleanString(job.programmer) || "Programmer not recorded";
+    if (!programmerGroups.has(programmerKey)) programmerGroups.set(programmerKey, coverageGroup());
+    addCoverageJob(programmerGroups.get(programmerKey), job, vehicle, partNumbers);
+
+    const primaryPart = partNumbers[0] || "Part number not recorded";
+    if (!partGroups.has(primaryPart)) partGroups.set(primaryPart, coverageGroup());
+    addCoverageJob(partGroups.get(primaryPart), job, vehicle, partNumbers);
+  }
+
+  const sortCoverage = (left, right) =>
+    right.jobs - left.jobs ||
+    (right.observedCoveragePercent ?? -1) - (left.observedCoveragePercent ?? -1) ||
+    left.key.localeCompare(right.key);
+  const makeCoverage = Array.from(makeGroups.entries()).map(([key, group]) => serializeCoverageGroup(key, group)).sort(sortCoverage);
+  const programmerCoverage = Array.from(programmerGroups.entries()).map(([key, group]) => serializeCoverageGroup(key, group)).sort(sortCoverage);
+  const partCoverage = Array.from(partGroups.entries()).map(([key, group]) => serializeCoverageGroup(key, group)).sort(sortCoverage);
+  const totalAutomotiveJobs = automotiveJobs.length;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalJobs: (jobs || []).length,
+      automotiveJobs: totalAutomotiveJobs,
+      provenJobs: successes,
+      warningJobs: warnings,
+      unknownJobs: unknown,
+      jobsWithProgrammer,
+      jobsWithPartNumbers,
+      crossReferenceLinkedJobs,
+      observedCoveragePercent: coveragePercent(successes, warnings),
+      programmerProofPercent: totalAutomotiveJobs ? Math.round((jobsWithProgrammer / totalAutomotiveJobs) * 100) : 0,
+      partProofPercent: totalAutomotiveJobs ? Math.round((jobsWithPartNumbers / totalAutomotiveJobs) * 100) : 0,
+      crossReferencePercent: totalAutomotiveJobs ? Math.round((crossReferenceLinkedJobs / totalAutomotiveJobs) * 100) : 0,
+      referenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
+      referenceTokens: partsReference?.totalTokens || Object.keys(partsReference?.tokenIndex || {}).length,
+    },
+    makes: makeCoverage.slice(0, 18),
+    programmers: programmerCoverage.slice(0, 18),
+    parts: partCoverage.slice(0, 24),
+    gaps: {
+      missingProgrammer: missingProgrammer.slice(0, 8),
+      missingPart: missingPart.slice(0, 8),
+      needsOutcome: needsOutcome.slice(0, 8),
+    },
+    proofNote:
+      "Coverage is observed from saved TimLock-App jobs. Percentages are proof of recorded shop history, not a universal guarantee for every trim or immobilizer variant.",
+  };
+}
+
 function applyShopEvidenceToProducts(liveSupplierLookup, shopEvidence) {
   if (!liveSupplierLookup?.products?.length || !shopEvidence?.tokens?.length) return liveSupplierLookup;
   return {
@@ -5337,6 +5575,12 @@ async function handleApi(request, response, pathname) {
     }
     const partsReference = await readPartsCrossReference();
     sendJson(response, 200, buildPartHistory(query, store.jobs, partsReference));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/coverage-dashboard") {
+    const partsReference = await readPartsCrossReference();
+    sendJson(response, 200, buildCoverageDashboard(store.jobs, partsReference));
     return;
   }
 

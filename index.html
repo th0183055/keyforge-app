@@ -25,6 +25,7 @@
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
           <button class="nav-item" data-view="part-history">Part History</button>
+          <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
           <button class="nav-item" data-view="about">About</button>
@@ -131,6 +132,25 @@
               <article class="assistant-card">
                 <strong>Search LR#, MW#, TI#, OE#, FCC, or SKU</strong>
                 <p>Matched saved jobs will show vehicle, part identifiers, programmer, OE sources, and observed coverage proof.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="coverage">
+          <section class="panel wide coverage-dashboard-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Observed proof</p>
+                <h3>Programmer coverage dashboard</h3>
+              </div>
+              <button class="secondary-action small" type="button" id="refreshCoverageDashboard">Refresh Proof</button>
+            </div>
+            <div class="form-status" id="coverageDashboardStatus"></div>
+            <div class="coverage-dashboard" id="coverageDashboard">
+              <article class="assistant-card">
+                <strong>Building proof from saved jobs</strong>
+                <p>Coverage will show observed success by make, programmer, part number, and missing proof gaps.</p>
               </article>
             </div>
           </section>

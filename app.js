@@ -20,6 +20,7 @@ let pendingJobOfferId = "";
 let deferredInstallPrompt = null;
 let latestPartHistory = null;
 let workflowActionsOpen = false;
+let latestCoverageDashboard = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const liveProductFilters = {
   condition: new Set(),
@@ -69,6 +70,9 @@ const partHistoryForm = document.querySelector("#partHistoryForm");
 const partHistoryStatus = document.querySelector("#partHistoryStatus");
 const partHistoryResult = document.querySelector("#partHistoryResult");
 const partHistoryRecents = document.querySelector("#partHistoryRecents");
+const coverageDashboard = document.querySelector("#coverageDashboard");
+const coverageDashboardStatus = document.querySelector("#coverageDashboardStatus");
+const refreshCoverageDashboardButton = document.querySelector("#refreshCoverageDashboard");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -83,6 +87,7 @@ const chatLogElement = document.querySelector("#chatLog");
 function showView(id) {
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
+  if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
 }
 
 function updateConnectionStatus() {
@@ -3118,6 +3123,189 @@ function renderPartHistory(payload) {
   `;
 }
 
+function coveragePercentLabel(value) {
+  return Number.isFinite(Number(value)) ? `${Number(value)}%` : "N/A";
+}
+
+function coverageProofSummary(payload = {}) {
+  const summary = payload.summary || {};
+  const topProgrammer = payload.programmers?.find((item) => item.key !== "Programmer not recorded");
+  const topMake = payload.makes?.[0];
+  const pieces = [
+    `${summary.automotiveJobs || 0} automotive jobs are in the TimLock-App proof base.`,
+    `${summary.provenJobs || 0} are proven successful with ${coveragePercentLabel(summary.observedCoveragePercent)} observed success across scored jobs.`,
+    `${summary.jobsWithProgrammer || 0} jobs have programmer proof and ${summary.jobsWithPartNumbers || 0} have part-number proof.`,
+  ];
+  if (topProgrammer) {
+    pieces.push(`Top programmer: ${topProgrammer.key} with ${topProgrammer.jobs} job${topProgrammer.jobs === 1 ? "" : "s"} and ${coveragePercentLabel(topProgrammer.observedCoveragePercent)} observed success.`);
+  }
+  if (topMake) {
+    pieces.push(`Top make: ${topMake.key} with ${topMake.jobs} job${topMake.jobs === 1 ? "" : "s"}.`);
+  }
+  return pieces.join(" ");
+}
+
+async function copyCoverageProof() {
+  if (!latestCoverageDashboard) return;
+  const text = coverageProofSummary(latestCoverageDashboard);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  if (coverageDashboardStatus) coverageDashboardStatus.textContent = "Coverage proof summary copied.";
+}
+
+function renderCoverageCard(item, type = "programmer") {
+  const percent = Number.isFinite(Number(item.observedCoveragePercent)) ? Number(item.observedCoveragePercent) : null;
+  const label = type === "make" ? "Make" : type === "part" ? "Part family" : "Programmer";
+  return `
+    <article class="coverage-card">
+      <div>
+        <span>${escapeHtml(percent === null ? "N/A" : `${percent}%`)}</span>
+        <strong>${escapeHtml(item.key || label)}</strong>
+      </div>
+      <div class="evidence-meter"><i style="width: ${escapeHtml(percent === null ? 0 : percent)}%"></i></div>
+      <p>${escapeHtml(`${item.successes || 0} success / ${item.warnings || 0} warning / ${item.unknown || 0} unknown across ${item.jobs || 0} job${item.jobs === 1 ? "" : "s"}.`)}</p>
+      <div class="history-job-section">
+        <small>${escapeHtml(type === "part" ? "Vehicles" : "Part proof")}</small>
+        <div class="part-chip-row">${renderPartChips(type === "part" ? item.vehicles : item.partNumbers, type === "part" ? "No vehicles" : "No part numbers")}</div>
+      </div>
+      ${
+        type !== "programmer"
+          ? `<div class="history-job-section"><small>Programmers</small><div class="part-chip-row">${renderPartChips(item.programmers, "No programmer")}</div></div>`
+          : `<div class="history-job-section"><small>Vehicles</small><div class="part-chip-row">${renderPartChips(item.vehicles, "No vehicles")}</div></div>`
+      }
+    </article>
+  `;
+}
+
+function renderCoverageGap(title, items = [], empty) {
+  return `
+    <article class="coverage-gap-card">
+      <strong>${escapeHtml(title)}</strong>
+      ${
+        items.length
+          ? `<div class="coverage-gap-list">${items
+              .map(
+                (item) => `
+                  <div>
+                    <span>${escapeHtml(item.vehicle || "Unknown vehicle")}</span>
+                    <small>${escapeHtml(item.title || item.id || "Saved job")}</small>
+                  </div>
+                `,
+              )
+              .join("")}</div>`
+          : `<p>${escapeHtml(empty)}</p>`
+      }
+    </article>
+  `;
+}
+
+function renderCoverageDashboard(payload = {}) {
+  if (!coverageDashboard) return;
+  latestCoverageDashboard = payload;
+  const summary = payload.summary || {};
+  const summaryCards = [
+    ["Jobs", summary.automotiveJobs || 0, `${summary.totalJobs || 0} total saved records`],
+    ["Observed", coveragePercentLabel(summary.observedCoveragePercent), `${summary.provenJobs || 0} proven / ${summary.warningJobs || 0} warnings`],
+    ["Programmers", coveragePercentLabel(summary.programmerProofPercent), `${summary.jobsWithProgrammer || 0} jobs with programmer proof`],
+    ["Parts", coveragePercentLabel(summary.partProofPercent), `${summary.jobsWithPartNumbers || 0} jobs with part numbers`],
+    ["Cross-ref", coveragePercentLabel(summary.crossReferencePercent), `${summary.crossReferenceLinkedJobs || 0} jobs linked to ${summary.referenceRows || 0} rows`],
+  ];
+
+  coverageDashboard.innerHTML = `
+    <section class="history-summary-grid coverage-summary-grid">
+      ${summaryCards
+        .map(
+          ([label, value, caption]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(caption)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    <section class="history-action-bar">
+      <div class="badge-row">
+        <span>Observed shop proof</span>
+        <span>${escapeHtml(`${summary.referenceTokens || 0} reference tokens`)}</span>
+        <span>${escapeHtml(`${summary.unknownJobs || 0} jobs need outcome cleanup`)}</span>
+      </div>
+      <button class="secondary-action small" type="button" data-copy-coverage-proof>Copy Coverage Proof</button>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Programmer proof</p>
+          <h3>What has worked here</h3>
+        </div>
+      </div>
+      <div class="coverage-grid">
+        ${
+          payload.programmers?.length
+            ? payload.programmers.slice(0, 6).map((item) => renderCoverageCard(item, "programmer")).join("")
+            : `<article class="assistant-card"><strong>No programmer proof yet</strong><p>Save worked jobs with a programmer to build this chart.</p></article>`
+        }
+      </div>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Make coverage</p>
+          <h3>Coverage by vehicle family</h3>
+        </div>
+      </div>
+      <div class="coverage-grid">
+        ${
+          payload.makes?.length
+            ? payload.makes.slice(0, 8).map((item) => renderCoverageCard(item, "make")).join("")
+            : `<article class="assistant-card"><strong>No make coverage yet</strong><p>Import or save vehicle jobs to build make-level proof.</p></article>`
+        }
+      </div>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Part proof</p>
+          <h3>Top part families</h3>
+        </div>
+      </div>
+      <div class="coverage-grid">
+        ${
+          payload.parts?.length
+            ? payload.parts.slice(0, 6).map((item) => renderCoverageCard(item, "part")).join("")
+            : `<article class="assistant-card"><strong>No part proof yet</strong><p>Record LR#, MW#, TI#, OE#, FCC, or SKU values on jobs to build part proof.</p></article>`
+        }
+      </div>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Cleanup queue</p>
+          <h3>Proof gaps to fix next</h3>
+        </div>
+      </div>
+      <div class="coverage-gap-grid">
+        ${renderCoverageGap("Missing programmer", payload.gaps?.missingProgrammer || [], "Every shown automotive job has programmer proof.")}
+        ${renderCoverageGap("Missing part number", payload.gaps?.missingPart || [], "Every shown automotive job has part proof.")}
+        ${renderCoverageGap("Needs outcome", payload.gaps?.needsOutcome || [], "Every shown automotive job has a scored outcome.")}
+      </div>
+    </section>
+    <article class="assistant-card">
+      <strong>Proof note</strong>
+      <p>${escapeHtml(payload.proofNote || "Coverage is observed from saved jobs.")}</p>
+    </article>
+  `;
+}
+
 function fillWorkedJobFromCurrentLookup() {
   if (!workedJobForm || !latestVinProfile?.vehicle) {
     if (workedJobStatus) workedJobStatus.textContent = "Run a VIN lookup first, then come back here to prefill the job.";
@@ -4279,6 +4467,19 @@ async function loadJobs() {
   renderJobs();
 }
 
+async function loadCoverageDashboard() {
+  if (!coverageDashboard) return;
+  try {
+    if (coverageDashboardStatus) coverageDashboardStatus.textContent = "Calculating observed coverage proof...";
+    const payload = await api("/api/coverage-dashboard");
+    renderCoverageDashboard(payload);
+    if (coverageDashboardStatus) coverageDashboardStatus.textContent = `Updated coverage from ${payload.summary?.automotiveJobs || 0} automotive jobs.`;
+  } catch (error) {
+    if (coverageDashboardStatus) coverageDashboardStatus.textContent = error.message;
+    coverageDashboard.innerHTML = `<article class="assistant-card"><strong>Coverage unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
 async function loadVehicles() {
   const payload = await api("/api/vehicles");
   vehicles = payload.vehicles;
@@ -4329,6 +4530,8 @@ navItems.forEach((item) => {
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.viewTarget));
 });
+
+refreshCoverageDashboardButton?.addEventListener("click", () => loadCoverageDashboard());
 
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
@@ -4400,6 +4603,12 @@ document.addEventListener("click", (event) => {
   const copyPartProofButton = event.target.closest("[data-copy-part-proof]");
   if (copyPartProofButton) {
     copyPartHistoryProof();
+    return;
+  }
+
+  const copyCoverageProofButton = event.target.closest("[data-copy-coverage-proof]");
+  if (copyCoverageProofButton) {
+    copyCoverageProof();
     return;
   }
 
@@ -4501,6 +4710,12 @@ document.addEventListener("click", (event) => {
         if (result.profile && latestVinProfile) {
           latestVinProfile.verifiedProfile = result.profile;
         }
+        if (result.job) {
+          jobs.unshift(result.job);
+          selectedJobId = result.job.id;
+          renderJobs();
+          loadCoverageDashboard();
+        }
         feedbackButton.textContent = `Saved: ${feedbackLabel(outcome)}`;
         if (outcome === "worked" && latestVinProfile) {
           startSupplierLookup(latestVinProfile);
@@ -4559,6 +4774,7 @@ jobForm.addEventListener("submit", async (event) => {
     jobs.unshift(payload.job);
     selectedJobId = payload.job.id;
     renderJobs();
+    loadCoverageDashboard();
     jobForm.reset();
   } catch (error) {
     alert(error.message);
@@ -4614,6 +4830,7 @@ document.addEventListener("submit", async (event) => {
     jobs.unshift(result.job);
     selectedJobId = result.job.id;
     renderJobs();
+    loadCoverageDashboard();
     closeJobSaveModal();
     await refreshProfileAfterWorkedJob(result, programmerName);
   } catch (error) {
@@ -4641,6 +4858,7 @@ workedJobForm?.addEventListener("submit", async (event) => {
     jobs.unshift(result.job);
     selectedJobId = result.job.id;
     renderJobs();
+    loadCoverageDashboard();
     await refreshProfileAfterWorkedJob(result, payload.part.programmer);
     workedJobForm.reset();
     workedJobStatus.textContent = `Saved ${payload.vehicle.year} ${payload.vehicle.make} ${payload.vehicle.model}: ${payload.part.name} / ${payload.part.lishi} / ${payload.part.programmer}.`;
@@ -4668,6 +4886,7 @@ workedJobImportForm?.addEventListener("submit", async (event) => {
       body: JSON.stringify({ text }),
     });
     await loadJobs();
+    await loadCoverageDashboard();
     workedJobImportStatus.textContent = `Imported ${result.imported} worked jobs, updated ${result.profilesUpdated} vehicle profiles, skipped ${result.skipped}, duplicates ${result.duplicates}.`;
     if (result.imported) workedJobImportForm.reset();
   } catch (error) {
@@ -4976,6 +5195,7 @@ renderReferenceVault();
 renderPublicReferenceSources();
 renderPartHistoryRecents();
 loadJobs();
+loadCoverageDashboard();
 loadVehicles();
 loadInsights();
 loadKeyIntelligence();
