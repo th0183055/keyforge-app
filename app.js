@@ -19,7 +19,6 @@ let activeVinScan = null;
 let pendingJobOfferId = "";
 let deferredInstallPrompt = null;
 let latestPartHistory = null;
-let workflowActionsOpen = false;
 let latestCoverageDashboard = null;
 let latestProofVault = null;
 let proofVaultServerAttachments = {};
@@ -919,16 +918,13 @@ function ensureSelectedKeyFamily(products) {
 }
 
 function renderWorkflowActions(actions) {
-  const hasHome = actions.some((action) => /data-vin-home|data-vin-reset/.test(action) && />\s*Home\s*</i.test(action));
-  const withHome = hasHome
+  const hasStartOver = actions.some((action) => /data-vin-home|data-vin-reset/.test(action));
+  const withStartOver = hasStartOver
     ? actions
-    : [...actions, `<button class="secondary-action" type="button" data-vin-home>Home</button>`];
+    : [...actions, `<button class="secondary-action" type="button" data-vin-home>Start over</button>`];
   return `
-    <div class="workflow-action-shell${workflowActionsOpen ? " is-open" : ""}">
-      <button class="workflow-action-toggle" type="button" data-toggle-workflow-actions aria-expanded="${workflowActionsOpen ? "true" : "false"}">
-        Actions <span>${withHome.length}</span>
-      </button>
-      <div class="workflow-actions">${withHome.join("")}</div>
+    <div class="workflow-action-shell">
+      <div class="workflow-actions">${withStartOver.join("")}</div>
     </div>
   `;
 }
@@ -2505,14 +2501,13 @@ function renderProgrammerCoverageScreen(profile) {
         <div>
           <p class="eyebrow">Screen 6</p>
           <h3>Choose programmer path</h3>
-          <p>Tap the path you would actually use, then record the outcome after the job to improve future confidence.</p>
+          <p>Tap the programmer you would actually use. That moves you to the final job overview where you can save the worked-job proof.</p>
         </div>
-        <button class="primary-action" type="button" data-save-selected-job>Record worked job</button>
       </div>
       ${renderSelectedKeyMini(snapshot)}
       <div class="job-entry-callout">
-        <strong>Record the outcome</strong>
-        <p>After the job, save the exact vehicle, key, Lishi/keyway, part number, programmer, and outcome. Future coverage percentages use that proof.</p>
+        <strong>Next step</strong>
+        <p>Choose a programmer card below to continue. Save worked-job proof only after reviewing the final summary.</p>
       </div>
       ${
         options.length
@@ -2535,8 +2530,7 @@ function renderProgrammerCoverageScreen(profile) {
           : `<article class="assistant-card"><strong>No programmer coverage yet</strong><p>Add a worked job record or use OEM as the fallback path before quoting.</p></article>`
       }
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="lishi">Back</button>`,
-        `<button class="secondary-action" type="button" data-save-selected-job>Save worked job</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="lishi">Back to decode</button>`,
       ])}
     </section>
   `;
@@ -2629,9 +2623,8 @@ function renderLishiDecodeScreen(profile) {
         <ul>${[...new Set(checklist)].slice(0, 7).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
       </section>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
-        `<button class="secondary-action" type="button" data-save-selected-job>Save worked job</button>`,
-        `<button class="primary-action" type="button" data-continue-programmers>Programmer coverage</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="parts">Back to key pictures</button>`,
+        `<button class="primary-action" type="button" data-continue-programmers>Next: Programmer coverage</button>`,
       ])}
     </section>
   `;
@@ -2712,9 +2705,9 @@ function renderFinalJobSummaryScreen(profile) {
         </article>
       </section>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="programmers">Back</button>`,
-        `<button class="primary-action" type="button" data-save-selected-job>Save worked job</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="programmers">Back to programmer</button>`,
+        `<button class="primary-action" type="button" data-save-selected-job>Save worked-job proof</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Start over</button>`,
       ])}
     </section>
   `;
@@ -2856,8 +2849,8 @@ function renderSelectedSupplierScreen(profile) {
         </ul>
       </section>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="parts">Back</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="parts">Back to key pictures</button>`,
+        `<button class="secondary-action" type="button" data-vin-reset>Start over</button>`,
       ])}
     </section>
   `;
@@ -5116,10 +5109,9 @@ function renderVehicleApprovalScreen(profile, context) {
       </div>
       ${renderVitalVehicleFacts(profile)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-home>Back</button>`,
-        `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
+        `<button class="secondary-action" type="button" data-vin-home>Edit VIN / start over</button>`,
+        `<button class="primary-action" type="button" data-approve-vehicle>Next: Choose key type</button>`,
         `<button class="secondary-action" type="button" data-view-vehicle-details>View details</button>`,
-        `<button class="secondary-action" type="button" data-vin-reset>Home</button>`,
       ])}
     </section>
   `;
@@ -5136,8 +5128,8 @@ function renderVehicleDetailsScreen(profile, context) {
       ${renderVehicleDossier(profile)}
       ${renderVinDetails(profile.vinDetails)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
-        `<button class="primary-action" type="button" data-approve-vehicle>Approve vehicle</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
+        `<button class="primary-action" type="button" data-approve-vehicle>Next: Choose key type</button>`,
       ])}
     </section>
   `;
@@ -5187,7 +5179,7 @@ function renderKeyFamilyScreen(profile) {
         </button>
       </div>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
       ])}
     </section>
   `;
@@ -5212,7 +5204,7 @@ function renderKeyPackageScreen(profile) {
           .join("")}
       </div>
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="vehicle">Back to vehicle</button>`,
       ])}
     </section>
   `;
@@ -5238,7 +5230,7 @@ function renderKeyChoicesScreen(profile) {
       </div>
       ${renderPartChoiceBoard(profile.liveSupplierLookup, selectedProducts)}
       ${renderWorkflowActions([
-        `<button class="secondary-action" type="button" data-vin-back="package">Back</button>`,
+        `<button class="secondary-action" type="button" data-vin-back="package">Back to key type</button>`,
       ])}
     </section>
   `;
@@ -6006,17 +5998,6 @@ document.addEventListener("click", (event) => {
   if (scannerCloseButton) {
     stopVinScanner();
     return;
-  }
-
-  const workflowActionToggle = event.target.closest("[data-toggle-workflow-actions]");
-  if (workflowActionToggle) {
-    workflowActionsOpen = !workflowActionsOpen;
-    if (latestVinProfile) renderVinProfile(latestVinProfile);
-    return;
-  }
-
-  if (event.target.closest(".workflow-actions button")) {
-    workflowActionsOpen = false;
   }
 
   const scannedVinButton = event.target.closest("[data-use-scanned-vin]");
