@@ -27,11 +27,14 @@ let proofVaultAttachmentMaxBytes = 1_500_000;
 let codeDeskImportedRecords = [];
 let codeDeskCustomSystems = [];
 let latestCodeDeskAutoBaseline = null;
+let latestApiHealth = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
 const codeDeskImportKey = "timlockCodeDeskImportsV1";
 const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
+const fieldLookupCacheKey = "timlockFieldLookupCacheV1";
+const dispatchPackArchiveKey = "timlockDispatchPacksV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -138,10 +141,33 @@ function closeMobileMenu() {
   setMobileMenu(false);
 }
 
+function setAppStatus(label, tone = "online", detail = "") {
+  if (connectionStatus) {
+    connectionStatus.textContent = label;
+    connectionStatus.title = detail || label;
+  }
+  if (!appStatusBanner) return;
+  ["online", "busy", "degraded", "offline"].forEach((state) => {
+    appStatusBanner.classList.toggle(state, tone === state);
+  });
+  appStatusBanner.dataset.statusDetail = detail || "";
+}
+
 function updateConnectionStatus() {
   const online = navigator.onLine !== false;
-  if (connectionStatus) connectionStatus.textContent = online ? "Online" : "Offline shell";
-  appStatusBanner?.classList.toggle("offline", !online);
+  if (!online) {
+    setAppStatus("Offline field mode", "offline", "Cached lookups and saved jobs remain available on this device.");
+    return;
+  }
+  if (latestApiHealth?.status === "ok") {
+    setAppStatus("Field ready", "online", `Server healthy. ${latestApiHealth?.summary || ""}`.trim());
+    return;
+  }
+  if (latestApiHealth?.status === "degraded") {
+    setAppStatus("Server waking", "degraded", latestApiHealth.error || "The cloud app is slow, but local field cache stays available.");
+    return;
+  }
+  setAppStatus("Checking server", "busy", "Confirming the API is awake.");
 }
 
 function updateInstallButton() {
@@ -2398,6 +2424,138 @@ function selectedProgrammerOption(profile) {
   return options.find((item) => item.key === selectedProgrammerKey) || options[0] || null;
 }
 
+function buildDispatchPack(profile) {
+  const vehicle = profile?.vehicle || {};
+  const snapshot = selectedPartSnapshot(profile);
+  const programmer = selectedProgrammerOption(profile);
+  const lishi = lishiReferenceForProfile(profile, snapshot);
+  const reference = profile?.vehicleReference || {};
+  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle lookup";
+  const supplier = profile?.liveSupplierLookup || {};
+  const supplierCount = supplier.products?.length || 0;
+  const matchedJobCount = profile?.matchedJobs?.length || profile?.shopEvidence?.jobs?.length || 0;
+  const sourceStatus = profile?.fieldMode?.cached
+    ? "Cached field pack"
+    : supplier.loginStatus === "error"
+      ? "Server live / parts slow"
+      : supplierCount
+        ? "Live parts ready"
+        : "Reference ready";
+  const facts = [
+    ["Vehicle", title],
+    ["VIN", profile?.vin || "Y/M/M lookup"],
+    ["Current step", stepLabel(vinWorkflowStep)],
+    ["Key choice", snapshot ? [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ") : selectedPackageOption()?.title || "Choose key type"],
+    ["Part clue", snapshot?.identifier || profile?.supplierCandidates?.[0]?.hlPartNumber || "Pick key picture"],
+    ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify from lock"],
+    ["Programmer", programmer ? `${programmer.name} (${programmerPercent(programmer)}%)` : "Choose programmer path"],
+    ["Proof history", matchedJobCount ? `${matchedJobCount} related saved job${matchedJobCount === 1 ? "" : "s"}` : "No saved job proof yet"],
+  ].filter(([, value]) => value);
+  const checklist = [
+    "Verify ownership/authorization and attach proof before code/PIN work",
+    snapshot ? "Compare FCC, buttons, chip, frequency, blade, and emergency insert before cutting" : "Choose the visible key/button layout before quoting parts",
+    lishi.primary ? `Confirm ${lishi.primary} from the lock or insert before decode` : "Confirm keyway from the lock or insert",
+    programmer ? `Use ${programmer.name}; verify add-key/all-keys-lost coverage before starting` : "Choose programmer path before final rundown",
+    ...(reference.partVerification || []).slice(0, 3),
+    "Save worked-job proof after the job to improve coverage percentages",
+  ];
+  return {
+    id: `${lookupCacheKeyFromProfile(profile)}:${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    title,
+    sourceStatus,
+    stage: stepLabel(vinWorkflowStep),
+    cached: Boolean(profile?.fieldMode?.cached),
+    facts,
+    checklist: [...new Set(checklist.filter(Boolean))].slice(0, 8),
+    notes: [
+      profile?.fieldMode?.reason,
+      supplier.statusMessage,
+      profile?.confidence,
+    ].filter(Boolean),
+  };
+}
+
+function dispatchPackText(pack) {
+  return [
+    `TimLock Dispatch Pack - ${pack.title}`,
+    `Status: ${pack.sourceStatus}`,
+    "",
+    ...pack.facts.map(([label, value]) => `${label}: ${value}`),
+    "",
+    "Checklist:",
+    ...pack.checklist.map((item, index) => `${index + 1}. ${item}`),
+    pack.notes.length ? "" : null,
+    ...pack.notes.map((note) => `Note: ${note}`),
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+}
+
+function savedDispatchPacks() {
+  const archive = readLocalObject(dispatchPackArchiveKey, { packs: [] });
+  return Array.isArray(archive.packs) ? archive.packs : [];
+}
+
+function saveDispatchPack(profile) {
+  const pack = buildDispatchPack(profile);
+  writeLocalObject(dispatchPackArchiveKey, { version: 1, packs: [pack, ...savedDispatchPacks()].slice(0, 50) });
+  return pack;
+}
+
+async function copyDispatchPack(profile) {
+  const pack = buildDispatchPack(profile);
+  const text = dispatchPackText(pack);
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  return pack;
+}
+
+function renderDispatchPack(profile) {
+  const pack = buildDispatchPack(profile);
+  return `
+    <div class="dispatch-pack">
+      <div class="dispatch-pack-head">
+        <div>
+          <p class="eyebrow">Dispatch Pack</p>
+          <strong>${escapeHtml(pack.title)}</strong>
+          <span>${escapeHtml(pack.sourceStatus)}${pack.cached ? " - offline-safe" : ""}</span>
+        </div>
+        <div class="dispatch-pack-actions">
+          <button class="secondary-action small" type="button" data-copy-dispatch-pack>Copy</button>
+          <button class="secondary-action small" type="button" data-save-dispatch-pack>Save</button>
+        </div>
+      </div>
+      <section class="dispatch-pack-facts">
+        ${pack.facts
+          .slice(0, 6)
+          .map(
+            ([label, value]) => `
+              <article>
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value)}</strong>
+              </article>
+            `,
+          )
+          .join("")}
+      </section>
+      <section class="dispatch-pack-checklist">
+        <span>Field checklist</span>
+        <ul>${pack.checklist.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </section>
+      ${pack.notes.length ? `<p class="dispatch-pack-note">${escapeHtml(pack.notes[0])}</p>` : ""}
+    </div>
+  `;
+}
+
 function normalizedProgrammerName(value) {
   return String(value || "")
     .toUpperCase()
@@ -2923,6 +3081,71 @@ function rememberJobs(items = []) {
   const merged = mergeJobLists(localArchivedJobs(), items).slice(0, 1000);
   localStorage.setItem(localJobArchiveKey, JSON.stringify(merged));
   return merged;
+}
+
+function readLocalObject(key, fallback) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "");
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalObject(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Unable to write ${key}`, error);
+  }
+}
+
+function lookupCacheKeyFromVehicle(vehicle = {}) {
+  return `ymm:${cleanInput(vehicle.year)}|${cleanInput(vehicle.make).toUpperCase()}|${cleanInput(vehicle.model).toUpperCase()}`;
+}
+
+function lookupCacheKeyFromVin(vin) {
+  return `vin:${normalizeVinInput(vin)}`;
+}
+
+function lookupCacheKeyFromProfile(profile = {}) {
+  if (profile.vin) return lookupCacheKeyFromVin(profile.vin);
+  return lookupCacheKeyFromVehicle(profile.vehicle || {});
+}
+
+function cacheLookupProfile(key, profile) {
+  if (!key || !profile?.vehicle) return;
+  const cache = readLocalObject(fieldLookupCacheKey, { entries: [] });
+  const entries = Array.isArray(cache.entries) ? cache.entries.filter((entry) => entry?.key !== key) : [];
+  entries.unshift({
+    key,
+    updatedAt: new Date().toISOString(),
+    vehicle: profile.vehicle,
+    profile,
+  });
+  writeLocalObject(fieldLookupCacheKey, { version: 1, entries: entries.slice(0, 75) });
+}
+
+function cachedLookupProfile(key, reason) {
+  const cache = readLocalObject(fieldLookupCacheKey, { entries: [] });
+  const entry = (Array.isArray(cache.entries) ? cache.entries : []).find((item) => item?.key === key);
+  if (!entry?.profile) return null;
+  const profile = JSON.parse(JSON.stringify(entry.profile));
+  profile.fieldMode = {
+    cached: true,
+    reason,
+    cachedAt: entry.updatedAt,
+  };
+  profile.sourceReadiness = [
+    ...(profile.sourceReadiness || []),
+    {
+      sourceId: "field-cache",
+      label: "Field cache",
+      status: "cached",
+      result: `Loaded saved profile from ${entry.updatedAt ? new Date(entry.updatedAt).toLocaleString() : "this device"}`,
+    },
+  ];
+  return profile;
 }
 
 async function syncLocalJobsToServer() {
@@ -5388,15 +5611,9 @@ function renderVinProfile(profile) {
     vinWorkflowStep = "vehicle";
     screenMarkup = renderVehicleApprovalScreen(profile, context);
   }
-  vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}${screenMarkup}`;
+  vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}<section class="vin-result-dispatch">${renderDispatchPack(profile)}</section>${screenMarkup}`;
 
-  vinRecommendation.innerHTML = `
-    <strong>Reference mode</strong>
-    <p>${escapeHtml("Decode the vehicle, choose the visible key style, confirm Lishi/code path, then choose programmer coverage before the final rundown.")}</p>
-    <div class="tag-row">
-      <span>Vehicle</span><span>Buttons</span><span>Lishi</span><span>Codes</span><span>Programming</span>
-    </div>
-  `;
+  vinRecommendation.innerHTML = renderDispatchPack(profile);
   return;
 
   vinResult.innerHTML = `
@@ -5713,6 +5930,7 @@ async function startSupplierLookup(profile) {
     const lookup = await api(`/api/supplier-lookup?${supplierLookupParams(profile)}`);
     if (requestId !== supplierLookupRequestId || latestVinProfile !== profile) return;
     latestVinProfile.liveSupplierLookup = lookup;
+    cacheLookupProfile(lookupCacheKeyFromProfile(latestVinProfile), latestVinProfile);
     renderVinProfile(latestVinProfile);
   } catch (error) {
     if (requestId !== supplierLookupRequestId || latestVinProfile !== profile) return;
@@ -5722,6 +5940,7 @@ async function startSupplierLookup(profile) {
       statusMessage: error.message || "Parts lookup failed.",
       products: latestVinProfile.liveSupplierLookup?.products || [],
     };
+    cacheLookupProfile(lookupCacheKeyFromProfile(latestVinProfile), latestVinProfile);
     renderVinProfile(latestVinProfile);
   }
 }
@@ -5793,14 +6012,17 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 async function api(path, options = {}) {
   let lastError = null;
   const urls = apiUrls(path);
+  const { timeoutMs, noStatus, headers = {}, ...fetchOptions } = options;
+  const defaultTimeout = path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup") ? 15000 : 12000;
+  const requestTimeout = Number(timeoutMs) || defaultTimeout;
 
   for (const [index, url] of urls.entries()) {
     try {
       const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http");
       const response = await fetchWithTimeout(url, {
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-        ...options,
-      }, shouldFastFail ? 2500 : 0);
+        headers: { "Content-Type": "application/json", ...headers },
+        ...fetchOptions,
+      }, shouldFastFail ? Math.min(2500, requestTimeout) : requestTimeout);
 
       let payload = null;
       try {
@@ -5811,17 +6033,58 @@ async function api(path, options = {}) {
       if (!response.ok) {
         throw new Error(payload.error || `Request failed with ${response.status}`);
       }
+      if (!noStatus && path !== "/api/health" && navigator.onLine !== false) {
+        if (latestApiHealth?.status === "degraded") latestApiHealth = null;
+        updateConnectionStatus();
+      }
       return payload;
     } catch (error) {
-      lastError = error;
+      const message =
+        error?.name === "AbortError"
+          ? `The app server took longer than ${Math.round(requestTimeout / 1000)} seconds for ${path}.`
+          : error.message;
+      lastError = new Error(message);
+      if (!noStatus && path !== "/api/health") {
+        setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
+      }
       if (!url.startsWith("http")) continue;
-      throw error;
+      throw lastError;
     }
   }
 
   throw new Error(
     `${lastError?.message || "Request failed"} If this happens only on one device, refresh the page or use the Render Node web-service URL, not a static site URL.`,
   );
+}
+
+async function refreshApiHealth({ quiet = false } = {}) {
+  if (navigator.onLine === false) {
+    latestApiHealth = { status: "degraded", error: "Device is offline." };
+    updateConnectionStatus();
+    return null;
+  }
+  if (!quiet) setAppStatus("Checking server", "busy", "Running a fast health check.");
+  try {
+    latestApiHealth = await api("/api/health", { timeoutMs: 5000, noStatus: true });
+    updateConnectionStatus();
+    return latestApiHealth;
+  } catch (error) {
+    latestApiHealth = { status: "degraded", error: error.message };
+    updateConnectionStatus();
+    return null;
+  }
+}
+
+function bootTask(label, task) {
+  Promise.resolve()
+    .then(task)
+    .catch((error) => {
+      console.warn(`${label} failed`, error);
+      if (navigator.onLine !== false) {
+        latestApiHealth = { status: "degraded", error: error.message };
+        updateConnectionStatus();
+      }
+    });
 }
 
 function normalizeVinInput(value) {
@@ -6043,6 +6306,32 @@ document.addEventListener("click", (event) => {
   const copyProofVaultButton = event.target.closest("[data-copy-proof-vault-summary]");
   if (copyProofVaultButton) {
     copyProofVaultSummary();
+    return;
+  }
+
+  const copyDispatchButton = event.target.closest("[data-copy-dispatch-pack]");
+  if (copyDispatchButton && latestVinProfile) {
+    const original = copyDispatchButton.textContent;
+    copyDispatchButton.textContent = "Copied";
+    copyDispatchButton.disabled = true;
+    copyDispatchPack(latestVinProfile)
+      .catch((error) => alert(error.message))
+      .finally(() => {
+        window.setTimeout(() => {
+          copyDispatchButton.textContent = original;
+          copyDispatchButton.disabled = false;
+        }, 900);
+      });
+    return;
+  }
+
+  const saveDispatchButton = event.target.closest("[data-save-dispatch-pack]");
+  if (saveDispatchButton && latestVinProfile) {
+    saveDispatchPack(latestVinProfile);
+    saveDispatchButton.textContent = "Saved";
+    window.setTimeout(() => {
+      saveDispatchButton.textContent = "Save";
+    }, 900);
     return;
   }
 
@@ -6567,15 +6856,24 @@ vinForm.addEventListener("submit", async (event) => {
     Object.values(liveProductFilters).forEach((selected) => selected.clear());
     vinResult.innerHTML = `
       <div class="lookup-loading">
-        <article><strong>1. Decoding VIN</strong><p>Reading vehicle identity.</p></article>
-        <article><strong>2. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
+        <article class="active"><strong>1. Decoding VIN</strong><p>Reading vehicle identity with a server timeout guard.</p></article>
+        <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
+        <article><strong>3. Preparing parts search</strong><p>Parts load after the vehicle is shown.</p></article>
       </div>
     `;
-    const profile = await api(`/api/vin/${encodeURIComponent(vin)}`);
+    setAppStatus("Decoding VIN", "busy", "The request will fail fast instead of hanging.");
+    const profile = await api(`/api/vin/${encodeURIComponent(vin)}`, { timeoutMs: 15000 });
+    cacheLookupProfile(lookupCacheKeyFromVin(vin), profile);
     renderVinProfile(profile);
     startSupplierLookup(profile);
   } catch (error) {
-    renderVinError(error.message);
+    const cached = cachedLookupProfile(lookupCacheKeyFromVin(vin), error.message);
+    if (cached) {
+      setAppStatus("Using field cache", "degraded", error.message);
+      renderVinProfile(cached);
+    } else {
+      renderVinError(error.message);
+    }
   } finally {
     submitButton.disabled = false;
   }
@@ -6603,24 +6901,34 @@ if (ymmForm) {
       Object.values(liveProductFilters).forEach((selected) => selected.clear());
       vinResult.innerHTML = `
         <div class="lookup-loading">
-          <article><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
-          <article><strong>2. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
+          <article class="active"><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
+          <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
+          <article><strong>3. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
         </div>
       `;
+      setAppStatus("Building lookup", "busy", "The request will fail fast instead of hanging.");
       const profile = await api(
         `/api/vehicle-lookup?year=${encodeURIComponent(year)}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`,
+        { timeoutMs: 12000 },
       );
+      cacheLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), profile);
       renderVinProfile(profile);
       startSupplierLookup(profile);
     } catch (error) {
-      renderVinError(error.message);
+      const cached = cachedLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), error.message);
+      if (cached) {
+        setAppStatus("Using field cache", "degraded", error.message);
+        renderVinProfile(cached);
+      } else {
+        renderVinError(error.message);
+      }
     } finally {
       submitButton.disabled = false;
     }
   });
 }
 
-window.addEventListener("online", updateConnectionStatus);
+window.addEventListener("online", () => refreshApiHealth({ quiet: true }));
 window.addEventListener("offline", updateConnectionStatus);
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -6655,14 +6963,16 @@ renderReferenceVault();
 renderPublicReferenceSources();
 renderPartHistoryRecents();
 renderCodeDesk();
-loadJobs();
-loadCoverageDashboard();
-loadVehicles();
-loadInsights();
-loadKeyIntelligence();
-loadSources();
-loadSupplierAccounts();
-loadReferenceVault();
-loadPublicReferenceSources();
 updateConnectionStatus();
+refreshApiHealth({ quiet: true });
+window.setInterval(() => refreshApiHealth({ quiet: true }), 60000);
+bootTask("jobs", loadJobs);
+bootTask("coverage dashboard", loadCoverageDashboard);
+bootTask("vehicles", loadVehicles);
+bootTask("insights", loadInsights);
+bootTask("key intelligence", loadKeyIntelligence);
+bootTask("sources", loadSources);
+bootTask("supplier accounts", loadSupplierAccounts);
+bootTask("reference vault", loadReferenceVault);
+bootTask("public sources", loadPublicReferenceSources);
 updateInstallButton();

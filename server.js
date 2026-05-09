@@ -27,6 +27,7 @@ const proofAttachmentsPath = path.join(mutableDataDir, "proof-attachments.json")
 const proofAttachmentFileDir = path.join(mutableDataDir, "proof-attachments");
 const localSecretPath = path.join(mutableDataDir, ".lockforge-secret");
 const attachmentUploadMaxBytes = Number(process.env.TIMLOCK_ATTACHMENT_MAX_BYTES || 5_000_000);
+const bootedAt = new Date().toISOString();
 
 const supplierRegistry = [
   {
@@ -1402,6 +1403,87 @@ function sendJson(response, statusCode, payload) {
 
 function sendError(response, statusCode, message) {
   sendJson(response, statusCode, { error: message });
+}
+
+async function jsonFileHealth(label, filePath, countKey = "", optional = false) {
+  try {
+    const payload = JSON.parse(await readFile(filePath, "utf8"));
+    const count =
+      countKey && Array.isArray(payload[countKey])
+        ? payload[countKey].length
+        : Array.isArray(payload.rows)
+          ? payload.rows.length
+          : Array.isArray(payload.entries)
+            ? payload.entries.length
+            : Array.isArray(payload.jobs)
+              ? payload.jobs.length
+              : null;
+    return { label, ok: true, optional, count };
+  } catch (error) {
+    return { label, ok: false, optional, error: error.message };
+  }
+}
+
+async function buildHealthStatus() {
+  await ensureStore();
+  const files = await Promise.all([
+    jsonFileHealth("job store", storePath, "jobs"),
+    jsonFileHealth("key intelligence", keyIntelligencePath, "records"),
+    jsonFileHealth("programming reference", programmingReferencePath, "rows"),
+    jsonFileHealth("VIN reference", vinReferencePath, "rows"),
+    jsonFileHealth("vPIC catalog", vpicCatalogPath, "rows"),
+    jsonFileHealth("parts cross-reference", partsCrossReferencePath, "rows"),
+    jsonFileHealth("reference vault", referenceVaultPath, "entries"),
+    jsonFileHealth("proof attachments", proofAttachmentsPath, "attachments", true),
+  ]);
+  const missing = files.filter((item) => !item.ok && !item.optional);
+  return {
+    status: missing.length ? "degraded" : "ok",
+    bootedAt,
+    checkedAt: new Date().toISOString(),
+    storage: {
+      mutableDataDir,
+      proofAttachments: proofAttachmentStorageMode(),
+    },
+    summary: missing.length ? `${missing.length} data source${missing.length === 1 ? "" : "s"} need attention` : "All core data sources readable",
+    files,
+  };
+}
+
+async function decodeVinWithTimeout(vin) {
+  const decodeUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`;
+  const payload = await fetchJson(decodeUrl, { signal: AbortSignal.timeout(8000) });
+  return payload.Results?.[0] || null;
+}
+
+async function localVinDecodeFallback(vin, error) {
+  const parsed = parseVin(vin);
+  try {
+    const reference = JSON.parse(await readFile(vinReferencePath, "utf8"));
+    const exact = (reference.rows || []).find((row) => row.vin === vin);
+    if (exact) {
+      return {
+        ModelYear: exact.year,
+        Make: exact.make,
+        Model: exact.model,
+        Trim: exact.trim,
+        BodyClass: exact.bodyClass,
+        DriveType: exact.driveType,
+        PlantCity: exact.plantCity,
+        PlantCountry: exact.plantCountry,
+        ErrorCode: "LOCAL",
+        ErrorText: `Loaded from local VIN reference because NHTSA was unavailable: ${error.message}`,
+      };
+    }
+  } catch {}
+
+  return {
+    ModelYear: parsed.derivedModelYear,
+    Make: "",
+    Model: "",
+    ErrorCode: "LOCAL",
+    ErrorText: `NHTSA was unavailable and this VIN is not in the local reference cache: ${error.message}`,
+  };
 }
 
 function sendBuffer(response, statusCode, buffer, contentType = "application/octet-stream", headers = {}) {
@@ -6209,6 +6291,11 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
 }
 
 async function handleApi(request, response, pathname) {
+  if (request.method === "GET" && pathname === "/api/health") {
+    sendJson(response, 200, await buildHealthStatus());
+    return;
+  }
+
   const store = await readStore();
 
   if (request.method === "GET" && pathname === "/api/jobs") {
@@ -6657,15 +6744,12 @@ async function handleApi(request, response, pathname) {
       return;
     }
 
-    const decodeUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`;
-    const vinResponse = await fetch(decodeUrl);
-    if (!vinResponse.ok) {
-      sendError(response, 502, "NHTSA VIN decoder did not respond");
-      return;
+    let decode = null;
+    try {
+      decode = await decodeVinWithTimeout(vin);
+    } catch (error) {
+      decode = await localVinDecodeFallback(vin, error);
     }
-
-    const payload = await vinResponse.json();
-    const decode = payload.Results?.[0];
     sendJson(response, 200, await buildLocksmithProfile(vin, decode, store));
     return;
   }
