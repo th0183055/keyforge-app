@@ -19,6 +19,7 @@ const keyInnovationsLabelsPath = path.join(dataDir, "key-innovations-labels.json
 const programmingReferencePath = path.join(dataDir, "programming-reference.json");
 const masterCatalogPath = path.join(dataDir, "master-catalog.json");
 const partsCrossReferencePath = path.join(dataDir, "parts-cross-reference.json");
+const lishiMasterReferencePath = path.join(dataDir, "lishi-master-reference.json");
 const supplierAccountsPath = path.join(mutableDataDir, "supplier-accounts.local.json");
 const vehicleProfilesPath = path.join(mutableDataDir, "vehicle-profiles.json");
 const referenceVaultPath = path.join(mutableDataDir, "reference-vault.json");
@@ -1433,6 +1434,7 @@ async function buildHealthStatus() {
     jsonFileHealth("VIN reference", vinReferencePath, "rows"),
     jsonFileHealth("vPIC catalog", vpicCatalogPath, "rows"),
     jsonFileHealth("parts cross-reference", partsCrossReferencePath, "rows"),
+    jsonFileHealth("Lishi master reference", lishiMasterReferencePath, "tools"),
     jsonFileHealth("reference vault", referenceVaultPath, "entries"),
     jsonFileHealth("proof attachments", proofAttachmentsPath, "attachments", true),
   ]);
@@ -2765,6 +2767,157 @@ function summarizeMatchedJobs(record, jobs) {
 
 function normalizeVehicleText(value) {
   return cleanString(value).toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
+function lishiTokens(value) {
+  return normalizeVehicleText(value)
+    .split(" ")
+    .filter((token) => token.length > 1);
+}
+
+function lishiTextMatch(haystack, needle) {
+  const normalizedHaystack = normalizeVehicleText(haystack);
+  const normalizedNeedle = normalizeVehicleText(needle);
+  return Boolean(normalizedNeedle && (normalizedHaystack === normalizedNeedle || normalizedHaystack.includes(normalizedNeedle)));
+}
+
+function lishiApplicationYearMatches(application, year) {
+  const target = Number(year);
+  if (!target) return true;
+  if (!application.yearStart && !application.yearEnd) return true;
+  const start = Number(application.yearStart) || 0;
+  const end = Number(application.yearEnd) || (application.yearOpenEnded ? 9999 : start);
+  return target >= start && target <= end;
+}
+
+function lishiVehicleApplicationScore(application, { make, model, year }) {
+  let score = 0;
+  if (make) {
+    if (!lishiTextMatch(application.manufacturer, make)) return 0;
+    score += 80;
+  }
+  if (model) {
+    const modelTokens = lishiTokens(model);
+    const applicationText = normalizeVehicleText(`${application.model} ${application.sourceTitle}`);
+    const matchedTokens = modelTokens.filter((token) => applicationText.includes(token));
+    if (modelTokens.length && !matchedTokens.length) return 0;
+    score += matchedTokens.length * 35;
+    if (modelTokens.length && matchedTokens.length === modelTokens.length) score += 35;
+  }
+  if (year) {
+    if (!lishiApplicationYearMatches(application, year)) return 0;
+    score += application.yearStart || application.yearEnd ? 28 : 8;
+  }
+  return score;
+}
+
+function lishiToolSearchText(tool, applications = []) {
+  return [
+    tool.tool,
+    tool.canonical,
+    ...(tool.aliases || []),
+    ...(tool.categories || []),
+    tool.primaryFunction,
+    ...(tool.manufacturers || []),
+    tool.closestYears,
+    ...applications.slice(0, 12).flatMap((application) => [application.manufacturer, application.model, application.yearsText]),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function lishiToolScore(tool, applications, options) {
+  const query = cleanString(options.q);
+  const category = cleanString(options.category);
+  let score = 0;
+  let queryMatched = false;
+  if (query) {
+    const queryNorm = normalizeVehicleText(query);
+    const exactAliases = [tool.tool, tool.canonical, ...(tool.aliases || [])].map(normalizeVehicleText);
+    if (exactAliases.includes(queryNorm)) {
+      score += 240;
+      queryMatched = true;
+    }
+    const haystack = normalizeVehicleText(lishiToolSearchText(tool, applications));
+    const tokens = lishiTokens(query);
+    const tokenHits = tokens.filter((token) => haystack.includes(token)).length;
+    if (!tokenHits && !haystack.includes(queryNorm)) return 0;
+    queryMatched = true;
+    score += tokenHits * 32 + (haystack.includes(queryNorm) ? 60 : 0);
+  }
+  if (category && !(tool.categories || []).some((item) => lishiTextMatch(item, category))) return 0;
+  const vehicleScores = applications.map((application) => lishiVehicleApplicationScore(application, options)).filter(Boolean);
+  if ((options.make || options.model || options.year) && !vehicleScores.length && !queryMatched) return 0;
+  score += vehicleScores.reduce((total, item) => total + item, 0);
+  score += Math.min(60, Number(tool.pdfCoverageRows || tool.applicationCount || 0));
+  return score || (query || category || options.make || options.model || options.year ? 0 : 1);
+}
+
+function publicLishiTool(tool, applications = [], score = 0) {
+  return {
+    id: tool.id,
+    score,
+    tool: tool.tool,
+    canonical: tool.canonical,
+    categories: tool.categories || [],
+    primaryFunction: tool.primaryFunction,
+    manufacturers: tool.manufacturers || [],
+    closestYears: tool.closestYears,
+    pdfCoverageRows: tool.pdfCoverageRows || 0,
+    aliases: tool.aliases || [],
+    sourceNote: tool.sourceNote,
+    applicationCount: applications.length || tool.applicationCount || 0,
+    applications: applications.slice(0, 10),
+  };
+}
+
+function buildLishiLookup(reference, options = {}) {
+  const limit = Math.max(1, Math.min(150, Number(options.limit) || 60));
+  const applicationsByTool = new Map();
+  for (const application of reference.applications || []) {
+    if (!applicationsByTool.has(application.canonicalId)) applicationsByTool.set(application.canonicalId, []);
+    applicationsByTool.get(application.canonicalId).push(application);
+  }
+  const scoredTools = (reference.tools || [])
+    .map((tool) => {
+      const applications = applicationsByTool.get(tool.id) || [];
+      return { tool, applications, score: lishiToolScore(tool, applications, options) };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.tool.canonical).localeCompare(String(b.tool.canonical)));
+
+  const matchedApplications = (reference.applications || [])
+    .map((application) => {
+      const queryText = `${application.canonical} ${application.toolFromPdf} ${application.manufacturer} ${application.model} ${application.yearsText} ${application.sourceTitle}`;
+      let score = lishiVehicleApplicationScore(application, options);
+      if (options.q && lishiTextMatch(queryText, options.q)) score += 80;
+      return { ...application, score };
+    })
+    .filter((application) => application.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.manufacturer).localeCompare(String(b.manufacturer)));
+
+  return {
+    generatedAt: reference.generatedAt,
+    sourceWorkbook: reference.sourceWorkbook,
+    sourcePathNote: reference.sourcePathNote,
+    stats: reference.stats || { tools: 0, applications: 0 },
+    categories: reference.categories || [],
+    manufacturers: reference.manufacturers || [],
+    query: {
+      q: cleanString(options.q),
+      year: cleanString(options.year),
+      make: cleanString(options.make),
+      model: cleanString(options.model),
+      category: cleanString(options.category),
+    },
+    returnedTools: Math.min(limit, scoredTools.length),
+    matchedTools: scoredTools.length,
+    matchedApplications: matchedApplications.length,
+    tools: scoredTools.slice(0, limit).map((item) => publicLishiTool(item.tool, item.applications, item.score)),
+    applications: matchedApplications.slice(0, limit),
+    cleanupNotes: (reference.cleanupNotes || []).slice(0, 20),
+    sources: reference.sources || [],
+  };
 }
 
 function normalizeVinCandidate(value) {
@@ -4323,6 +4476,14 @@ async function readPartsCrossReference() {
     return JSON.parse(await readFile(partsCrossReferencePath, "utf8"));
   } catch {
     return { rows: [], tokenIndex: {} };
+  }
+}
+
+async function readLishiMasterReference() {
+  try {
+    return JSON.parse(await readFile(lishiMasterReferencePath, "utf8"));
+  } catch {
+    return { stats: { tools: 0, applications: 0 }, categories: [], manufacturers: [], tools: [], applications: [], cleanupNotes: [], sources: [] };
   }
 }
 
@@ -6521,6 +6682,44 @@ async function handleApi(request, response, pathname) {
         limit: url.searchParams.get("limit"),
       }),
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/lishi-reference") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    const reference = await readLishiMasterReference();
+    sendJson(
+      response,
+      200,
+      buildLishiLookup(reference, {
+        q: url.searchParams.get("q"),
+        year: url.searchParams.get("year"),
+        make: url.searchParams.get("make"),
+        model: url.searchParams.get("model"),
+        category: url.searchParams.get("category"),
+        limit: url.searchParams.get("limit"),
+      }),
+    );
+    return;
+  }
+
+  if (request.method === "GET" && pathname.startsWith("/api/lishi-reference/tool/")) {
+    const toolId = normalizeVehicleText(decodeURIComponent(pathname.replace("/api/lishi-reference/tool/", ""))).replace(/\s+/g, "-");
+    const reference = await readLishiMasterReference();
+    const applications = (reference.applications || []).filter((application) => application.canonicalId === toolId);
+    const tool = (reference.tools || []).find((item) => item.id === toolId || normalizeVehicleText(item.canonical).replace(/\s+/g, "-") === toolId);
+    if (!tool) {
+      sendError(response, 404, "Lishi tool not found in the imported master reference.");
+      return;
+    }
+    sendJson(response, 200, {
+      generatedAt: reference.generatedAt,
+      sourceWorkbook: reference.sourceWorkbook,
+      tool: publicLishiTool(tool, applications, 100),
+      applications,
+      sources: reference.sources || [],
+      cleanupNotes: reference.cleanupNotes || [],
+    });
     return;
   }
 

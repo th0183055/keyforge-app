@@ -32,6 +32,7 @@
           <button class="nav-item" data-view="part-history">Part History</button>
           <button class="nav-item" data-view="proof-vault">Proof Vault</button>
           <button class="nav-item" data-view="code-desk">Code Desk</button>
+          <button class="nav-item" data-view="lishi">Lishi Lookup</button>
           <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -266,6 +267,49 @@
                 </article>
               </div>
             </section>
+          </section>
+        </section>
+
+        <section class="view" id="lishi">
+          <section class="panel wide lishi-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Pick / decode reference</p>
+                <h3>Lishi Lookup</h3>
+              </div>
+            </div>
+            <form id="lishiLookupForm" class="lishi-lookup-form">
+              <label class="wide-field">
+                Tool, keyway, make, or model
+                <input name="lishiQuery" placeholder="HU101, CY24, Ford F-150, Honda Accord" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <label>
+                Year
+                <input name="lishiYear" inputmode="numeric" maxlength="4" placeholder="Any" autocomplete="off" />
+              </label>
+              <label>
+                Make
+                <input name="lishiMake" placeholder="Any" autocomplete="off" />
+              </label>
+              <label>
+                Model
+                <input name="lishiModel" placeholder="Any" autocomplete="off" />
+              </label>
+              <label>
+                Category
+                <select name="lishiCategory">
+                  <option value="">All</option>
+                </select>
+              </label>
+              <button class="primary-action" type="submit">Search Lishi</button>
+            </form>
+            <div class="form-status" id="lishiLookupStatus"></div>
+            <div class="lishi-lookup-result" id="lishiLookupResult">
+              <article class="assistant-card">
+                <strong>Lishi reference ready</strong>
+                <p>Search by Lishi tool, keyway, vehicle, manufacturer, or category. Verify coverage before quoting or using a tool.</p>
+              </article>
+            </div>
           </section>
         </section>
 

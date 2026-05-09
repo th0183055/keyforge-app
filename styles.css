@@ -4664,7 +4664,8 @@ textarea:focus {
   margin: 0 auto;
 }
 
-.code-desk-panel {
+.code-desk-panel,
+.lishi-panel {
   max-width: 1180px;
   margin: 0 auto;
 }
@@ -4731,8 +4732,17 @@ textarea:focus {
   align-items: end;
 }
 
+.lishi-lookup-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) minmax(100px, 0.35fr) minmax(140px, 0.55fr) minmax(160px, 0.65fr) minmax(170px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
 .code-desk-form label,
 .code-desk-auto-form label,
+.lishi-lookup-form label,
 .part-history-form label {
   display: grid;
   gap: 7px;
@@ -4746,6 +4756,8 @@ textarea:focus {
 .code-desk-form input,
 .code-desk-form select,
 .code-desk-auto-form input,
+.lishi-lookup-form input,
+.lishi-lookup-form select,
 .part-history-form input {
   width: 100%;
   border: 1px solid #cfd5dc;
@@ -4761,6 +4773,8 @@ textarea:focus {
 .code-desk-form input:focus,
 .code-desk-form select:focus,
 .code-desk-auto-form input:focus,
+.lishi-lookup-form input:focus,
+.lishi-lookup-form select:focus,
 .part-history-form input:focus {
   outline: 2px solid rgba(79, 89, 101, 0.2);
   border-color: var(--accent);
@@ -4779,14 +4793,18 @@ textarea:focus {
 }
 
 .code-desk-auto-baseline,
-.auto-baseline-list {
+.auto-baseline-list,
+.lishi-lookup-result,
+.lishi-tool-list,
+.lishi-application-results {
   display: grid;
   gap: 14px;
 }
 
 .code-desk-card,
 .auto-baseline-card,
-.code-desk-record {
+.code-desk-record,
+.lishi-tool-card {
   display: grid;
   gap: 12px;
   border: 1px solid #cfd5dc;
@@ -4797,6 +4815,48 @@ textarea:focus {
 
 .auto-baseline-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 250, 0.96));
+}
+
+.lishi-result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 14px;
+}
+
+.lishi-application-list,
+.profile-lishi-lookup {
+  display: grid;
+  gap: 8px;
+}
+
+.lishi-application-list span,
+.lishi-application-row {
+  display: block;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: white;
+  color: #27313a;
+  font-size: 0.88rem;
+}
+
+.lishi-application-row {
+  display: grid;
+  gap: 3px;
+}
+
+.lishi-application-row strong,
+.lishi-application-row span,
+.lishi-application-row small {
+  overflow-wrap: anywhere;
+}
+
+.profile-lishi-lookup {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  background: #f7f9fb;
 }
 
 .auto-baseline-grid {
@@ -5249,8 +5309,10 @@ textarea:focus {
   .part-history-form,
   .code-desk-form,
   .code-desk-auto-form,
+  .lishi-lookup-form,
   .code-desk-summary-grid,
   .code-desk-grid,
+  .lishi-result-grid,
   .auto-baseline-grid,
   .history-summary-grid,
   .history-job-grid,

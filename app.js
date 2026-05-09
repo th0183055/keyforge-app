@@ -28,6 +28,9 @@ let codeDeskImportedRecords = [];
 let codeDeskCustomSystems = [];
 let latestCodeDeskAutoBaseline = null;
 let latestApiHealth = null;
+let latestLishiLookup = null;
+let lishiLookupRequestId = 0;
+let vinLishiLookupRequestId = 0;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
@@ -107,6 +110,9 @@ const codeDeskAutoForm = document.querySelector("#codeDeskAutoForm");
 const codeDeskAutoStatus = document.querySelector("#codeDeskAutoStatus");
 const codeDeskAutoBaseline = document.querySelector("#codeDeskAutoBaseline");
 const exportCodeDeskAutoButton = document.querySelector("#exportCodeDeskAuto");
+const lishiLookupForm = document.querySelector("#lishiLookupForm");
+const lishiLookupStatus = document.querySelector("#lishiLookupStatus");
+const lishiLookupResult = document.querySelector("#lishiLookupResult");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -128,6 +134,7 @@ function showView(id) {
     renderCodeDesk();
     if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
   }
+  if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
 }
 
 function setMobileMenu(open) {
@@ -2424,12 +2431,28 @@ function selectedProgrammerOption(profile) {
   return options.find((item) => item.key === selectedProgrammerKey) || options[0] || null;
 }
 
+function compactToolToken(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function importedLishiToolsForProfile(profile, lishi = lishiReferenceForProfile(profile)) {
+  const tools = profile?.lishiLookup?.tools || [];
+  const preferred = [...new Set([...(lishi.keyways || []), lishi.fallbackPrimary, lishi.primary].flatMap((value) => extractKeywayTokens(value)))].map(compactToolToken);
+  if (!preferred.length) return tools;
+  const exact = tools.filter((tool) => {
+    const id = compactToolToken(tool.canonical || tool.tool);
+    return preferred.some((token) => id === token || id.startsWith(token));
+  });
+  return exact.length ? exact : tools;
+}
+
 function buildDispatchPack(profile) {
   const vehicle = profile?.vehicle || {};
   const snapshot = selectedPartSnapshot(profile);
   const programmer = selectedProgrammerOption(profile);
   const lishi = lishiReferenceForProfile(profile, snapshot);
   const reference = profile?.vehicleReference || {};
+  const importedLishiTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
   const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle lookup";
   const supplier = profile?.liveSupplierLookup || {};
   const supplierCount = supplier.products?.length || 0;
@@ -2448,13 +2471,14 @@ function buildDispatchPack(profile) {
     ["Key choice", snapshot ? [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ") : selectedPackageOption()?.title || "Choose key type"],
     ["Part clue", snapshot?.identifier || profile?.supplierCandidates?.[0]?.hlPartNumber || "Pick key picture"],
     ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify from lock"],
+    ["Lishi match", importedLishiTools.length ? importedLishiTools.slice(0, 4).join(" / ") : lishi.primary || "Verify by keyway"],
     ["Programmer", programmer ? `${programmer.name} (${programmerPercent(programmer)}%)` : "Choose programmer path"],
     ["Proof history", matchedJobCount ? `${matchedJobCount} related saved job${matchedJobCount === 1 ? "" : "s"}` : "No saved job proof yet"],
   ].filter(([, value]) => value);
   const checklist = [
     "Verify ownership/authorization and attach proof before code/PIN work",
     snapshot ? "Compare FCC, buttons, chip, frequency, blade, and emergency insert before cutting" : "Choose the visible key/button layout before quoting parts",
-    lishi.primary ? `Confirm ${lishi.primary} from the lock or insert before decode` : "Confirm keyway from the lock or insert",
+    importedLishiTools.length ? `Verify ${importedLishiTools.slice(0, 3).join(" / ")} against the lock before use` : lishi.primary ? `Confirm ${lishi.primary} from the lock or insert before decode` : "Confirm keyway from the lock or insert",
     programmer ? `Use ${programmer.name}; verify add-key/all-keys-lost coverage before starting` : "Choose programmer path before final rundown",
     ...(reference.partVerification || []).slice(0, 3),
     "Save worked-job proof after the job to improve coverage percentages",
@@ -2536,7 +2560,7 @@ function renderDispatchPack(profile) {
       </div>
       <section class="dispatch-pack-facts">
         ${pack.facts
-          .slice(0, 6)
+          .slice(0, 8)
           .map(
             ([label, value]) => `
               <article>
@@ -2769,6 +2793,7 @@ function renderLishiDecodeScreen(profile) {
             : `<article><strong>${escapeHtml(lishi.fallbackPrimary)}</strong><p>Parts listings did not expose a specific Lishi/keyway. Confirm from the lock, emergency insert, or authorized code source.</p></article>`
         }
       </section>
+      ${renderProfileLishiLookup(profile.lishiLookup)}
       <section class="code-source-panel">
         <div>
           <span>Code / PIN sources</span>
@@ -2807,6 +2832,7 @@ function renderFinalJobSummaryScreen(profile) {
   const reference = profile.vehicleReference || {};
   const best = snapshot.best;
   const lishi = lishiReferenceForProfile(profile, snapshot);
+  const importedLishiTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
   const percent = programmer ? programmerPercent(programmer) : 0;
   const rows = [
     ["Vehicle", [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ")],
@@ -2820,6 +2846,7 @@ function renderFinalJobSummaryScreen(profile) {
     ["OEM key note", programmer && Number(programmer.oemKeyLikelihood) >= 90 ? `Plan OEM key about ${programmer.oemKeyLikelihood}% of the time when this path is required.` : ""],
     ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify by lock/emergency insert"],
     ["Lishi / decode", lishi.primary || "Verify keyway before choosing tool"],
+    ["Imported Lishi match", importedLishiTools.slice(0, 5).join(" / ")],
     ["Cut / originate", (reference.cutting || reference.decodePlan || []).slice(0, 2).join(" | ")],
   ].filter(([, value]) => value);
   const verify = [
@@ -2830,6 +2857,7 @@ function renderFinalJobSummaryScreen(profile) {
   ];
   const tools = [
     ...(profile.jobKit?.tools || []).map((item) => item.name || item.detail),
+    ...importedLishiTools.map((tool) => `${tool} Lishi`),
     ...(reference.fieldTools || []),
   ].filter(Boolean);
   return `
@@ -4900,6 +4928,217 @@ async function exportCodeDeskAutoBaseline() {
   }
 }
 
+function lishiLookupParamsFromForm() {
+  const params = new URLSearchParams();
+  const elements = lishiLookupForm?.elements || {};
+  const values = {
+    q: cleanInput(elements.lishiQuery?.value || ""),
+    year: cleanInput(elements.lishiYear?.value || ""),
+    make: cleanInput(elements.lishiMake?.value || ""),
+    model: cleanInput(elements.lishiModel?.value || ""),
+    category: cleanInput(elements.lishiCategory?.value || ""),
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  params.set("limit", "80");
+  return params;
+}
+
+function lishiLookupParamsFromProfile(profile) {
+  const vehicle = profile?.vehicle || {};
+  const snapshot = selectedPartSnapshot(profile);
+  const lishi = lishiReferenceForProfile(profile, snapshot);
+  const reference = profile?.vehicleReference || {};
+  const q = [
+    ...(lishi.keyways || []),
+    lishi.primary,
+    reference.keyway?.primary,
+    reference.lishi?.primary,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (vehicle.year) params.set("year", vehicle.year);
+  if (vehicle.make) params.set("make", vehicle.make);
+  if (vehicle.model) params.set("model", vehicle.model);
+  params.set("category", "Automotive");
+  params.set("limit", "12");
+  return params;
+}
+
+function renderLishiToolCard(tool) {
+  const applications = tool.applications || [];
+  return `
+    <article class="lishi-tool-card">
+      <div class="history-job-head">
+        <div>
+          <span>${escapeHtml((tool.categories || []).slice(0, 2).join(" | ") || "Lishi tool")}</span>
+          <strong>${escapeHtml(tool.canonical || tool.tool)}</strong>
+        </div>
+        <span class="status">${escapeHtml(`${tool.applicationCount || 0} apps`)}</span>
+      </div>
+      <p>${escapeHtml(tool.primaryFunction || "Verify function before use.")}</p>
+      <div class="part-chip-row">
+        ${(tool.aliases || []).slice(0, 6).map((alias) => `<span class="part-chip">${escapeHtml(alias)}</span>`).join("")}
+      </div>
+      <div class="lishi-application-list">
+        ${
+          applications.length
+            ? applications
+                .slice(0, 5)
+                .map(
+                  (application) => `
+                    <span>${escapeHtml([application.manufacturer, application.model, application.yearsText].filter(Boolean).join(" | "))}</span>
+                  `,
+                )
+                .join("")
+            : `<span>No PDF vehicle rows matched this tool in the imported reference.</span>`
+        }
+      </div>
+      <small>${escapeHtml(tool.sourceNote || "Verify against current supplier/manufacturer source.")}</small>
+    </article>
+  `;
+}
+
+function renderLishiApplicationRow(application) {
+  return `
+    <article class="lishi-application-row">
+      <strong>${escapeHtml(application.canonical || application.toolFromPdf)}</strong>
+      <span>${escapeHtml([application.manufacturer, application.model].filter(Boolean).join(" "))}</span>
+      <small>${escapeHtml(application.yearsText || [application.yearStart, application.yearEnd || (application.yearOpenEnded ? "current" : "")].filter(Boolean).join("-") || "Years not specified")}</small>
+    </article>
+  `;
+}
+
+function populateLishiCategories(payload = latestLishiLookup) {
+  const select = lishiLookupForm?.elements.lishiCategory;
+  if (!select || select.dataset.ready || !payload?.categories?.length) return;
+  const current = select.value;
+  select.innerHTML = `<option value="">All</option>${payload.categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}`;
+  select.value = current;
+  select.dataset.ready = "true";
+}
+
+function renderLishiLookup(payload = {}) {
+  if (!lishiLookupResult) return;
+  latestLishiLookup = payload;
+  populateLishiCategories(payload);
+  const tools = payload.tools || [];
+  const applications = payload.applications || [];
+  lishiLookupResult.innerHTML = `
+    <section class="code-desk-summary-grid">
+      <article class="metric">
+        <span>Master tools</span>
+        <strong>${escapeHtml(payload.stats?.tools || 0)}</strong>
+        <p>${escapeHtml(`${payload.matchedTools || 0} matched`)}</p>
+      </article>
+      <article class="metric">
+        <span>Applications</span>
+        <strong>${escapeHtml(payload.stats?.applications || 0)}</strong>
+        <p>${escapeHtml(`${payload.matchedApplications || 0} matched`)}</p>
+      </article>
+      <article class="metric">
+        <span>Categories</span>
+        <strong>${escapeHtml(payload.categories?.length || 0)}</strong>
+        <p>${escapeHtml((payload.categories || []).slice(0, 3).join(" / ") || "No categories")}</p>
+      </article>
+      <article class="metric">
+        <span>Source</span>
+        <strong>${escapeHtml(payload.sourceWorkbook || "Lishi reference")}</strong>
+        <p>Verify before quoting</p>
+      </article>
+    </section>
+    <section class="lishi-result-grid">
+      <div>
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">Best matches</p>
+            <h3>Tools</h3>
+          </div>
+        </div>
+        <div class="lishi-tool-list">
+          ${tools.length ? tools.slice(0, 40).map(renderLishiToolCard).join("") : `<article class="assistant-card"><strong>No Lishi tools matched</strong><p>Try a keyway, tool number, manufacturer, or broader category.</p></article>`}
+        </div>
+      </div>
+      <div>
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">Coverage rows</p>
+            <h3>Applications</h3>
+          </div>
+        </div>
+        <div class="lishi-application-results">
+          ${applications.length ? applications.slice(0, 60).map(renderLishiApplicationRow).join("") : `<article class="assistant-card"><strong>No application rows matched</strong><p>Tool matches may still exist without vehicle coverage rows.</p></article>`}
+        </div>
+      </div>
+    </section>
+    <details class="deep-detail">
+      <summary>Reference notes and sources</summary>
+      <div class="source-list">
+        ${(payload.sources || []).map((source) => `<article><strong>${escapeHtml(source.source)}</strong><p>${escapeHtml(source.contribution)}</p><small>${escapeHtml(source.reliability)}</small></article>`).join("")}
+      </div>
+    </details>
+  `;
+}
+
+async function loadLishiLookup(params = lishiLookupParamsFromForm()) {
+  if (!lishiLookupResult) return;
+  const requestId = ++lishiLookupRequestId;
+  try {
+    if (lishiLookupStatus) lishiLookupStatus.textContent = "Searching Lishi master reference...";
+    const payload = await api(`/api/lishi-reference?${params.toString()}`, { timeoutMs: 12000 });
+    if (requestId !== lishiLookupRequestId) return;
+    renderLishiLookup(payload);
+    if (lishiLookupStatus) {
+      lishiLookupStatus.textContent = `Loaded ${payload.returnedTools || payload.tools?.length || 0} tool match${(payload.returnedTools || payload.tools?.length || 0) === 1 ? "" : "es"} and ${payload.matchedApplications || 0} coverage rows.`;
+    }
+  } catch (error) {
+    if (requestId !== lishiLookupRequestId) return;
+    if (lishiLookupStatus) lishiLookupStatus.textContent = error.message;
+    lishiLookupResult.innerHTML = `<article class="assistant-card"><strong>Lishi lookup unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function renderProfileLishiLookup(lookup) {
+  const tools = lookup?.tools || [];
+  if (!tools.length) return "";
+  return `
+    <section class="profile-lishi-lookup">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Imported Lishi reference</p>
+          <h3>Tool matches from master workbook</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-open-lishi-current>Open Lishi Tool</button>
+      </div>
+      <div class="part-chip-row">
+        ${tools.slice(0, 8).map((tool) => `<span class="part-chip">${escapeHtml(tool.canonical || tool.tool)}</span>`).join("")}
+      </div>
+      <p class="muted-copy">${escapeHtml(`${lookup.matchedApplications || 0} vehicle/application rows matched. Verify current availability and tool coverage before using.`)}</p>
+    </section>
+  `;
+}
+
+async function startLishiReferenceLookup(profile) {
+  if (!profile?.vehicle) return;
+  const params = lishiLookupParamsFromProfile(profile);
+  const key = params.toString();
+  if (!key || profile.lishiLookupKey === key) return;
+  profile.lishiLookupKey = key;
+  const requestId = ++vinLishiLookupRequestId;
+  try {
+    const lookup = await api(`/api/lishi-reference?${key}`, { timeoutMs: 12000 });
+    if (requestId !== vinLishiLookupRequestId || latestVinProfile !== profile) return;
+    latestVinProfile.lishiLookup = lookup;
+    renderVinProfile(latestVinProfile);
+  } catch (error) {
+    if (requestId !== vinLishiLookupRequestId || latestVinProfile !== profile) return;
+    latestVinProfile.lishiLookup = { tools: [], applications: [], matchedApplications: 0, error: error.message };
+  }
+}
+
 function fillWorkedJobFromCurrentLookup() {
   if (!workedJobForm || !latestVinProfile?.vehicle) {
     if (workedJobStatus) workedJobStatus.textContent = "Run a VIN lookup first, then come back here to prefill the job.";
@@ -5614,6 +5853,7 @@ function renderVinProfile(profile) {
   vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}<section class="vin-result-dispatch">${renderDispatchPack(profile)}</section>${screenMarkup}`;
 
   vinRecommendation.innerHTML = renderDispatchPack(profile);
+  startLishiReferenceLookup(profile);
   return;
 
   vinResult.innerHTML = `
@@ -6213,6 +6453,11 @@ codeDeskAutoForm?.addEventListener("submit", (event) => {
 });
 exportCodeDeskAutoButton?.addEventListener("click", exportCodeDeskAutoBaseline);
 
+lishiLookupForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadLishiLookup(lishiLookupParamsFromForm());
+});
+
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
     selectedSupplierId = supplierSelect.value;
@@ -6255,6 +6500,22 @@ document.addEventListener("click", (event) => {
       codeDeskForm.elements.query?.focus();
       if (codeDeskStatus) codeDeskStatus.textContent = `${selectedCodeDeskSystem().name} selected. Import the exact depth-space card before production cutting.`;
     }
+  }
+
+  const openCurrentLishiButton = event.target.closest("[data-open-lishi-current]");
+  if (openCurrentLishiButton && latestVinProfile?.vehicle) {
+    const vehicle = latestVinProfile.vehicle || {};
+    const snapshot = selectedPartSnapshot(latestVinProfile);
+    const lishi = lishiReferenceForProfile(latestVinProfile, snapshot);
+    showView("lishi");
+    if (lishiLookupForm) {
+      lishiLookupForm.elements.lishiQuery.value = (lishi.keyways || []).join(" ") || lishi.primary || "";
+      lishiLookupForm.elements.lishiYear.value = vehicle.year || "";
+      lishiLookupForm.elements.lishiMake.value = vehicle.make || "";
+      lishiLookupForm.elements.lishiModel.value = vehicle.model || "";
+    }
+    loadLishiLookup(lishiLookupParamsFromForm());
+    return;
   }
 
   const scannerCloseButton = event.target.closest("[data-close-scanner]");
