@@ -4441,6 +4441,351 @@ async function buildAutoCodeBaseline(options = {}) {
   };
 }
 
+function compactReferenceValue(value) {
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 8)
+      .map((item) => (typeof item === "object" && item !== null ? compactReferenceRow(item) : cleanString(item)))
+      .filter((item) => (typeof item === "object" ? Object.keys(item).length : item))
+      .concat(value.length > 8 ? [`+${value.length - 8} more`] : []);
+  }
+  if (value && typeof value === "object") return compactReferenceRow(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return cleanString(value);
+}
+
+function compactReferenceRow(row = {}) {
+  if (!row || typeof row !== "object") return { value: cleanString(row) };
+  const entries = Object.entries(row)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 18)
+    .map(([key, value]) => [key, compactReferenceValue(value)]);
+  return Object.fromEntries(entries);
+}
+
+function referenceRowSearchText(row = {}) {
+  return normalizeVehicleText(JSON.stringify(row));
+}
+
+function filterReferenceRows(rows = [], query = "", limit = 100) {
+  const normalizedQuery = normalizeVehicleText(query);
+  const filtered = normalizedQuery ? rows.filter((row) => referenceRowSearchText(row).includes(normalizedQuery)) : rows;
+  return {
+    totalRows: rows.length,
+    matchedRows: filtered.length,
+    returnedRows: filtered.slice(0, limit).length,
+    rows: filtered.slice(0, limit).map(compactReferenceRow),
+  };
+}
+
+function referenceListSources() {
+  return [
+    { id: "parts", label: "Parts cross-reference", note: "ML/LR/MW/TI/OE aliases and imported part identifiers." },
+    { id: "lishi-tools", label: "Lishi master tools", note: "Imported Lishi tool list, aliases, functions, and categories." },
+    { id: "lishi-applications", label: "Lishi applications", note: "Vehicle coverage rows from the Lishi master reference." },
+    { id: "programming", label: "Programming reference", note: "Local year/make/model programmer and security rows." },
+    { id: "auto-baseline", label: "Auto Code Desk baseline", note: "Merged programming/vPIC/code-readiness view." },
+    { id: "key-intelligence", label: "Key intelligence", note: "Built-in verified key systems, tools, programmers, and source records." },
+    { id: "master-catalog", label: "Master parts catalog", note: "Imported master catalog identifiers and application clues." },
+    { id: "key-innovations", label: "Key Innovations labels", note: "Imported supplier label/SKU extraction." },
+    { id: "reference-vault", label: "Reference Vault", note: "Owner-created vehicle/keyway/programmer notes." },
+    { id: "jobs", label: "Saved jobs", note: "Server saved and imported worked-job records." },
+    { id: "vehicle-profiles", label: "Vehicle profiles", note: "Shop-confirmed per-vehicle profile upgrades." },
+    { id: "public-sources", label: "Public sources", note: "Synced public reference source summaries." },
+  ];
+}
+
+async function buildReferenceList(options = {}, store = { jobs: [] }) {
+  const source = cleanString(options.source || "parts") || "parts";
+  const query = cleanString(options.q || options.query || "");
+  const limit = Math.max(10, Math.min(Number(options.limit) || 100, 500));
+  let rows = [];
+  let generatedAt = "";
+  let sourceNote = "";
+
+  if (source === "parts") {
+    const reference = await readPartsCrossReference();
+    rows = reference.rows || [];
+    generatedAt = reference.generatedAt || reference.updatedAt || "";
+    sourceNote = `${reference.totalRows || rows.length} rows, ${reference.totalTokens || Object.keys(reference.tokenIndex || {}).length} searchable tokens.`;
+  } else if (source === "lishi-tools" || source === "lishi-applications") {
+    const reference = await readLishiMasterReference();
+    rows = source === "lishi-tools" ? reference.tools || [] : reference.applications || [];
+    generatedAt = reference.generatedAt || "";
+    sourceNote = reference.sourceWorkbook || "Imported Lishi master reference.";
+  } else if (source === "programming") {
+    const reference = await readFile(programmingReferencePath, "utf8").then(JSON.parse).catch(() => ({ rows: [] }));
+    rows = reference.rows || [];
+    generatedAt = reference.generatedAt || "";
+    sourceNote = "Local programming-reference.json.";
+  } else if (source === "auto-baseline") {
+    const baseline = await buildAutoCodeBaseline({ q: query, limit });
+    rows = baseline.rows || [];
+    generatedAt = baseline.generatedAt || "";
+    sourceNote = baseline.source || "";
+  } else if (source === "key-intelligence") {
+    const reference = await readKeyIntelligence().catch(() => ({ records: [] }));
+    rows = Array.isArray(reference) ? reference : reference.records || reference.keyIntelligence || [];
+    generatedAt = reference.generatedAt || reference.updatedAt || "";
+    sourceNote = "Built-in key-intelligence reference.";
+  } else if (source === "master-catalog") {
+    const reference = await readMasterCatalog();
+    rows = reference.rows || [];
+    generatedAt = reference.generatedAt || "";
+    sourceNote = "Imported master catalog.";
+  } else if (source === "key-innovations") {
+    const reference = await readKeyInnovationsLabels();
+    rows = reference.entries || [];
+    generatedAt = reference.generatedAt || "";
+    sourceNote = "Imported Key Innovations label rows.";
+  } else if (source === "reference-vault") {
+    const vault = await readReferenceVault();
+    rows = vault.entries || [];
+    generatedAt = vault.updatedAt || "";
+    sourceNote = "Owner-created Reference Vault entries.";
+  } else if (source === "jobs") {
+    rows = store.jobs || [];
+    sourceNote = "Server saved jobs and imported worked jobs.";
+  } else if (source === "vehicle-profiles") {
+    const profiles = await readVehicleProfiles();
+    rows = profiles.profiles || [];
+    generatedAt = profiles.updatedAt || profiles.generatedAt || "";
+    sourceNote = "Shop-confirmed vehicle profiles.";
+  } else if (source === "public-sources") {
+    const publicSources = await readPublicReferenceSources();
+    rows = [
+      ...(publicSources.sources || []).map((row) => ({ type: "source", ...row })),
+      ...(publicSources.communityEvidence || []).map((row) => ({ type: "community", ...row })),
+      ...((publicSources.autel?.products || []).map((row) => ({ type: "autel-product", ...row })) || []),
+      ...((publicSources.autel?.coverage || []).map((row) => ({ type: "autel-coverage", ...row })) || []),
+    ];
+    generatedAt = publicSources.generatedAt || "";
+    sourceNote = "Public source sync summary rows.";
+  } else {
+    rows = [];
+    sourceNote = "Unknown list source.";
+  }
+
+  const filtered = source === "auto-baseline" ? { totalRows: rows.length, matchedRows: rows.length, returnedRows: rows.length, rows: rows.map(compactReferenceRow) } : filterReferenceRows(rows, query, limit);
+  return {
+    generatedAt: generatedAt || new Date().toISOString(),
+    sources: referenceListSources(),
+    selectedSource: source,
+    sourceNote,
+    query,
+    limit,
+    ...filtered,
+  };
+}
+
+function workbenchVehicleLabel(profile = {}, fallback = "") {
+  const vehicle = profile.vehicle || {};
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].map(cleanString).filter(Boolean).join(" ") || cleanString(fallback || profile.vin || "Current job");
+}
+
+function workbenchPrimaryPartQuery(profile = {}, body = {}) {
+  const values = uniqueCleanValues([
+    body.partQuery,
+    body.q,
+    body.query,
+    profile.partQuery,
+    profile.selectedPart?.sku,
+    profile.selectedPart?.oem,
+    profile.selectedPart?.fcc,
+    profile.keys?.flatMap((item) => [item.partNumber, item.fccId, item.fcc, item.sku, item.name]),
+    profile.supplierCandidates?.flatMap((item) => [
+      item.legacyPartNumber,
+      item.activePartNumber,
+      item.supplierSku,
+      item.hlPartNumber,
+      item.fccId,
+      item.oemPartNumbers,
+    ]),
+    profile.matchedJobs?.flatMap((job) => [job.sequence, job.partNumber, job.programmer]),
+  ]);
+  return (
+    values.find((value) => /\b(?:ULK|FRD|HON|TOY|LEX|GM|CHRY|NIS|INF|HYU|KIA|MAZ|MIT|SUB|FORD|BMW|CAD|TIK|OEM)[A-Z0-9#\- ]{2,}\b/i.test(value)) ||
+    values.find((value) => compactToken(value).length >= 4) ||
+    ""
+  );
+}
+
+function workbenchLishiQuery(profile = {}, body = {}) {
+  const vehicle = profile.vehicle || body.vehicle || {};
+  const reference = profile.vehicleReference || {};
+  return uniqueCleanValues([
+    body.lishiQuery,
+    reference.keyway?.primary,
+    reference.lishi?.primary,
+    reference.keyway?.alternates,
+    profile.lishiLookup?.tools?.map((tool) => tool.canonical || tool.tool),
+    [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+    body.q,
+  ])
+    .slice(0, 8)
+    .join(" ");
+}
+
+function workbenchAutoQuery(profile = {}, body = {}) {
+  const vehicle = profile.vehicle || body.vehicle || {};
+  const reference = profile.vehicleReference || {};
+  return uniqueCleanValues([
+    body.codeQuery,
+    body.autoQuery,
+    [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+    reference.keyway?.primary,
+    body.q,
+  ])
+    .slice(0, 5)
+    .join(" ");
+}
+
+function compactPartHistory(payload = {}) {
+  return {
+    query: payload.query || "",
+    primaryIdentifier: payload.primaryIdentifier || "",
+    identifiers: payload.identifiers || {},
+    crossReferences: (payload.crossReferences || []).slice(0, 8),
+    jobs: (payload.jobs || []).slice(0, 10),
+    programmerEvidence: {
+      ...(payload.programmerEvidence || {}),
+      programmers: (payload.programmerEvidence?.programmers || []).slice(0, 8),
+    },
+    referenceStats: payload.referenceStats || {},
+  };
+}
+
+function compactProofVault(payload = {}) {
+  return {
+    query: payload.query || "",
+    summary: payload.summary || {},
+    records: (payload.records || []).slice(0, 10),
+    proofNote: payload.proofNote || "",
+  };
+}
+
+function compactLishiLookup(payload = {}) {
+  return {
+    query: payload.query || {},
+    stats: payload.stats || {},
+    categories: payload.categories || [],
+    returnedTools: payload.returnedTools || 0,
+    matchedTools: payload.matchedTools || 0,
+    matchedApplications: payload.matchedApplications || 0,
+    tools: (payload.tools || []).slice(0, 12),
+    applications: (payload.applications || []).slice(0, 12),
+    sources: payload.sources || [],
+  };
+}
+
+function compactAutoBaseline(payload = {}) {
+  return {
+    generatedAt: payload.generatedAt,
+    source: payload.source,
+    totalRows: payload.totalRows || 0,
+    returnedRows: payload.returnedRows || 0,
+    makes: (payload.makes || []).slice(0, 25),
+    years: (payload.years || []).slice(0, 25),
+    supportedImports: payload.supportedImports || {},
+    rows: (payload.rows || []).slice(0, 18),
+  };
+}
+
+async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
+  const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  const vehicle = profile.vehicle || body.vehicle || {};
+  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const partsReference = await readPartsCrossReference();
+  const lishiReference = await readLishiMasterReference();
+  const referenceVault = await readReferenceVault();
+  const keyIntelligence = await readKeyIntelligence().catch(() => ({ records: [] }));
+  const keyIntelligenceRecords = Array.isArray(keyIntelligence) ? keyIntelligence : keyIntelligence.records || [];
+  const partQuery = workbenchPrimaryPartQuery(profile, body);
+  const lishiQuery = workbenchLishiQuery(profile, body);
+  const autoQuery = workbenchAutoQuery(profile, body);
+  const proofQuery = cleanString(body.proofQuery || partQuery || body.q || profile.vin || workbenchVehicleLabel(profile));
+  const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
+    partQuery ? Promise.resolve(buildPartHistory(partQuery, cleanJobs, partsReference)) : Promise.resolve(null),
+    Promise.resolve(buildProofVault(proofQuery, cleanJobs, partsReference)),
+    Promise.resolve(buildLishiLookup(lishiReference, {
+      q: lishiQuery,
+      year: vehicle.year,
+      make: vehicle.make,
+      model: vehicle.model,
+      category: "Automotive",
+      limit: 24,
+    })),
+    buildAutoCodeBaseline({
+      q: autoQuery,
+      year: vehicle.year,
+      make: vehicle.make,
+      limit: 80,
+    }),
+  ]);
+  const coverage = buildCoverageDashboard(cleanJobs, partsReference);
+  const matchedJobs = uniqueCleanValues([
+    partHistory?.jobs?.map((job) => job.id),
+    proofVault?.records?.map((record) => record.id),
+    profile.matchedJobs?.map((job) => job.id),
+  ]);
+  const warnings = uniqueCleanValues([
+    ...(profile.vehicleReference?.warnings || []),
+    profile.confidence && /verify|partial|inconclusive/i.test(profile.confidence) ? profile.confidence : "",
+    !partHistory?.jobs?.length && partQuery ? "No saved job proof matched this part yet." : "",
+    !lishiLookup?.tools?.length ? "No Lishi tool matched the current vehicle/keyway query." : "",
+  ]).slice(0, 8);
+  return {
+    generatedAt: new Date().toISOString(),
+    title: workbenchVehicleLabel(profile, body.q),
+    query: cleanString(body.q || body.query || ""),
+    vehicle,
+    vin: profile.vin || body.vin || "",
+    activeQueries: {
+      part: partQuery,
+      proof: proofQuery,
+      lishi: lishiQuery,
+      auto: autoQuery,
+    },
+    overview: {
+      savedJobs: cleanJobs.length,
+      matchedJobs: matchedJobs.length,
+      partReferenceRows: partsReference.totalRows || partsReference.rows?.length || 0,
+      lishiTools: lishiReference.stats?.tools || lishiReference.tools?.length || 0,
+      lishiApplications: lishiReference.stats?.applications || lishiReference.applications?.length || 0,
+      codeBaselineRows: autoBaseline.totalRows || 0,
+      referenceVaultEntries: referenceVault.entries?.length || 0,
+      keyIntelligenceRecords: keyIntelligenceRecords.length || 0,
+      observedCoveragePercent: coverage.summary?.observedCoveragePercent,
+    },
+    nextActions: [
+      { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
+      { label: partQuery ? `Check part history for ${partQuery}` : "Search LR/MW/TI/OE part history", target: "part-history", tone: partHistory?.jobs?.length ? "ready" : "verify" },
+      { label: lishiLookup?.tools?.length ? "Open matched Lishi tools" : "Confirm keyway before Lishi use", target: "lishi", tone: lishiLookup?.tools?.length ? "ready" : "verify" },
+      { label: "Review auto code/programming baseline", target: "code-desk", tone: autoBaseline.rows?.length ? "ready" : "verify" },
+      { label: "Save worked job when complete", target: "learn", tone: "required" },
+    ],
+    warnings,
+    partHistory: partHistory ? compactPartHistory(partHistory) : null,
+    proofVault: compactProofVault(proofVault),
+    lishi: compactLishiLookup(lishiLookup),
+    autoBaseline: compactAutoBaseline(autoBaseline),
+    coverage: {
+      summary: coverage.summary || {},
+      programmers: (coverage.programmers || []).slice(0, 8),
+      parts: (coverage.parts || []).slice(0, 8),
+      gaps: coverage.gaps || {},
+      proofNote: coverage.proofNote,
+    },
+    sourceMap: {
+      parts: { rows: partsReference.totalRows || partsReference.rows?.length || 0, status: "connected" },
+      lishi: { tools: lishiReference.stats?.tools || lishiReference.tools?.length || 0, applications: lishiReference.stats?.applications || lishiReference.applications?.length || 0, status: "connected" },
+      codeDesk: { rows: autoBaseline.totalRows || 0, status: "baseline connected; authorized code imports remain separate" },
+      proofVault: { jobs: cleanJobs.length, matchingRecords: proofVault.summary?.matchingJobs || 0, status: "connected" },
+      referenceVault: { entries: referenceVault.entries?.length || 0, status: "connected" },
+    },
+  };
+}
+
 async function findVerifiedVehicleProfile(vehicle) {
   const profiles = await readVehicleProfiles();
   const baseKey = vehicleProfileBaseKey(vehicle);
@@ -6490,6 +6835,29 @@ async function handleApi(request, response, pathname) {
     const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
     const partsReference = await readPartsCrossReference();
     sendJson(response, 200, buildProofVault(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/job-workbench") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await buildJobWorkbench(body, store));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/reference-lists") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    sendJson(
+      response,
+      200,
+      await buildReferenceList(
+        {
+          source: url.searchParams.get("source"),
+          q: url.searchParams.get("q"),
+          limit: url.searchParams.get("limit"),
+        },
+        store,
+      ),
+    );
     return;
   }
 

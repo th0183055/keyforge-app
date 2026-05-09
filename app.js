@@ -31,6 +31,8 @@ let latestApiHealth = null;
 let latestLishiLookup = null;
 let lishiLookupRequestId = 0;
 let vinLishiLookupRequestId = 0;
+let latestWorkbench = null;
+let latestReferenceList = null;
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
@@ -38,6 +40,7 @@ const codeDeskImportKey = "timlockCodeDeskImportsV1";
 const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
 const fieldLookupCacheKey = "timlockFieldLookupCacheV1";
 const dispatchPackArchiveKey = "timlockDispatchPacksV1";
+const currentJobContextKey = "timlockCurrentJobContextV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -113,6 +116,14 @@ const exportCodeDeskAutoButton = document.querySelector("#exportCodeDeskAuto");
 const lishiLookupForm = document.querySelector("#lishiLookupForm");
 const lishiLookupStatus = document.querySelector("#lishiLookupStatus");
 const lishiLookupResult = document.querySelector("#lishiLookupResult");
+const workbenchForm = document.querySelector("#workbenchForm");
+const workbenchStatus = document.querySelector("#workbenchStatus");
+const workbenchResult = document.querySelector("#workbenchResult");
+const refreshWorkbenchButton = document.querySelector("#refreshWorkbench");
+const clearWorkbenchButton = document.querySelector("#clearWorkbench");
+const referenceListForm = document.querySelector("#referenceListForm");
+const referenceListStatus = document.querySelector("#referenceListStatus");
+const referenceListResult = document.querySelector("#referenceListResult");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -130,11 +141,13 @@ function showView(id) {
   closeMobileMenu();
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
+  if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
   if (id === "code-desk") {
     renderCodeDesk();
     if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
   }
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
+  if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
 }
 
 function setMobileMenu(open) {
@@ -2554,6 +2567,7 @@ function renderDispatchPack(profile) {
           <span>${escapeHtml(pack.sourceStatus)}${pack.cached ? " - offline-safe" : ""}</span>
         </div>
         <div class="dispatch-pack-actions">
+          <button class="secondary-action small" type="button" data-open-workbench-current>Workbench</button>
           <button class="secondary-action small" type="button" data-copy-dispatch-pack>Copy</button>
           <button class="secondary-action small" type="button" data-save-dispatch-pack>Save</button>
         </div>
@@ -5101,6 +5115,388 @@ async function loadLishiLookup(params = lishiLookupParamsFromForm()) {
   }
 }
 
+function currentWorkbenchProfile() {
+  const profile = latestVinProfile || readLocalObject(currentJobContextKey, null);
+  if (!profile?.vehicle) return null;
+  const snapshot = latestVinProfile ? selectedPartSnapshot(latestVinProfile) : null;
+  const best = snapshot?.best || {};
+  return {
+    vin: profile.vin || "",
+    lookupMode: profile.lookupMode || "",
+    vehicle: profile.vehicle || {},
+    confidence: profile.confidence || "",
+    keys: profile.keys || [],
+    programmers: profile.programmers || [],
+    tools: profile.tools || [],
+    recommendation: profile.recommendation || null,
+    matchedJobs: profile.matchedJobs || [],
+    programmingReference: profile.programmingReference || null,
+    supplierCandidates: profile.supplierCandidates || [],
+    verifiedProfile: profile.verifiedProfile || null,
+    shopEvidence: profile.shopEvidence || null,
+    referenceVault: profile.referenceVault || [],
+    vehicleReference: profile.vehicleReference || null,
+    keyRequirements: profile.keyRequirements || null,
+    catalogApplication: profile.catalogApplication || null,
+    jobKit: profile.jobKit || null,
+    lishiLookup: profile.lishiLookup || null,
+    selectedPart: snapshot
+      ? {
+          title: snapshot.title,
+          identifier: snapshot.identifier,
+          typeLabel: snapshot.typeLabel,
+          sku: best.sku || "",
+          oem: best.oem || "",
+          fcc: best.fcc || "",
+          partName: best.partName || "",
+          keyway: best.keyway || "",
+        }
+      : null,
+  };
+}
+
+function saveCurrentJobContext(profile) {
+  if (!profile?.vehicle) return;
+  writeLocalObject(currentJobContextKey, currentWorkbenchProfile() || profile);
+}
+
+function workbenchQueryFromForm() {
+  return cleanInput(workbenchForm?.elements.workbenchQuery?.value || "");
+}
+
+function workbenchPayload(query = workbenchQueryFromForm()) {
+  return {
+    q: query,
+    profile: currentWorkbenchProfile(),
+    jobs: localArchivedJobs(),
+  };
+}
+
+function renderWorkbenchActions(payload = {}) {
+  return `
+    <section class="history-action-bar workbench-actions">
+      <div class="badge-row">
+        ${(payload.warnings || []).length ? payload.warnings.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("") : `<span>No current warnings beyond normal verification.</span>`}
+      </div>
+      <div class="workbench-action-buttons">
+        ${(payload.nextActions || [])
+          .map((action) => `<button class="secondary-action small ${escapeHtml(action.tone || "")}" type="button" data-workbench-open="${escapeHtml(action.target)}">${escapeHtml(action.label)}</button>`)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchPartHistory(payload = {}) {
+  const history = payload.partHistory;
+  if (!history) {
+    return `<article class="assistant-card"><strong>No part query yet</strong><p>Search an LR#, MW#, TI#, OE#, FCC, or select a key from VIN lookup to pull part history.</p></article>`;
+  }
+  const jobs = history.jobs || [];
+  return `
+    <section class="workbench-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Part proof</p>
+          <h3>${escapeHtml(history.primaryIdentifier || history.query || "Part history")}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="part-history">Open Part History</button>
+      </div>
+      <div class="history-reference-panel">
+        <div>
+          <p class="eyebrow">Cross-reference family</p>
+          <div class="part-chip-row">${renderPartChips(history.identifiers?.all || [], "No cross-reference row found")}</div>
+        </div>
+        <div>
+          <p class="eyebrow">OE sources</p>
+          <div class="part-chip-row">${renderPartChips(history.identifiers?.oe || [], "No OE sources linked")}</div>
+        </div>
+      </div>
+      <div class="workbench-card-list">
+        ${jobs.length ? jobs.slice(0, 4).map(renderPartHistoryJob).join("") : `<article class="assistant-card"><strong>No saved job proof matched</strong><p>Save this job when complete and it will feed coverage percentages automatically.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchLishi(payload = {}) {
+  const lookup = payload.lishi || {};
+  const tools = lookup.tools || [];
+  return `
+    <section class="workbench-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Lishi / decode</p>
+          <h3>${escapeHtml(tools.length ? "Matched tools" : "Confirm keyway")}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="lishi">Open Lishi Lookup</button>
+      </div>
+      <div class="lishi-tool-list compact">
+        ${tools.length ? tools.slice(0, 5).map(renderLishiToolCard).join("") : `<article class="assistant-card"><strong>No Lishi match yet</strong><p>Use the keyway from the lock/insert or a broader make/model search.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchAuto(payload = {}) {
+  const rows = payload.autoBaseline?.rows || [];
+  return `
+    <section class="workbench-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Code Desk / auto</p>
+          <h3>${escapeHtml(rows.length ? "Baseline matches" : "Automotive baseline")}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="code-desk">Open Code Desk</button>
+      </div>
+      <div class="auto-baseline-list compact">
+        ${rows.length ? rows.slice(0, 4).map(renderCodeDeskAutoRow).join("") : `<article class="assistant-card"><strong>No baseline row matched</strong><p>Try a year/make/model or keyway search, then import authorized code data for production lookup.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchProof(payload = {}) {
+  const records = payload.proofVault?.records || [];
+  return `
+    <section class="workbench-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Proof Vault</p>
+          <h3>${escapeHtml(`${records.length} shown`)}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="proof-vault">Open Proof Vault</button>
+      </div>
+      <div class="proof-record-list compact">
+        ${records.length ? records.slice(0, 4).map((record) => renderProofVaultRecord(record, proofVaultAttachments())).join("") : `<article class="assistant-card"><strong>No proof records matched</strong><p>Attach photos/docs and save the worked job to build proof across devices.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkbenchSources(payload = {}) {
+  const sources = payload.sourceMap || {};
+  return `
+    <section class="workbench-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Data sources</p>
+          <h3>Connected pieces</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="reference-lists">View Lists</button>
+      </div>
+      <div class="source-list compact">
+        ${Object.entries(sources)
+          .map(
+            ([key, value]) => `
+              <article>
+                <strong>${escapeHtml(key.replace(/([A-Z])/g, " $1"))}</strong>
+                <p>${escapeHtml(value.status || "connected")}</p>
+                <small>${escapeHtml(Object.entries(value).filter(([name]) => name !== "status").map(([name, item]) => `${name}: ${item}`).join(" | "))}</small>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderJobWorkbench(payload = {}) {
+  if (!workbenchResult) return;
+  latestWorkbench = payload;
+  const overview = payload.overview || {};
+  const activeQueries = payload.activeQueries || {};
+  const metrics = [
+    ["Current", payload.title || "Job context", payload.vin || payload.query || "Search ready"],
+    ["Proof", overview.matchedJobs || 0, `${overview.savedJobs || 0} saved jobs`],
+    ["Parts", overview.partReferenceRows || 0, activeQueries.part || "Search-ready"],
+    ["Coverage", overview.observedCoveragePercent ?? "N/A", "Observed shop proof"],
+  ];
+  workbenchResult.innerHTML = `
+    <section class="history-summary-grid">
+      ${metrics
+        .map(
+          ([label, value, caption]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(caption)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    ${renderWorkbenchActions(payload)}
+    <section class="workbench-query-strip">
+      <span>Part: ${escapeHtml(activeQueries.part || "none")}</span>
+      <span>Lishi: ${escapeHtml(activeQueries.lishi || "none")}</span>
+      <span>Auto: ${escapeHtml(activeQueries.auto || "none")}</span>
+      <span>Proof: ${escapeHtml(activeQueries.proof || "all")}</span>
+    </section>
+    <section class="workbench-grid">
+      ${renderWorkbenchPartHistory(payload)}
+      ${renderWorkbenchLishi(payload)}
+      ${renderWorkbenchAuto(payload)}
+      ${renderWorkbenchProof(payload)}
+    </section>
+    ${renderWorkbenchSources(payload)}
+  `;
+}
+
+async function loadJobWorkbench(query = workbenchQueryFromForm()) {
+  if (!workbenchResult) return;
+  try {
+    if (workbenchStatus) workbenchStatus.textContent = "Building unified job workbench...";
+    const payload = await api("/api/job-workbench", {
+      method: "POST",
+      body: JSON.stringify(workbenchPayload(query)),
+      timeoutMs: 18000,
+    });
+    renderJobWorkbench(payload);
+    if (workbenchStatus) workbenchStatus.textContent = `Workbench ready: ${payload.overview?.matchedJobs || 0} matched proof job${payload.overview?.matchedJobs === 1 ? "" : "s"}.`;
+  } catch (error) {
+    if (workbenchStatus) workbenchStatus.textContent = error.message;
+    workbenchResult.innerHTML = `<article class="assistant-card"><strong>Workbench unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function referenceValueText(value) {
+  if (Array.isArray(value)) return value.map(referenceValueText).filter(Boolean).join(" | ");
+  if (value && typeof value === "object") return Object.entries(value).map(([key, item]) => `${key}: ${referenceValueText(item)}`).join(" | ");
+  return cleanInput(value);
+}
+
+function renderReferenceListRow(row = {}, index = 0) {
+  const entries = Object.entries(row).slice(0, 12);
+  const title = row.title || row.name || row.canonical || row.tool || row.mlPartNumber || row.mwId || row.mwPartNumber || row.id || `Row ${index + 1}`;
+  return `
+    <article class="reference-row-card">
+      <div class="history-job-head">
+        <div>
+          <span>${escapeHtml(row.type || row.sourceTable || row.category || "Reference row")}</span>
+          <strong>${escapeHtml(title)}</strong>
+        </div>
+        <span class="status">${escapeHtml(row.id || index + 1)}</span>
+      </div>
+      <div class="reference-row-grid">
+        ${entries
+          .map(
+            ([key, value]) => `
+              <div>
+                <small>${escapeHtml(key)}</small>
+                <strong>${escapeHtml(referenceValueText(value) || "None")}</strong>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderReferenceList(payload = {}) {
+  if (!referenceListResult) return;
+  latestReferenceList = payload;
+  const selected = (payload.sources || []).find((source) => source.id === payload.selectedSource);
+  referenceListResult.innerHTML = `
+    <section class="history-summary-grid">
+      <article class="metric">
+        <span>List</span>
+        <strong>${escapeHtml(selected?.label || payload.selectedSource || "Reference")}</strong>
+        <p>${escapeHtml(selected?.note || payload.sourceNote || "")}</p>
+      </article>
+      <article class="metric">
+        <span>Total</span>
+        <strong>${escapeHtml(payload.totalRows || 0)}</strong>
+        <p>Rows in this piece</p>
+      </article>
+      <article class="metric">
+        <span>Matched</span>
+        <strong>${escapeHtml(payload.matchedRows || 0)}</strong>
+        <p>${escapeHtml(payload.query || "No search filter")}</p>
+      </article>
+      <article class="metric">
+        <span>Shown</span>
+        <strong>${escapeHtml(payload.returnedRows || 0)}</strong>
+        <p>${escapeHtml(payload.sourceNote || "Searchable list")}</p>
+      </article>
+    </section>
+    <div class="reference-list-cards">
+      ${(payload.rows || []).length ? payload.rows.map(renderReferenceListRow).join("") : `<article class="assistant-card"><strong>No rows matched</strong><p>Try a broader part number, make, model, keyway, or programmer search.</p></article>`}
+    </div>
+  `;
+}
+
+async function loadReferenceList() {
+  if (!referenceListResult) return;
+  try {
+    if (referenceListStatus) referenceListStatus.textContent = "Loading reference list...";
+    const source = cleanInput(referenceListForm?.elements.referenceSource?.value || "parts");
+    const q = cleanInput(referenceListForm?.elements.referenceQuery?.value || "");
+    const params = new URLSearchParams({ source, limit: "120" });
+    if (q) params.set("q", q);
+    const payload = await api(`/api/reference-lists?${params.toString()}`, { timeoutMs: 18000 });
+    renderReferenceList(payload);
+    if (referenceListStatus) referenceListStatus.textContent = `Showing ${payload.returnedRows || 0} of ${payload.matchedRows || 0} matched rows.`;
+  } catch (error) {
+    if (referenceListStatus) referenceListStatus.textContent = error.message;
+    referenceListResult.innerHTML = `<article class="assistant-card"><strong>Reference list unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function openWorkbenchTarget(target) {
+  const payload = latestWorkbench || {};
+  const queries = payload.activeQueries || {};
+  if (target === "part-history") {
+    showView("part-history");
+    if (partHistoryForm) {
+      partHistoryForm.elements.partNumber.value = queries.part || payload.query || "";
+      if (partHistoryForm.elements.partNumber.value) partHistoryForm.requestSubmit();
+    }
+    return;
+  }
+  if (target === "lishi") {
+    showView("lishi");
+    const vehicle = payload.vehicle || currentWorkbenchProfile()?.vehicle || {};
+    if (lishiLookupForm) {
+      lishiLookupForm.elements.lishiQuery.value = queries.lishi || "";
+      lishiLookupForm.elements.lishiYear.value = vehicle.year || "";
+      lishiLookupForm.elements.lishiMake.value = vehicle.make || "";
+      lishiLookupForm.elements.lishiModel.value = vehicle.model || "";
+    }
+    loadLishiLookup(lishiLookupParamsFromForm());
+    return;
+  }
+  if (target === "code-desk") {
+    showView("code-desk");
+    const vehicle = payload.vehicle || currentWorkbenchProfile()?.vehicle || {};
+    if (codeDeskAutoForm) {
+      codeDeskAutoForm.elements.autoQuery.value = queries.auto || "";
+      codeDeskAutoForm.elements.autoYear.value = vehicle.year || "";
+      codeDeskAutoForm.elements.autoMake.value = vehicle.make || "";
+    }
+    loadCodeDeskAutoBaseline(queries.auto || "");
+    return;
+  }
+  if (target === "proof-vault") {
+    showView("proof-vault");
+    if (proofVaultForm) proofVaultForm.elements.proofQuery.value = queries.proof || queries.part || payload.query || "";
+    loadProofVault(proofVaultForm?.elements.proofQuery?.value || "");
+    return;
+  }
+  if (target === "reference-lists") {
+    showView("reference-lists");
+    if (referenceListForm) {
+      referenceListForm.elements.referenceSource.value = "parts";
+      referenceListForm.elements.referenceQuery.value = queries.part || queries.lishi || payload.query || "";
+    }
+    loadReferenceList();
+    return;
+  }
+  showView(target);
+}
+
 function renderProfileLishiLookup(lookup) {
   const tools = lookup?.tools || [];
   if (!tools.length) return "";
@@ -5802,6 +6198,7 @@ function renderVinProfileLegacy(profile) {
 
 function renderVinProfile(profile) {
   latestVinProfile = profile;
+  window.requestAnimationFrame(() => saveCurrentJobContext(profile));
   vinForm.classList.add("is-hidden");
   ymmForm?.classList.add("is-hidden");
   const vehicle = profile.vehicle;
@@ -6458,6 +6855,30 @@ lishiLookupForm?.addEventListener("submit", (event) => {
   loadLishiLookup(lishiLookupParamsFromForm());
 });
 
+workbenchForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadJobWorkbench(workbenchQueryFromForm());
+});
+
+refreshWorkbenchButton?.addEventListener("click", () => loadJobWorkbench(workbenchQueryFromForm()));
+
+clearWorkbenchButton?.addEventListener("click", () => {
+  latestWorkbench = null;
+  try {
+    localStorage.removeItem(currentJobContextKey);
+  } catch {}
+  if (workbenchForm) workbenchForm.reset();
+  if (workbenchStatus) workbenchStatus.textContent = "Workbench context cleared.";
+  if (workbenchResult) {
+    workbenchResult.innerHTML = `<article class="assistant-card"><strong>Workbench cleared</strong><p>Run a VIN lookup or search a part number to build a fresh job packet.</p></article>`;
+  }
+});
+
+referenceListForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadReferenceList();
+});
+
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
     selectedSupplierId = supplierSelect.value;
@@ -6515,6 +6936,20 @@ document.addEventListener("click", (event) => {
       lishiLookupForm.elements.lishiModel.value = vehicle.model || "";
     }
     loadLishiLookup(lishiLookupParamsFromForm());
+    return;
+  }
+
+  const openWorkbenchButton = event.target.closest("[data-open-workbench-current]");
+  if (openWorkbenchButton) {
+    if (latestVinProfile?.vehicle) saveCurrentJobContext(latestVinProfile);
+    showView("workbench");
+    loadJobWorkbench(workbenchQueryFromForm());
+    return;
+  }
+
+  const workbenchTargetButton = event.target.closest("[data-workbench-open]");
+  if (workbenchTargetButton) {
+    openWorkbenchTarget(workbenchTargetButton.dataset.workbenchOpen);
     return;
   }
 

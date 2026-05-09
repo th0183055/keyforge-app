@@ -29,10 +29,12 @@
 
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="vin">VIN Lookup</button>
+          <button class="nav-item" data-view="workbench">Job Workbench</button>
           <button class="nav-item" data-view="part-history">Part History</button>
           <button class="nav-item" data-view="proof-vault">Proof Vault</button>
           <button class="nav-item" data-view="code-desk">Code Desk</button>
           <button class="nav-item" data-view="lishi">Lishi Lookup</button>
+          <button class="nav-item" data-view="reference-lists">Reference Lists</button>
           <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
           <button class="nav-item" data-view="settings">Settings</button>
@@ -117,6 +119,35 @@
               </div>
             </section>
           </div>
+        </section>
+
+        <section class="view" id="workbench">
+          <section class="panel wide workbench-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Unified job context</p>
+                <h3>Job Workbench</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="refreshWorkbench">Refresh Current</button>
+                <button class="secondary-action small" type="button" id="clearWorkbench">Clear Context</button>
+              </div>
+            </div>
+            <form id="workbenchForm" class="workbench-form">
+              <label class="wide-field">
+                Search anything
+                <input name="workbenchQuery" placeholder="VIN, vehicle, LR# ULK123, MW# TOY-239, HU101, programmer, OE number" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Build Workbench</button>
+            </form>
+            <div class="form-status" id="workbenchStatus"></div>
+            <div class="workbench-result" id="workbenchResult">
+              <article class="assistant-card">
+                <strong>One place for the current job</strong>
+                <p>Run a VIN/vehicle lookup or search a part number here. The workbench pulls part history, Lishi, Code Desk, Proof Vault, and coverage into one packet.</p>
+              </article>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="part-history">
@@ -308,6 +339,48 @@
               <article class="assistant-card">
                 <strong>Lishi reference ready</strong>
                 <p>Search by Lishi tool, keyway, vehicle, manufacturer, or category. Verify coverage before quoting or using a tool.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="reference-lists">
+          <section class="panel wide reference-lists-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Owner reference shelf</p>
+                <h3>Reference Lists</h3>
+              </div>
+            </div>
+            <form id="referenceListForm" class="reference-list-form">
+              <label>
+                List
+                <select name="referenceSource">
+                  <option value="parts">Parts cross-reference</option>
+                  <option value="lishi-tools">Lishi master tools</option>
+                  <option value="lishi-applications">Lishi applications</option>
+                  <option value="programming">Programming reference</option>
+                  <option value="auto-baseline">Auto Code Desk baseline</option>
+                  <option value="key-intelligence">Key intelligence</option>
+                  <option value="master-catalog">Master parts catalog</option>
+                  <option value="key-innovations">Key Innovations labels</option>
+                  <option value="reference-vault">Reference Vault</option>
+                  <option value="jobs">Saved jobs</option>
+                  <option value="vehicle-profiles">Vehicle profiles</option>
+                  <option value="public-sources">Public sources</option>
+                </select>
+              </label>
+              <label class="wide-field">
+                Search list
+                <input name="referenceQuery" placeholder="ULK123, TOY-239, HU101, 2020 Accord, Smart Pro" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Search List</button>
+            </form>
+            <div class="form-status" id="referenceListStatus"></div>
+            <div class="reference-list-result" id="referenceListResult">
+              <article class="assistant-card">
+                <strong>Raw pieces stay inspectable</strong>
+                <p>Use this owner-facing shelf to audit the separate lists that power the subscriber workflow.</p>
               </article>
             </div>
           </section>

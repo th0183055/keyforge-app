@@ -4740,9 +4740,24 @@ textarea:focus {
   margin-bottom: 12px;
 }
 
+.workbench-form,
+.reference-list-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.reference-list-form {
+  grid-template-columns: minmax(190px, 0.45fr) minmax(280px, 1fr) auto;
+}
+
 .code-desk-form label,
 .code-desk-auto-form label,
 .lishi-lookup-form label,
+.workbench-form label,
+.reference-list-form label,
 .part-history-form label {
   display: grid;
   gap: 7px;
@@ -4758,6 +4773,9 @@ textarea:focus {
 .code-desk-auto-form input,
 .lishi-lookup-form input,
 .lishi-lookup-form select,
+.workbench-form input,
+.reference-list-form input,
+.reference-list-form select,
 .part-history-form input {
   width: 100%;
   border: 1px solid #cfd5dc;
@@ -4775,6 +4793,9 @@ textarea:focus {
 .code-desk-auto-form input:focus,
 .lishi-lookup-form input:focus,
 .lishi-lookup-form select:focus,
+.workbench-form input:focus,
+.reference-list-form input:focus,
+.reference-list-form select:focus,
 .part-history-form input:focus {
   outline: 2px solid rgba(79, 89, 101, 0.2);
   border-color: var(--accent);
@@ -4796,7 +4817,11 @@ textarea:focus {
 .auto-baseline-list,
 .lishi-lookup-result,
 .lishi-tool-list,
-.lishi-application-results {
+.lishi-application-results,
+.workbench-result,
+.reference-list-result,
+.workbench-card-list,
+.reference-list-cards {
   display: grid;
   gap: 14px;
 }
@@ -4857,6 +4882,97 @@ textarea:focus {
   border: 1px solid #cfd5dc;
   border-radius: 8px;
   background: #f7f9fb;
+}
+
+.workbench-query-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+
+.workbench-query-strip span {
+  min-width: 0;
+  border: 1px solid #cfd5dc;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workbench-section,
+.reference-row-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  padding: 14px;
+  background: rgba(246, 248, 250, 0.92);
+}
+
+.workbench-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.workbench-action-buttons .required {
+  background: linear-gradient(135deg, #a1844b, #4f5965);
+}
+
+.workbench-action-buttons .verify {
+  background: linear-gradient(135deg, #8a949f, #5e6670);
+}
+
+.lishi-tool-list.compact,
+.auto-baseline-list.compact,
+.proof-record-list.compact,
+.source-list.compact {
+  max-height: 620px;
+  overflow: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.reference-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.reference-row-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 9px;
+  background: white;
+}
+
+.reference-row-grid small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reference-row-grid strong {
+  color: var(--accent-dark);
+  font-size: 0.9rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .auto-baseline-grid {
@@ -5310,10 +5426,13 @@ textarea:focus {
   .code-desk-form,
   .code-desk-auto-form,
   .lishi-lookup-form,
+  .workbench-form,
+  .reference-list-form,
   .code-desk-summary-grid,
   .code-desk-grid,
   .lishi-result-grid,
   .auto-baseline-grid,
+  .workbench-grid,
   .history-summary-grid,
   .history-job-grid,
   .coverage-summary-grid,
@@ -5326,12 +5445,14 @@ textarea:focus {
   }
 
   .proof-vault-actions,
-  .proof-card-actions {
+  .proof-card-actions,
+  .workbench-action-buttons {
     justify-content: stretch;
   }
 
   .proof-vault-actions > *,
-  .proof-card-actions > * {
+  .proof-card-actions > *,
+  .workbench-action-buttons > * {
     flex: 1 1 140px;
   }
 
