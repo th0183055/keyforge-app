@@ -5030,6 +5030,89 @@ textarea:focus {
   padding: 14px;
 }
 
+.verified-code-list {
+  gap: 10px;
+}
+
+.verified-code-card {
+  background: #ffffff;
+  border-color: #c8d3dc;
+}
+
+.verified-code-card.exact {
+  border-color: rgba(55, 122, 86, 0.42);
+  box-shadow: inset 4px 0 0 rgba(55, 122, 86, 0.72);
+}
+
+.verified-code-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.verified-code-head > div:first-child {
+  min-width: 0;
+}
+
+.verified-code-head strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.verified-code-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  flex: 0 0 auto;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: #f6f8fa;
+}
+
+.verified-code-score strong {
+  color: var(--accent-dark);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.verified-code-score small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.verified-code-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.verified-code-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  padding: 9px;
+  background: #f9fafb;
+}
+
+.verified-code-grid small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.verified-code-grid strong {
+  color: var(--accent-dark);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
 .auto-baseline-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 250, 0.96));
 }
@@ -5629,13 +5712,19 @@ textarea:focus {
   .workbench-grid,
   .history-summary-grid,
   .history-job-grid,
+  .verified-code-grid,
   .coverage-summary-grid,
   .coverage-gap-grid {
     grid-template-columns: 1fr;
   }
 
-  .history-job-head {
+  .history-job-head,
+  .verified-code-head {
     flex-direction: column;
+  }
+
+  .verified-code-score {
+    justify-items: start;
   }
 
   .proof-vault-actions,

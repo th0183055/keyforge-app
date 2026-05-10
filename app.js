@@ -3872,7 +3872,7 @@ function renderProofVault(payload = {}) {
   const summary = payload.summary || {};
   const attachments = proofVaultAttachments();
   const summaryCards = [
-    ["Saved Jobs", summary.totalJobs || 0, `${summary.matchingJobs || 0} shown`],
+    ["Saved Jobs", summary.totalJobs || 0, `${summary.shownJobs || payload.records?.length || 0} shown`],
     ["Proven", summary.provenJobs || 0, `${summary.warningJobs || 0} warnings`],
     ["Files", proofVaultAttachmentCount(attachments), proofVaultStorageCaption()],
     ["Cross-Refs", summary.matchedReferenceRows || 0, `${summary.referenceRows || 0} reference rows`],
@@ -3894,7 +3894,7 @@ function renderProofVault(payload = {}) {
     </section>
     <section class="history-action-bar">
       <div class="badge-row">
-        <span>${escapeHtml(payload.query ? `Search: ${payload.query}` : "All proof")}</span>
+        <span>${escapeHtml(payload.query ? `Search: ${payload.query}` : "Recent proof only")}</span>
         <span>${escapeHtml(`${summary.unknownJobs || 0} unknown outcomes`)}</span>
         <span>${escapeHtml(`${localArchivedJobs().length} local archived jobs`)}</span>
         <span>${escapeHtml(proofVaultStorageCaption())}</span>
@@ -3946,15 +3946,22 @@ async function loadProofVaultAttachments(jobId = "") {
 async function loadProofVault(query = proofVaultForm?.elements.proofQuery?.value || "") {
   if (!proofVault) return;
   try {
-    if (proofVaultStatus) proofVaultStatus.textContent = "Loading proof vault...";
+    const cleanQuery = cleanInput(query);
+    if (proofVaultStatus) proofVaultStatus.textContent = cleanQuery ? "Searching proof vault..." : "Loading recent proof...";
     const attachmentLoad = loadProofVaultAttachments();
     const payload = await api("/api/proof-vault", {
       method: "POST",
-      body: JSON.stringify({ q: cleanInput(query), jobs: localArchivedJobs() }),
+      body: JSON.stringify({ q: cleanQuery, jobs: localArchivedJobs() }),
+      timeoutMs: 20000,
     });
     await attachmentLoad;
     renderProofVault(payload);
-    if (proofVaultStatus) proofVaultStatus.textContent = `Vault searched ${payload.summary?.totalJobs || 0} jobs and found ${payload.summary?.matchingJobs || 0} records.`;
+    if (proofVaultStatus) {
+      proofVaultStatus.textContent =
+        payload.mode === "recent"
+          ? `Vault ready. Showing ${payload.summary?.shownJobs || payload.records?.length || 0} recent records; search to narrow proof.`
+          : `Vault searched ${payload.summary?.totalJobs || 0} jobs and found ${payload.summary?.matchingJobs || 0} records.`;
+    }
   } catch (error) {
     if (proofVaultStatus) proofVaultStatus.textContent = error.message;
     proofVault.innerHTML = `<article class="assistant-card"><strong>Proof Vault unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
@@ -4657,6 +4664,107 @@ function findCodeDeskRecords(system, query, mode) {
     .slice(0, 40);
 }
 
+function codeDeskBittingDistance(left, right) {
+  const a = normalizeBittingInput(left).join("");
+  const b = normalizeBittingInput(right).join("");
+  if (!a || !b || a.length !== b.length) return Number.POSITIVE_INFINITY;
+  let distance = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] === "?" || b[index] === "?") continue;
+    if (a[index] !== b[index]) distance += 1;
+  }
+  return distance;
+}
+
+function codeDeskVerifiedCandidates(system, bitting = [], query = "", mode = "bitting") {
+  const targetBitting = Array.isArray(bitting) ? bitting.join("") : normalizeBittingInput(bitting).join("");
+  const compactQuery = compactCodeDeskKey(query);
+  return codeDeskImportedRecords
+    .filter((record) => codeDeskSystemMatchesRecord(system, record))
+    .map((record) => {
+      const recordBitting = normalizeBittingInput(record.bitting).join("");
+      const code = compactCodeDeskKey(record.code);
+      const vehicleText = compactCodeDeskKey(record.vehicle);
+      const partText = compactCodeDeskKey(record.partNumber);
+      const sourceText = compactCodeDeskKey(record.source);
+      let score = 0;
+      let relation = "";
+      let distance = Number.POSITIVE_INFINITY;
+      const reasons = [];
+
+      if (targetBitting && recordBitting) {
+        distance = codeDeskBittingDistance(recordBitting, targetBitting);
+        const maxNearDistance = targetBitting.length >= 8 ? 2 : 1;
+        if (distance === 0) {
+          score += 92;
+          relation = "Exact bitting match";
+          reasons.push("exact cuts");
+        } else if (distance <= maxNearDistance) {
+          score += Math.max(48, 74 - distance * 12);
+          relation = `${distance} cut${distance === 1 ? "" : "s"} off`;
+          reasons.push("near bitting");
+        }
+      }
+
+      if (mode === "code" && compactQuery && code.includes(compactQuery)) {
+        score += 78;
+        relation ||= "Code record match";
+        reasons.push("code match");
+      }
+
+      if (compactQuery && [vehicleText, partText, sourceText].some((value) => value && value.includes(compactQuery))) {
+        score += 18;
+        relation ||= "Context match";
+        reasons.push("vehicle/source clue");
+      }
+
+      if (record.source) score += 4;
+      if (record.vehicle) score += 3;
+      if (record.partNumber) score += 3;
+      if (!score) return null;
+
+      const cappedScore = Math.min(99, Math.round(score));
+      return {
+        ...record,
+        distance: Number.isFinite(distance) ? distance : null,
+        matchScore: cappedScore,
+        relation: relation || "Imported code clue",
+        confidence: cappedScore >= 90 ? "Verified" : cappedScore >= 75 ? "Strong" : cappedScore >= 55 ? "Candidate" : "Clue",
+        reasons: reasons.slice(0, 4),
+        targetBitting,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.matchScore - a.matchScore || (a.distance ?? 99) - (b.distance ?? 99) || String(a.code).localeCompare(String(b.code)))
+    .slice(0, 12);
+}
+
+function renderCodeDeskCandidate(candidate) {
+  const exact = candidate.distance === 0 || candidate.confidence === "Verified";
+  return `
+    <article class="code-desk-record verified-code-card ${exact ? "exact" : ""}">
+      <div class="verified-code-head">
+        <div>
+          <span>${escapeHtml(candidate.relation)}</span>
+          <strong>${escapeHtml(candidate.code || "No code recorded")}</strong>
+        </div>
+        <div class="verified-code-score">
+          <strong>${escapeHtml(`${candidate.matchScore || 0}%`)}</strong>
+          <small>${escapeHtml(candidate.confidence || "Candidate")}</small>
+        </div>
+      </div>
+      <div class="verified-code-grid">
+        <div><small>Record bitting</small><strong>${escapeHtml(candidate.bitting || "Not recorded")}</strong></div>
+        <div><small>Target bitting</small><strong>${escapeHtml(candidate.targetBitting || "Not entered")}</strong></div>
+        <div><small>Vehicle / system</small><strong>${escapeHtml([candidate.vehicle, candidate.system || candidate.keyway].filter(Boolean).join(" | ") || "Any imported system")}</strong></div>
+        <div><small>Part / source</small><strong>${escapeHtml([candidate.partNumber, candidate.source].filter(Boolean).join(" | ") || "Authorized import")}</strong></div>
+      </div>
+      <div class="part-chip-row">${renderPartChips(candidate.reasons || [], exact ? "Exact imported match" : "Verify against vehicle, keyway, and code series")}</div>
+      ${candidate.notes ? `<small>${escapeHtml(candidate.notes)}</small>` : ""}
+    </article>
+  `;
+}
+
 function renderCodeDeskRecord(record) {
   return `
     <article class="code-desk-record">
@@ -4675,6 +4783,8 @@ function renderCodeDeskResult(result) {
   const depthRows = codeDeskDepthRows(result.system);
   const cutRows = result.cutRows || [];
   const measurementRows = result.measurementRows || [];
+  const verifiedCandidates = result.verifiedCandidates || [];
+  const topVerified = verifiedCandidates[0];
   codeDeskResult.dataset.ready = "result";
   codeDeskResult.innerHTML = `
     <section class="code-desk-summary-grid">
@@ -4694,9 +4804,9 @@ function renderCodeDeskResult(result) {
         <p>${escapeHtml([result.system.cuts ? `${result.system.cuts} cuts` : "", result.system.stop || ""].filter(Boolean).join(" | ") || "Machine setup controls final cut quality.")}</p>
       </article>
       <article class="metric">
-        <span>Imported Codes</span>
-        <strong>${escapeHtml(codeDeskImportedRecords.length)}</strong>
-        <p>${escapeHtml(`${result.matches.length} matched this lookup`)}</p>
+        <span>Verified Code</span>
+        <strong>${escapeHtml(topVerified?.code || "None")}</strong>
+        <p>${escapeHtml(topVerified ? `${topVerified.confidence} | ${topVerified.relation}` : `${codeDeskImportedRecords.length} imported records`)}</p>
       </article>
     </section>
     <section class="code-desk-grid">
@@ -4748,7 +4858,22 @@ function renderCodeDeskResult(result) {
     <section class="history-section">
       <div class="panel-header tight">
         <div>
-          <p class="eyebrow">Imported code records</p>
+          <p class="eyebrow">Verified code candidates</p>
+          <h3>${escapeHtml(`${verifiedCandidates.length} candidate${verifiedCandidates.length === 1 ? "" : "s"}`)}</h3>
+        </div>
+      </div>
+      <div class="code-desk-record-list verified-code-list">
+        ${
+          verifiedCandidates.length
+            ? verifiedCandidates.map(renderCodeDeskCandidate).join("")
+            : `<article class="assistant-card"><strong>No verified code candidate</strong><p>Enter bitting/cuts or measurements, then import authorized code records with code and bitting columns to verify code direction.</p></article>`
+        }
+      </div>
+    </section>
+    <section class="history-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Raw imported records</p>
           <h3>${escapeHtml(`${result.matches.length} match${result.matches.length === 1 ? "" : "es"}`)}</h3>
         </div>
       </div>
@@ -4768,17 +4893,21 @@ function runCodeDesk() {
   let bitting = [];
   let measurementRows = [];
   let matches = [];
+  let verifiedCandidates = [];
 
   if (mode === "measurements") {
     measurementRows = codeDeskMeasurementsToCuts(system, query);
     bitting = measurementRows.map((row) => row.cut);
     matches = findCodeDeskRecords(system, bitting.join(""), "reverse");
+    verifiedCandidates = codeDeskVerifiedCandidates(system, bitting, query, mode);
   } else if (mode === "code") {
     matches = findCodeDeskRecords(system, query, "code");
     bitting = normalizeBittingInput(matches[0]?.bitting || "");
+    verifiedCandidates = codeDeskVerifiedCandidates(system, bitting, query, mode);
   } else {
     bitting = normalizeBittingInput(query);
     matches = findCodeDeskRecords(system, query, mode);
+    verifiedCandidates = codeDeskVerifiedCandidates(system, bitting, query, mode);
   }
 
   renderCodeDeskResult({
@@ -4789,8 +4918,14 @@ function runCodeDesk() {
     cutRows: codeDeskCutRows(system, bitting),
     measurementRows,
     matches,
+    verifiedCandidates,
   });
-  if (codeDeskStatus) codeDeskStatus.textContent = `${system.name}: ${bitting.length ? `cut plan ${bitting.join("")}` : `${matches.length} imported records matched`}.`;
+  if (codeDeskStatus) {
+    const topVerified = verifiedCandidates[0];
+    codeDeskStatus.textContent = topVerified
+      ? `${system.name}: ${topVerified.confidence.toLowerCase()} code candidate ${topVerified.code || "record"} from ${topVerified.relation.toLowerCase()}.`
+      : `${system.name}: ${bitting.length ? `cut plan ${bitting.join("")}` : `${matches.length} imported records matched`}.`;
+  }
 }
 
 function renderCodeDesk() {
@@ -4827,6 +4962,7 @@ function renderCodeDesk() {
       cutRows: [],
       measurementRows: [],
       matches: [],
+      verifiedCandidates: [],
     });
     codeDeskResult.dataset.ready = "starter";
     if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk ready. Automotive templates need your exact depth-space card import before production cutting.";
@@ -4855,6 +4991,7 @@ async function importCodeDeskFile(file) {
       cutRows: [],
       measurementRows: [],
       matches: imported.records.slice(0, 40),
+      verifiedCandidates: [],
     });
     if (codeDeskStatus) codeDeskStatus.textContent = `Imported ${imported.records.length} code records and ${imported.systems.length} depth-space cards.`;
   } catch (error) {
@@ -7580,6 +7717,7 @@ partHistoryForm?.addEventListener("submit", async (event) => {
     const payload = await api("/api/part-history", {
       method: "POST",
       body: JSON.stringify({ q: query, jobs: localArchivedJobs() }),
+      timeoutMs: 20000,
     });
     savePartHistoryRecent(query);
     renderPartHistoryRecents();

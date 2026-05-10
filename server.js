@@ -29,6 +29,8 @@ const proofAttachmentFileDir = path.join(mutableDataDir, "proof-attachments");
 const localSecretPath = path.join(mutableDataDir, ".lockforge-secret");
 const attachmentUploadMaxBytes = Number(process.env.TIMLOCK_ATTACHMENT_MAX_BYTES || 5_000_000);
 const bootedAt = new Date().toISOString();
+const staticJsonCache = new Map();
+const partsReferenceRowsByIdCache = new WeakMap();
 
 const supplierRegistry = [
   {
@@ -265,6 +267,17 @@ async function readStore() {
   return JSON.parse(await readFile(storePath, "utf8"));
 }
 
+async function readJsonCached(filePath, fallback = {}) {
+  if (staticJsonCache.has(filePath)) return staticJsonCache.get(filePath);
+  try {
+    const payload = JSON.parse(await readFile(filePath, "utf8"));
+    staticJsonCache.set(filePath, payload);
+    return payload;
+  } catch {
+    return typeof fallback === "function" ? fallback() : fallback;
+  }
+}
+
 async function writeStore(store) {
   await mkdir(mutableDataDir, { recursive: true });
   await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`);
@@ -315,15 +328,16 @@ async function writePublicReferenceSources(payload) {
 }
 
 async function readKeyIntelligence() {
-  return JSON.parse(await readFile(keyIntelligencePath, "utf8"));
+  return readJsonCached(keyIntelligencePath, { rows: [] });
 }
 
 async function readSourceConnectors() {
-  return JSON.parse(await readFile(sourceConnectorsPath, "utf8"));
+  return readJsonCached(sourceConnectorsPath, { connectors: [] });
 }
 
 async function writeKeyIntelligence(intelligence) {
   await writeFile(keyIntelligencePath, `${JSON.stringify(intelligence, null, 2)}\n`);
+  staticJsonCache.delete(keyIntelligencePath);
 }
 
 async function localVaultKey() {
@@ -3646,9 +3660,11 @@ function buildCoverageDashboard(jobs = [], partsReference = {}) {
   };
 }
 
-function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = []) {
+function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = [], options = {}) {
+  const includeReferences = options.includeReferences !== false;
+  const extractedTokens = extractPartHistoryJobTokens(job);
   const matchedTokens = searchTokens.length ? partHistoryMatchedTokens(job, searchTokens) : [];
-  const directRows = lookupPartsCrossReferenceRows(partsReference, extractPartHistoryJobTokens(job));
+  const directRows = includeReferences ? lookupPartsCrossReferenceRows(partsReference, extractedTokens) : [];
   const matchedReferenceRows = matchedTokens.length
     ? referenceRows.filter((row) => (row.tokens || []).some((token) => matchedTokens.includes(token.normalized || compactToken(token.value))))
     : [];
@@ -3657,7 +3673,7 @@ function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRo
     .map(crossReferenceSummary)
     .slice(0, 6);
   const partNumbers = uniqueCleanValues([
-    extractPartHistoryJobTokens(job),
+    extractedTokens,
     references.flatMap((reference) => reference.labeledIdentifiers?.map((entry) => `${entry.label} ${entry.value}`) || []),
   ]).slice(0, 24);
   const vehicle = coverageVehicleForJob(job);
@@ -3702,29 +3718,33 @@ function buildProofVault(query, jobs = [], partsReference = {}) {
   const referenceRows = cleanQuery ? findPartHistoryReferenceRows(partsReference, cleanQuery) : [];
   const searchTokens = cleanQuery ? partHistorySearchTokens(cleanQuery, referenceRows) : [];
   const compactQuery = compactToken(cleanQuery);
-  const records = (jobs || [])
-    .map((job) => proofVaultJobRecord(job, partsReference, searchTokens, referenceRows))
-    .filter((record) => proofVaultJobMatches(record, compactQuery, searchTokens))
+  const allRecords = (jobs || [])
+    .map((job) => proofVaultJobRecord(job, partsReference, searchTokens, referenceRows, { includeReferences: Boolean(cleanQuery) }))
     .sort((a, b) => (Date.parse(b.schedule) || 0) - (Date.parse(a.schedule) || 0));
+  const matchedRecords = cleanQuery ? allRecords.filter((record) => proofVaultJobMatches(record, compactQuery, searchTokens)) : allRecords;
+  const records = cleanQuery ? matchedRecords.slice(0, 80) : matchedRecords.slice(0, 16);
   const history = cleanQuery ? buildPartHistory(cleanQuery, jobs, partsReference) : null;
-  const coverage = buildCoverageDashboard(jobs, partsReference);
   return {
     generatedAt: new Date().toISOString(),
     query: cleanQuery,
+    mode: cleanQuery ? "search" : "recent",
     summary: {
       totalJobs: jobs?.length || 0,
-      matchingJobs: records.length,
+      matchingJobs: matchedRecords.length,
+      shownJobs: records.length,
       referenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
       matchedReferenceRows: referenceRows.length,
       provenJobs: records.filter((record) => record.outcome?.key === "success").length,
       warningJobs: records.filter((record) => record.outcome?.key === "warning").length,
       unknownJobs: records.filter((record) => record.outcome?.key === "unknown").length,
     },
-    records: records.slice(0, 80),
-    coverage,
+    records,
+    coverage: null,
     partHistory: history,
     proofNote:
-      "Proof Vault searches saved jobs, local browser proof, and the parts cross-reference. Attachments live in the browser backup until a full file store is added.",
+      cleanQuery
+        ? "Proof Vault searched saved jobs, attachments, aliases, and the parts cross-reference. Use exact LR#, MW#, OE#, VIN, FCC, or programmer terms for the cleanest proof packet."
+        : "Showing recent proof only so the vault opens fast. Search an LR#, MW#, OE#, VIN, FCC, programmer, or vehicle to build a focused proof packet.",
   };
 }
 
@@ -4299,14 +4319,16 @@ function autoCodeTemplateForVehicle(vehicle = {}) {
   };
 }
 
-function autoDatabaseSupport(row = {}, vpicRow = null, jobs = []) {
+function autoDatabaseSupport(row = {}, vpicRow = null, jobs = [], observedJobCount = null) {
   const securityFlags = [
     row.requiresPin ? "PIN/passcode" : "",
     row.requiresOnline ? "online/OEM" : "",
     row.requiresBypass ? "bypass/security procedure" : "",
   ].filter(Boolean);
   const vehicle = { year: row.year, make: row.make, model: row.model };
-  const matchingJobs = jobs.filter((job) => jobMatchesVehicle(job, vehicle) || jobMatchesMakeModel(job, vehicle));
+  const matchingJobCount = Number.isFinite(Number(observedJobCount))
+    ? Number(observedJobCount)
+    : jobs.filter((job) => jobMatchesVehicle(job, vehicle) || jobMatchesMakeModel(job, vehicle)).length;
   return [
     {
       name: "NHTSA vPIC identity",
@@ -4332,10 +4354,26 @@ function autoDatabaseSupport(row = {}, vpicRow = null, jobs = []) {
     },
     {
       name: "Proof Vault / saved jobs",
-      status: matchingJobs.length ? `${matchingJobs.length} observed job${matchingJobs.length === 1 ? "" : "s"}` : "ready",
+      status: matchingJobCount ? `${matchingJobCount} observed job${matchingJobCount === 1 ? "" : "s"}` : "ready",
       gives: "what worked in your shop, programmer proof, parts proof, photos/docs",
     },
   ];
+}
+
+function autoJobVehicleCounts(jobs = []) {
+  const makeModel = new Map();
+  for (const job of jobs || []) {
+    const vehicle = coverageVehicleForJob(job);
+    if (!vehicle.make || !vehicle.model) continue;
+    const key = `${normalizeVehicleText(vehicle.make)}|${normalizeVehicleText(vehicle.model)}`;
+    makeModel.set(key, (makeModel.get(key) || 0) + 1);
+  }
+  return makeModel;
+}
+
+function autoObservedJobCount(counts, row = {}) {
+  const key = `${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`;
+  return counts.get(key) || 0;
 }
 
 async function buildAutoCodeBaseline(options = {}) {
@@ -4344,10 +4382,11 @@ async function buildAutoCodeBaseline(options = {}) {
   const year = Number(options.year) || 0;
   const limit = Math.max(25, Math.min(Number(options.limit) || 250, 20000));
   const [programming, vpic, store] = await Promise.all([
-    readFile(programmingReferencePath, "utf8").then(JSON.parse).catch(() => ({ rows: [] })),
-    readFile(vpicCatalogPath, "utf8").then(JSON.parse).catch(() => ({ rows: [] })),
+    readJsonCached(programmingReferencePath, { rows: [] }),
+    readJsonCached(vpicCatalogPath, { rows: [] }),
     readStore().catch(() => ({ jobs: [] })),
   ]);
+  const jobVehicleCounts = autoJobVehicleCounts(store.jobs || []);
   const vpicMap = new Map(
     (vpic.rows || []).map((row) => [`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`, row]),
   );
@@ -4388,7 +4427,6 @@ async function buildAutoCodeBaseline(options = {}) {
       const vehicle = { year: row.year, make: row.make, model: row.model };
       const vpicRow = vpicMap.get(`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`) || null;
       const template = autoCodeTemplateForVehicle(vehicle);
-      const databaseSupport = autoDatabaseSupport(row, vpicRow, store.jobs || []);
       const searchable = normalizeVehicleText([
         row.year,
         row.make,
@@ -4404,7 +4442,7 @@ async function buildAutoCodeBaseline(options = {}) {
         ...row,
         vehicleType: vpicRow?.vehicleType || "",
         template,
-        databaseSupport,
+        _vpicRow: vpicRow,
         security: [
           row.requiresPin ? "PIN" : "",
           row.requiresOnline ? "Online/OEM" : "",
@@ -4425,11 +4463,18 @@ async function buildAutoCodeBaseline(options = {}) {
     .sort((a, b) => Number(b.year) - Number(a.year) || a.make.localeCompare(b.make) || a.model.localeCompare(b.model));
   const makes = [...new Set(rows.map((row) => row.make).filter(Boolean))].sort();
   const years = [...new Set(rows.map((row) => row.year).filter(Boolean))].sort((a, b) => b - a);
+  const returnedRows = rows.slice(0, limit).map((row) => {
+    const { _vpicRow, ...publicRow } = row;
+    return {
+      ...publicRow,
+      databaseSupport: autoDatabaseSupport(publicRow, _vpicRow, [], autoObservedJobCount(jobVehicleCounts, publicRow)),
+    };
+  });
   return {
     generatedAt: new Date().toISOString(),
     source: "Local programming-reference plus vPIC identity catalog",
     totalRows: rows.length,
-    returnedRows: rows.slice(0, limit).length,
+    returnedRows: returnedRows.length,
     limit,
     makes,
     years,
@@ -4437,7 +4482,7 @@ async function buildAutoCodeBaseline(options = {}) {
       codeRecords: ["system", "keyway", "code", "bitting", "vehicle", "partNumber", "source", "notes"],
       depthSpaceCards: ["type=system", "name", "category", "family", "blanks", "spaces", "depths", "cuts", "stop", "macs", "source", "notes"],
     },
-    rows: rows.slice(0, limit),
+    rows: returnedRows,
   };
 }
 
@@ -4973,35 +5018,27 @@ async function findVerifiedVehicleProfile(vehicle) {
 }
 
 async function readMasterCatalog() {
-  try {
-    return JSON.parse(await readFile(masterCatalogPath, "utf8"));
-  } catch {
-    return { rows: [] };
-  }
+  return readJsonCached(masterCatalogPath, { rows: [] });
 }
 
 async function readKeyInnovationsLabels() {
-  try {
-    return JSON.parse(await readFile(keyInnovationsLabelsPath, "utf8"));
-  } catch {
-    return { entries: [] };
-  }
+  return readJsonCached(keyInnovationsLabelsPath, { entries: [] });
 }
 
 async function readPartsCrossReference() {
-  try {
-    return JSON.parse(await readFile(partsCrossReferencePath, "utf8"));
-  } catch {
-    return { rows: [], tokenIndex: {} };
-  }
+  return readJsonCached(partsCrossReferencePath, { rows: [], tokenIndex: {} });
 }
 
 async function readLishiMasterReference() {
-  try {
-    return JSON.parse(await readFile(lishiMasterReferencePath, "utf8"));
-  } catch {
-    return { stats: { tools: 0, applications: 0 }, categories: [], manufacturers: [], tools: [], applications: [], cleanupNotes: [], sources: [] };
-  }
+  return readJsonCached(lishiMasterReferencePath, () => ({
+    stats: { tools: 0, applications: 0 },
+    categories: [],
+    manufacturers: [],
+    tools: [],
+    applications: [],
+    cleanupNotes: [],
+    sources: [],
+  }));
 }
 
 const catalogBrandPrefixes = {
@@ -5095,8 +5132,18 @@ function partReferenceTokenVariants(value) {
   return Array.from(variants);
 }
 
+function partsReferenceRowsById(partsReference = {}) {
+  if (!partsReference || typeof partsReference !== "object") return new Map();
+  let rowsById = partsReferenceRowsByIdCache.get(partsReference);
+  if (!rowsById) {
+    rowsById = new Map((partsReference.rows || []).map((row) => [row.id, row]));
+    partsReferenceRowsByIdCache.set(partsReference, rowsById);
+  }
+  return rowsById;
+}
+
 function lookupPartsCrossReferenceRows(partsReference, values = []) {
-  const rowsById = new Map((partsReference?.rows || []).map((row) => [row.id, row]));
+  const rowsById = partsReferenceRowsById(partsReference);
   const matches = new Map();
   for (const value of uniqueCleanValues(values)) {
     for (const token of partReferenceTokenVariants(value)) {
