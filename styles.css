@@ -175,6 +175,52 @@ body.mobile-menu-open {
   line-height: 1.45;
 }
 
+body.mode-subscriber [data-owner-only] {
+  display: none !important;
+}
+
+.mode-panel {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mode-panel span {
+  color: #becac8;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mode-toggle.inline {
+  display: inline-grid;
+  min-width: 210px;
+}
+
+.mode-toggle button {
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e7ecef;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.mode-toggle button.active {
+  background: #f7fbfa;
+  color: var(--accent-dark);
+}
+
 .worked-job-panel {
   max-width: 980px;
 }
@@ -384,6 +430,152 @@ main {
 .app-status-banner.degraded span {
   background: #fff2c9;
   color: #7a4b13;
+}
+
+.global-command-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  background: rgba(250, 251, 252, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.global-command-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.global-command-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.global-command-panel .mode-toggle button {
+  border-color: #cfd5dc;
+  background: #e1e6eb;
+  color: var(--accent-dark);
+}
+
+.global-command-panel .mode-toggle button.active {
+  background: linear-gradient(135deg, #2a2f36, #050608);
+  color: #ffffff;
+}
+
+.global-search-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.global-search-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--accent-dark);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.global-search-form input {
+  width: 100%;
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  padding: 12px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.global-search-result {
+  display: grid;
+  gap: 12px;
+}
+
+.global-result-summary,
+.global-result-group,
+.global-result-card {
+  min-width: 0;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  background: rgba(246, 248, 250, 0.92);
+}
+
+.global-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.global-result-summary strong,
+.global-result-summary span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.global-result-summary span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.global-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.global-result-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.global-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.global-result-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: white;
+}
+
+.global-result-card span,
+.global-result-card strong,
+.global-result-card p,
+.global-result-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.global-result-card span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.global-result-card p,
+.global-result-card small {
+  margin: 3px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 #vin.view.active {
@@ -5428,6 +5620,8 @@ textarea:focus {
   .lishi-lookup-form,
   .workbench-form,
   .reference-list-form,
+  .global-search-form,
+  .global-result-grid,
   .code-desk-summary-grid,
   .code-desk-grid,
   .lishi-result-grid,
@@ -5454,6 +5648,10 @@ textarea:focus {
   .proof-card-actions > *,
   .workbench-action-buttons > * {
     flex: 1 1 140px;
+  }
+
+  .global-result-card {
+    grid-template-columns: 1fr;
   }
 
   .proof-attachment {

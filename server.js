@@ -4786,6 +4786,178 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   };
 }
 
+function globalJobMatches(query, jobs = [], limit = 8) {
+  const normalizedQuery = normalizeVehicleText(query);
+  if (!normalizedQuery) return [];
+  return (jobs || [])
+    .filter((job) => normalizeVehicleText(JSON.stringify(job)).includes(normalizedQuery))
+    .sort((a, b) => (Date.parse(b.createdAt || b.schedule || "") || 0) - (Date.parse(a.createdAt || a.schedule || "") || 0))
+    .slice(0, limit)
+    .map((job) => ({
+      id: job.id,
+      title: job.title || job.vehicle || "Saved job",
+      subtitle: [job.vehicle, job.vin].filter(Boolean).join(" | "),
+      detail: [job.service, job.programmer, job.sequence].filter(Boolean).join(" | "),
+      badge: job.status || "Job",
+      target: "proof-vault",
+      query: job.vin || job.sequence || job.vehicle || query,
+    }));
+}
+
+function globalGroup(id, label, target, results = [], note = "") {
+  return {
+    id,
+    label,
+    target,
+    note,
+    count: results.length,
+    results,
+  };
+}
+
+function globalPartResults(partHistory = {}) {
+  const references = (partHistory.crossReferences || []).slice(0, 5).map((reference) => ({
+    id: reference.id || reference.primary,
+    title: reference.primaryLabel || reference.primary || "Cross-reference",
+    subtitle: (reference.labeledIdentifiers || []).map((item) => `${item.label} ${item.value}`).join(" | "),
+    detail: (reference.oemPartNumbers || []).slice(0, 5).join(" | "),
+    badge: reference.sourceTable || "Part",
+    target: "part-history",
+    query: partHistory.primaryIdentifier || partHistory.query,
+  }));
+  const jobs = (partHistory.jobs || []).slice(0, 4).map((job) => ({
+    id: job.id,
+    title: job.title || job.vehicle || "Saved job",
+    subtitle: [job.vehicle, job.vin].filter(Boolean).join(" | "),
+    detail: [job.programmer, (job.partNumbers || []).slice(0, 3).join(" | ")].filter(Boolean).join(" | "),
+    badge: job.outcome?.label || "Job proof",
+    target: "part-history",
+    query: partHistory.primaryIdentifier || partHistory.query,
+  }));
+  return [...references, ...jobs].slice(0, 8);
+}
+
+function globalProofResults(proofVault = {}) {
+  return (proofVault.records || []).slice(0, 8).map((record) => ({
+    id: record.id,
+    title: record.title || record.vehicle || "Proof record",
+    subtitle: [record.vehicle, record.vin].filter(Boolean).join(" | "),
+    detail: [record.programmer, (record.partNumbers || []).slice(0, 3).join(" | ")].filter(Boolean).join(" | "),
+    badge: record.outcome?.label || "Proof",
+    target: "proof-vault",
+    query: proofVault.query || record.vin || record.vehicle,
+  }));
+}
+
+function globalLishiResults(lookup = {}, query = "") {
+  return (lookup.tools || []).slice(0, 8).map((tool) => ({
+    id: tool.id || tool.canonical || tool.tool,
+    title: tool.canonical || tool.tool || "Lishi tool",
+    subtitle: (tool.categories || []).slice(0, 3).join(" | "),
+    detail: (tool.applications || [])
+      .slice(0, 3)
+      .map((application) => [application.manufacturer, application.model, application.yearsText].filter(Boolean).join(" "))
+      .join(" | "),
+    badge: `${tool.applicationCount || 0} apps`,
+    target: "lishi",
+    query: query || tool.canonical || tool.tool,
+  }));
+}
+
+function globalAutoResults(baseline = {}, query = "") {
+  return (baseline.rows || []).slice(0, 8).map((row) => ({
+    id: [row.year, row.make, row.model].filter(Boolean).join("-"),
+    title: [row.year, row.make, row.model].filter(Boolean).join(" ") || "Auto baseline row",
+    subtitle: row.template?.name || row.ignitionType || "Verify key system",
+    detail: [row.programMethod, row.immobilizerSystem, (row.security || []).join(" / ")].filter(Boolean).join(" | "),
+    badge: row.vpicOnly ? "Identity only" : "Programming",
+    target: "code-desk",
+    query,
+  }));
+}
+
+async function buildGlobalSearch(body = {}, store = { jobs: [] }) {
+  const query = cleanString(body.q || body.query || "");
+  if (!query) return { generatedAt: new Date().toISOString(), query, mode: body.mode === "subscriber" ? "subscriber" : "owner", groups: [] };
+  const mode = body.mode === "subscriber" ? "subscriber" : "owner";
+  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const partsReference = await readPartsCrossReference();
+  const lishiReference = await readLishiMasterReference();
+  const vin = normalizeVinCandidate(query);
+  const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
+    Promise.resolve(buildPartHistory(query, cleanJobs, partsReference)),
+    Promise.resolve(buildProofVault(query, cleanJobs, partsReference)),
+    Promise.resolve(buildLishiLookup(lishiReference, { q: query, limit: 16 })),
+    buildAutoCodeBaseline({ q: query, limit: 30 }),
+  ]);
+  const groups = [];
+
+  if (vin || /\b(?:19|20)\d{2}\b/.test(query) || normalizeVehicleText(query).split(/\s+/).length >= 2) {
+    groups.push(
+      globalGroup("vehicle", "Vehicle / VIN", "vin", [
+        {
+          id: vin || "vehicle-search",
+          title: vin ? `Decode VIN ${vin}` : `Search vehicle ${query}`,
+          subtitle: vin ? "Run VIN lookup" : "Use this as a year/make/model clue",
+          detail: "Sends the query into the vehicle workflow.",
+          badge: vin ? "VIN" : "Vehicle",
+          target: "vin",
+          query,
+        },
+      ]),
+    );
+  }
+
+  groups.push(globalGroup("workbench", "Job Workbench", "workbench", [
+    {
+      id: "workbench",
+      title: `Build packet for ${query}`,
+      subtitle: "Parts, proof, Lishi, Code Desk, and coverage in one place",
+      detail: "Best first stop when you are not sure which tool should own the search.",
+      badge: "Unified",
+      target: "workbench",
+      query,
+    },
+  ]));
+
+  const partResults = globalPartResults(partHistory);
+  if (partResults.length) groups.push(globalGroup("parts", "Parts and saved jobs", "part-history", partResults, `${partHistory.referenceStats?.matchedReferenceRows || 0} cross-reference rows matched.`));
+
+  const proofResults = globalProofResults(proofVault);
+  if (proofResults.length) groups.push(globalGroup("proof", "Proof Vault", "proof-vault", proofResults, `${proofVault.summary?.matchingJobs || 0} proof records matched.`));
+
+  const directJobs = globalJobMatches(query, cleanJobs);
+  if (directJobs.length) groups.push(globalGroup("jobs", "Direct job text", "proof-vault", directJobs, "Matched raw saved job text."));
+
+  const lishiResults = globalLishiResults(lishiLookup, query);
+  if (lishiResults.length) groups.push(globalGroup("lishi", "Lishi tools", "lishi", lishiResults, `${lishiLookup.matchedApplications || 0} application rows matched.`));
+
+  const autoResults = globalAutoResults(autoBaseline, query);
+  if (autoResults.length) groups.push(globalGroup("auto", "Auto Code Desk", "code-desk", autoResults, `${autoBaseline.totalRows || 0} automotive baseline rows matched.`));
+
+  if (mode === "owner") {
+    groups.push(
+      globalGroup("owner-lists", "Owner reference lists", "reference-lists", [
+        { id: "parts-list", title: "Search parts cross-reference list", subtitle: `${partsReference.totalRows || partsReference.rows?.length || 0} rows`, detail: "Raw ML/LR/MW/TI/OE aliases.", badge: "Owner", target: "reference-lists", source: "parts", query },
+        { id: "lishi-list", title: "Search Lishi tools list", subtitle: `${lishiReference.stats?.tools || lishiReference.tools?.length || 0} tools`, detail: "Raw Lishi master import.", badge: "Owner", target: "reference-lists", source: "lishi-tools", query },
+        { id: "programming-list", title: "Search programming reference", subtitle: "Year/make/model baseline", detail: "Raw programming and source rows.", badge: "Owner", target: "reference-lists", source: "programming", query },
+      ]),
+    );
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    query,
+    mode,
+    summary: {
+      groups: groups.length,
+      results: groups.reduce((total, group) => total + group.count, 0),
+      ownerListsVisible: mode === "owner",
+    },
+    groups,
+  };
+}
+
 async function findVerifiedVehicleProfile(vehicle) {
   const profiles = await readVehicleProfiles();
   const baseKey = vehicleProfileBaseKey(vehicle);
@@ -6841,6 +7013,12 @@ async function handleApi(request, response, pathname) {
   if (request.method === "POST" && pathname === "/api/job-workbench") {
     const body = await readJsonBody(request);
     sendJson(response, 200, await buildJobWorkbench(body, store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/global-search") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await buildGlobalSearch(body, store));
     return;
   }
 

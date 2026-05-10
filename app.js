@@ -33,6 +33,8 @@ let lishiLookupRequestId = 0;
 let vinLishiLookupRequestId = 0;
 let latestWorkbench = null;
 let latestReferenceList = null;
+let latestGlobalSearch = null;
+let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
@@ -41,6 +43,7 @@ const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
 const fieldLookupCacheKey = "timlockFieldLookupCacheV1";
 const dispatchPackArchiveKey = "timlockDispatchPacksV1";
 const currentJobContextKey = "timlockCurrentJobContextV1";
+const appModeKey = "timlockAppModeV1";
 const liveProductFilters = {
   condition: new Set(),
   stock: new Set(),
@@ -57,11 +60,52 @@ const chatLog = [
   },
 ];
 
+function loadAppMode() {
+  try {
+    return localStorage.getItem(appModeKey) === "subscriber" ? "subscriber" : "owner";
+  } catch {
+    return "owner";
+  }
+}
+
+function isOwnerOnlyView(id) {
+  return Boolean(document.querySelector(`.nav-item[data-view="${id}"][data-owner-only]`));
+}
+
+function applyAppMode(mode = loadAppMode()) {
+  appMode = mode === "subscriber" ? "subscriber" : "owner";
+  try {
+    localStorage.setItem(appModeKey, appMode);
+  } catch {}
+  document.body.classList.toggle("mode-owner", appMode === "owner");
+  document.body.classList.toggle("mode-subscriber", appMode === "subscriber");
+  modeButtons.forEach((button) => {
+    const active = button.dataset.setMode === appMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  if (modeCaption) {
+    modeCaption.textContent =
+      appMode === "owner"
+        ? "Owner tools visible."
+        : "Subscriber view hides raw/admin tools.";
+  }
+  const activeOwnerView = document.querySelector(".view.active")?.id;
+  if (appMode === "subscriber" && isOwnerOnlyView(activeOwnerView)) {
+    showView("workbench");
+  }
+}
+
 const navItems = document.querySelectorAll(".nav-item");
 const views = document.querySelectorAll(".view");
 const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
 const mobileMenuBackdrop = document.querySelector(".mobile-menu-backdrop");
 const primarySidebar = document.querySelector("#primarySidebar");
+const modeButtons = document.querySelectorAll("[data-set-mode]");
+const modeCaption = document.querySelector("#modeCaption");
+const globalSearchForm = document.querySelector("#globalSearchForm");
+const globalSearchStatus = document.querySelector("#globalSearchStatus");
+const globalSearchResult = document.querySelector("#globalSearchResult");
 const dashboardJobs = document.querySelector("#dashboardJobs");
 const jobBoard = document.querySelector("#jobBoard");
 const vehicleGrid = document.querySelector("#vehicleGrid");
@@ -136,6 +180,7 @@ const aiForm = document.querySelector("#aiForm");
 const chatLogElement = document.querySelector("#chatLog");
 
 function showView(id) {
+  if (appMode === "subscriber" && isOwnerOnlyView(id)) id = "workbench";
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
   closeMobileMenu();
@@ -5497,6 +5542,150 @@ function openWorkbenchTarget(target) {
   showView(target);
 }
 
+function globalSearchQuery() {
+  return cleanInput(globalSearchForm?.elements.globalQuery?.value || "");
+}
+
+function renderGlobalResultCard(result = {}) {
+  return `
+    <article class="global-result-card">
+      <div>
+        <span>${escapeHtml(result.badge || "Result")}</span>
+        <strong>${escapeHtml(result.title || "Search result")}</strong>
+        <p>${escapeHtml(result.subtitle || "")}</p>
+        ${result.detail ? `<small>${escapeHtml(result.detail)}</small>` : ""}
+      </div>
+      <button class="secondary-action small" type="button" data-global-open="${escapeHtml(result.target || "workbench")}" data-global-query="${escapeHtml(result.query || latestGlobalSearch?.query || "")}" data-global-source="${escapeHtml(result.source || "")}">Open</button>
+    </article>
+  `;
+}
+
+function renderGlobalGroup(group = {}) {
+  return `
+    <section class="global-result-group">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">${escapeHtml(group.count || 0)} result${group.count === 1 ? "" : "s"}</p>
+          <h3>${escapeHtml(group.label || "Results")}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-global-open="${escapeHtml(group.target || "workbench")}" data-global-query="${escapeHtml(latestGlobalSearch?.query || "")}">Open Tool</button>
+      </div>
+      ${group.note ? `<p class="muted-copy">${escapeHtml(group.note)}</p>` : ""}
+      <div class="global-result-list">
+        ${(group.results || []).map(renderGlobalResultCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderGlobalSearch(payload = {}) {
+  if (!globalSearchResult) return;
+  latestGlobalSearch = payload;
+  const groups = payload.groups || [];
+  globalSearchResult.hidden = false;
+  globalSearchResult.innerHTML = `
+    <section class="global-result-summary">
+      <div>
+        <p class="eyebrow">Search packet</p>
+        <strong>${escapeHtml(payload.query || "Global search")}</strong>
+        <span>${escapeHtml(`${payload.summary?.results || 0} results across ${payload.summary?.groups || groups.length} groups`)}</span>
+      </div>
+      <button class="secondary-action small" type="button" data-clear-global-search>Clear</button>
+    </section>
+    <div class="global-result-grid">
+      ${groups.length ? groups.map(renderGlobalGroup).join("") : `<article class="assistant-card"><strong>No global matches</strong><p>Try a VIN, part number, keyway, make/model, OE number, FCC, or programmer name.</p></article>`}
+    </div>
+  `;
+}
+
+async function runGlobalSearch() {
+  const query = globalSearchQuery();
+  if (!query) {
+    if (globalSearchStatus) globalSearchStatus.textContent = "Enter a VIN, part number, keyway, vehicle, OE number, or programmer.";
+    return;
+  }
+  try {
+    if (globalSearchStatus) globalSearchStatus.textContent = "Searching the whole app...";
+    const payload = await api("/api/global-search", {
+      method: "POST",
+      body: JSON.stringify({
+        q: query,
+        mode: appMode,
+        jobs: localArchivedJobs(),
+        profile: currentWorkbenchProfile(),
+      }),
+      timeoutMs: 18000,
+    });
+    renderGlobalSearch(payload);
+    if (globalSearchStatus) globalSearchStatus.textContent = `Found ${payload.summary?.results || 0} results across ${payload.summary?.groups || 0} groups.`;
+  } catch (error) {
+    if (globalSearchStatus) globalSearchStatus.textContent = error.message;
+    if (globalSearchResult) {
+      globalSearchResult.hidden = false;
+      globalSearchResult.innerHTML = `<article class="assistant-card"><strong>Global search unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    }
+  }
+}
+
+function openGlobalSearchTarget(target, query, source = "") {
+  const cleanQuery = cleanInput(query || latestGlobalSearch?.query || globalSearchQuery());
+  if (target === "vin") {
+    showView("vin");
+    const normalizedVin = normalizeVinInput(cleanQuery);
+    if (normalizedVin.length === 17 && vinForm) {
+      vinForm.elements.vin.value = normalizedVin;
+      vinForm.requestSubmit();
+    } else if (workbenchForm) {
+      showView("workbench");
+      workbenchForm.elements.workbenchQuery.value = cleanQuery;
+      loadJobWorkbench(cleanQuery);
+    }
+    return;
+  }
+  if (target === "workbench") {
+    showView("workbench");
+    if (workbenchForm) workbenchForm.elements.workbenchQuery.value = cleanQuery;
+    loadJobWorkbench(cleanQuery);
+    return;
+  }
+  if (target === "part-history") {
+    showView("part-history");
+    if (partHistoryForm) {
+      partHistoryForm.elements.partNumber.value = cleanQuery;
+      partHistoryForm.requestSubmit();
+    }
+    return;
+  }
+  if (target === "proof-vault") {
+    showView("proof-vault");
+    if (proofVaultForm) proofVaultForm.elements.proofQuery.value = cleanQuery;
+    loadProofVault(cleanQuery);
+    return;
+  }
+  if (target === "lishi") {
+    showView("lishi");
+    if (lishiLookupForm) lishiLookupForm.elements.lishiQuery.value = cleanQuery;
+    loadLishiLookup(lishiLookupParamsFromForm());
+    return;
+  }
+  if (target === "code-desk") {
+    showView("code-desk");
+    if (codeDeskAutoForm) codeDeskAutoForm.elements.autoQuery.value = cleanQuery;
+    loadCodeDeskAutoBaseline(cleanQuery);
+    return;
+  }
+  if (target === "reference-lists") {
+    showView("reference-lists");
+    if (referenceListForm) {
+      referenceListForm.elements.referenceSource.value = source || "parts";
+      referenceListForm.elements.referenceQuery.value = cleanQuery;
+    }
+    loadReferenceList();
+    return;
+  }
+  showView(target);
+}
+
 function renderProfileLishiLookup(lookup) {
   const tools = lookup?.tools || [];
   if (!tools.length) return "";
@@ -6798,6 +6987,15 @@ async function loadPublicReferenceSources() {
   renderPublicReferenceSources();
 }
 
+applyAppMode(loadAppMode());
+
+modeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    applyAppMode(button.dataset.setMode);
+    if (latestGlobalSearch && globalSearchQuery()) runGlobalSearch();
+  });
+});
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => showView(item.dataset.view));
 });
@@ -6814,6 +7012,11 @@ window.addEventListener("keydown", (event) => {
 
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.viewTarget));
+});
+
+globalSearchForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  runGlobalSearch();
 });
 
 refreshCoverageDashboardButton?.addEventListener("click", () => loadCoverageDashboard());
@@ -6950,6 +7153,27 @@ document.addEventListener("click", (event) => {
   const workbenchTargetButton = event.target.closest("[data-workbench-open]");
   if (workbenchTargetButton) {
     openWorkbenchTarget(workbenchTargetButton.dataset.workbenchOpen);
+    return;
+  }
+
+  const clearGlobalSearchButton = event.target.closest("[data-clear-global-search]");
+  if (clearGlobalSearchButton) {
+    latestGlobalSearch = null;
+    if (globalSearchResult) {
+      globalSearchResult.hidden = true;
+      globalSearchResult.innerHTML = "";
+    }
+    if (globalSearchStatus) globalSearchStatus.textContent = "";
+    return;
+  }
+
+  const globalOpenButton = event.target.closest("[data-global-open]");
+  if (globalOpenButton) {
+    openGlobalSearchTarget(
+      globalOpenButton.dataset.globalOpen,
+      globalOpenButton.dataset.globalQuery,
+      globalOpenButton.dataset.globalSource,
+    );
     return;
   }
 

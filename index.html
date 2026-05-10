@@ -34,12 +34,21 @@
           <button class="nav-item" data-view="proof-vault">Proof Vault</button>
           <button class="nav-item" data-view="code-desk">Code Desk</button>
           <button class="nav-item" data-view="lishi">Lishi Lookup</button>
-          <button class="nav-item" data-view="reference-lists">Reference Lists</button>
+          <button class="nav-item" data-view="reference-lists" data-owner-only>Reference Lists</button>
           <button class="nav-item" data-view="coverage">Coverage</button>
           <button class="nav-item" data-view="learn">Worked Job</button>
-          <button class="nav-item" data-view="settings">Settings</button>
+          <button class="nav-item" data-view="settings" data-owner-only>Settings</button>
           <button class="nav-item" data-view="about">About</button>
         </nav>
+
+        <section class="mode-panel" aria-label="App mode">
+          <p class="eyebrow">View mode</p>
+          <div class="mode-toggle">
+            <button type="button" data-set-mode="subscriber">Subscriber</button>
+            <button type="button" data-set-mode="owner">Owner</button>
+          </div>
+          <span id="modeCaption">Owner tools visible.</span>
+        </section>
 
         <section class="operator-panel">
           <p class="eyebrow">Field mode</p>
@@ -54,11 +63,32 @@
             <p class="eyebrow">VIN to key</p>
             <h2>Scan a VIN. See the vehicle, keys, tools, and programming path.</h2>
           </div>
-          <button class="primary-action" data-view-target="settings">Parts Setup</button>
+          <button class="primary-action" data-view-target="settings" data-owner-only>Parts Setup</button>
         </header>
         <section class="app-status-banner" id="appStatusBanner">
           <span id="connectionStatus">Online</span>
           <button class="secondary-action small" type="button" id="installAppButton">Install app</button>
+        </section>
+        <section class="global-command-panel" id="globalCommandPanel">
+          <div class="global-command-head">
+            <div>
+              <p class="eyebrow">Command center</p>
+              <strong>Search everything</strong>
+            </div>
+            <div class="mode-toggle inline" aria-label="App mode">
+              <button type="button" data-set-mode="subscriber">Subscriber</button>
+              <button type="button" data-set-mode="owner">Owner</button>
+            </div>
+          </div>
+          <form id="globalSearchForm" class="global-search-form">
+            <label>
+              Global search
+              <input name="globalQuery" placeholder="VIN, part number, vehicle, HU101, TOY-239, OE number, programmer" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+            </label>
+            <button class="primary-action" type="submit">Search All</button>
+          </form>
+          <div class="form-status" id="globalSearchStatus"></div>
+          <div class="global-search-result" id="globalSearchResult" hidden></div>
         </section>
 
         <section class="view active" id="vin">
