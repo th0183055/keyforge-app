@@ -314,10 +314,13 @@ main {
   min-width: 0;
   max-width: 100%;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
   overflow-x: hidden;
-  padding: 28px;
+  overscroll-behavior: contain;
+  padding: 28px 28px calc(72px + env(safe-area-inset-bottom));
+  scrollbar-gutter: stable;
   background: transparent;
+  -webkit-overflow-scrolling: touch;
 }
 
 .topbar {
@@ -389,8 +392,8 @@ main {
   min-height: 0;
   min-width: 0;
   max-width: 100%;
-  flex: 1;
-  overflow: auto;
+  flex: 0 0 auto;
+  overflow: visible;
   overflow-x: hidden;
 }
 
@@ -579,7 +582,7 @@ main {
 }
 
 #vin.view.active {
-  overflow: auto;
+  overflow: visible;
   overflow-x: hidden;
   padding-bottom: 24px;
 }
@@ -1031,11 +1034,11 @@ textarea {
 }
 
 .vin-result {
-  flex: 1;
+  flex: 0 0 auto;
   display: grid;
   gap: 16px;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   padding-right: 3px;
 }
 
@@ -1547,7 +1550,7 @@ textarea {
   grid-template-columns: minmax(0, 1fr) 320px;
   align-items: start;
   gap: 16px;
-  height: 100%;
+  height: auto;
   min-height: 0;
 }
 
@@ -1561,16 +1564,16 @@ textarea {
 .vin-main-panel {
   display: flex;
   min-height: 0;
-  max-height: 100%;
+  max-height: none;
   flex-direction: column;
   padding: 20px;
-  overflow: auto;
+  overflow: visible;
 }
 
 .vin-side-panel {
   position: sticky;
   top: 28px;
-  max-height: 100%;
+  max-height: calc(100dvh - 56px);
   overflow: auto;
 }
 
@@ -4091,7 +4094,7 @@ textarea {
   }
 
   main {
-    padding: calc(58px + env(safe-area-inset-top)) 12px 14px;
+    padding: calc(58px + env(safe-area-inset-top)) 12px calc(72px + env(safe-area-inset-bottom));
   }
 
   .topbar {
@@ -4124,7 +4127,7 @@ textarea {
   }
 
   .vin-layout {
-    height: 100%;
+    height: auto;
     grid-template-columns: 1fr;
   }
 
@@ -4379,7 +4382,7 @@ textarea {
 
 @media (max-width: 620px) {
   main {
-    padding: calc(56px + env(safe-area-inset-top)) 8px 12px;
+    padding: calc(56px + env(safe-area-inset-top)) 8px calc(76px + env(safe-area-inset-bottom));
   }
 
   .topbar,
