@@ -4,7 +4,9 @@ import path from "node:path";
 
 const workspace = process.cwd();
 const dataDir = path.join(workspace, "data");
-const storePath = path.join(dataDir, "store.json");
+const mutableDataDir = process.env.TIMLOCK_DATA_DIR ? path.resolve(process.env.TIMLOCK_DATA_DIR) : dataDir;
+const storePath = path.join(mutableDataDir, "store.json");
+const storeExamplePath = path.join(dataDir, "store.example.json");
 const calendarPath = path.join(workspace, "calendar-import", "Tim Work_tim@wekeycars.com.ics");
 const outputJsonPath = path.join(dataDir, "vin-reference.json");
 const outputCsvPath = path.join(dataDir, "vin-reference.csv");
@@ -88,7 +90,7 @@ function collectVinsFromText(map, text, source) {
 }
 
 async function collectStoreVins(map) {
-  const store = JSON.parse(await readFile(storePath, "utf8"));
+  const store = await readStoreForVinReference();
   for (const job of store.jobs || []) {
     const source = {
       sourceType: "store",
@@ -102,6 +104,14 @@ async function collectStoreVins(map) {
 
     collectVinsFromText(map, Object.values(job).join("\n"), source);
   }
+}
+
+async function readStoreForVinReference() {
+  for (const candidatePath of [storePath, storeExamplePath]) {
+    if (!existsSync(candidatePath)) continue;
+    return JSON.parse(await readFile(candidatePath, "utf8"));
+  }
+  return { jobs: [] };
 }
 
 async function collectCalendarVins(map) {

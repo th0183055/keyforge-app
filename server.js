@@ -11,6 +11,7 @@ const host = process.env.HOST || "0.0.0.0";
 const dataDir = path.join(__dirname, "data");
 const mutableDataDir = process.env.TIMLOCK_DATA_DIR ? path.resolve(process.env.TIMLOCK_DATA_DIR) : dataDir;
 const storePath = path.join(mutableDataDir, "store.json");
+const storeExamplePath = path.join(dataDir, "store.example.json");
 const keyIntelligencePath = path.join(dataDir, "key-intelligence.json");
 const vinReferencePath = path.join(dataDir, "vin-reference.json");
 const vpicCatalogPath = path.join(dataDir, "vpic-catalog.json");
@@ -99,149 +100,9 @@ function mergeSupplierRegistry(accounts) {
   return merged;
 }
 
-const seedStore = {
-  jobs: [
-    {
-      id: randomUUID(),
-      title: "RLP - Grandfather Clock",
-      customer: "RLP",
-      vehicle: "Sligh Clock",
-      service: "Repair / lock problem",
-      verification: "Customer scheduled job",
-      status: "Part on order",
-      schedule: "Friday, April 24, 2026 - 09:15 to 09:45",
-      locationName: "24255 Jasmin Ln",
-      address: "24255 Jasmin Ln, Glenwood, IA 51534, USA",
-      phone: "402-960-9734",
-      contact: "",
-      price: 170,
-      payment: "cr",
-      programmer: "Clock hardware inspection",
-      sequence: "Confirmation #4PP4A2R5U / Q180",
-      tags: ["RLP", "clock", "part ordered"],
-      notes: ["Has key not turning", "Q170 for first hour and service trip", "Part on order"],
-      createdAt: "2026-04-24T14:15:00.000Z",
-    },
-    {
-      id: randomUUID(),
-      title: "DK 25 F-150 gry",
-      customer: "Sarah",
-      vehicle: "2025 Ford F-150 gray",
-      service: "Duplicate key",
-      verification: "Completed customer job",
-      status: "Completed",
-      schedule: "Friday, April 24, 2026 - 10:30 to 10:45",
-      locationName: "2311 Lincoln Ave",
-      address: "2311 Lincoln Ave, Plattsmouth, NE 68048, USA",
-      phone: "402-296-1010",
-      contact: "Sarah",
-      vin: "1FTFW3L58SKD97045",
-      mileage: "25,437",
-      price: 278.53,
-      payment: "cr",
-      programmer: "FRD8334 + FDRS",
-      sequence: "228.53 + 50",
-      tags: ["DK", "Ford", "FDRS"],
-      notes: ["VIN recorded", "Mileage 25,437", "FRD8334 + FDRS", "228.53 + 50"],
-      createdAt: "2026-04-24T15:30:00.000Z",
-    },
-    {
-      id: randomUUID(),
-      title: "AU 00 Accord [Del Auto]",
-      customer: "Del Auto",
-      vehicle: "2000 Honda Accord",
-      service: "Auto unlock",
-      verification: "Completed dealer job",
-      status: "Completed",
-      schedule: "Friday, April 24, 2026 - 11:15 to 11:20",
-      locationName: "8759 S 48th St",
-      address: "8759 S 48th St, Bellevue, NE 68157, USA",
-      phone: "",
-      contact: "",
-      vin: "1HGCG1651YA06308",
-      price: 60,
-      payment: "ch",
-      programmer: "Field unlock service",
-      sequence: "",
-      tags: ["AU", "Honda", "dealer"],
-      notes: ["VIN recorded", "$60.00 [ch]"],
-      createdAt: "2026-04-24T16:15:00.000Z",
-    },
-    {
-      id: randomUUID(),
-      title: "DK 24 Expedition blk [ehs]",
-      customer: "Rande",
-      vehicle: "2024 Ford Expedition black",
-      service: "Duplicate key",
-      verification: "Rande via text",
-      status: "Completed",
-      schedule: "Thursday, April 23, 2026 - 10:30 to 10:40",
-      locationName: "",
-      address: "",
-      phone: "",
-      contact: "Rande via text",
-      vin: "1FMJK2A87REA42384",
-      mileage: "69,416",
-      keyCode: "10077",
-      price: 110,
-      payment: "n30",
-      programmer: "PCP + FDRS",
-      sequence: "Sq. Inv. 14121",
-      tags: ["DK", "Ford", "FDRS", "n30"],
-      notes: ["24 Expedition", "LP: none", "PCP + FDRS", "Sq. Inv. 14121"],
-      createdAt: "2026-04-23T15:30:00.000Z",
-    },
-    {
-      id: randomUUID(),
-      title: "PCP 25 Camry wht [ewc]",
-      customer: "Edwards Chevrolet",
-      vehicle: "2025 Toyota Camry hybrid white",
-      service: "Program customer-provided key",
-      verification: "Melissa via text",
-      status: "Completed",
-      schedule: "Thursday, April 23, 2026 - 09:55 to 10:05",
-      locationName: "Edwards Chevrolet",
-      address: "3400 S Expressway St, Council Bluffs, IA 51501, USA",
-      phone: "",
-      contact: "Melissa via text",
-      vin: "4T1DAACK3SU116334",
-      keyCode: "87731",
-      price: 110,
-      payment: "n30",
-      programmer: "PCP + TIS",
-      sequence: "Sq. Inv. 14120",
-      tags: ["PCP", "Toyota", "TIS", "n30"],
-      notes: ["Customer-provided 2025 Toyota Camry hybrid key needed programming", "PCP + TIS", "Sq. Inv. 14120"],
-      createdAt: "2026-04-23T14:55:00.000Z",
-    },
-    {
-      id: randomUUID(),
-      title: "CU Trailer",
-      customer: "Chris",
-      vehicle: "Trailer with 3 Master Lock padlocks",
-      service: "Trailer lock service",
-      verification: "Completed customer job",
-      status: "Completed",
-      schedule: "Thursday, April 23, 2026 - 09:15 to 09:25",
-      locationName: "11528 Centennial Rd",
-      address: "11528 Centennial Rd, La Vista, NE 68128, USA",
-      phone: "(314) 308-2603",
-      contact: "Chris",
-      price: 150,
-      payment: "cr",
-      programmer: "Field lock service",
-      sequence: "",
-      tags: ["CU", "trailer", "padlocks"],
-      notes: ["Pick or cut off 3 Master Lock padlocks off of trailer", "$150.00 [cr]"],
-      createdAt: "2026-04-23T14:15:00.000Z",
-    },
-  ],
-  vehicles: [
-    ["2025 Ford F-150", "DK job pattern, FRD8334 + FDRS, mileage and VIN captured"],
-    ["2024 Ford Expedition", "DK job pattern, PCP + FDRS, key code and invoice captured"],
-    ["2025 Toyota Camry hybrid", "PCP job pattern, TIS workflow, dealer text authorization"],
-    ["2000 Honda Accord", "AU dealer job pattern with fast closeout and VIN record"],
-  ],
+const emptyStore = {
+  jobs: [],
+  vehicles: [],
   auditLog: [],
 };
 
@@ -255,16 +116,30 @@ const mimeTypes = {
   ".md": "text/markdown; charset=utf-8",
 };
 
+function normalizeStore(store = {}) {
+  return {
+    ...emptyStore,
+    ...store,
+    jobs: Array.isArray(store.jobs) ? store.jobs : [],
+    vehicles: Array.isArray(store.vehicles) ? store.vehicles : [],
+    auditLog: Array.isArray(store.auditLog) ? store.auditLog : [],
+  };
+}
+
+async function readStoreSeed() {
+  return normalizeStore(await readJsonCached(storeExamplePath, emptyStore));
+}
+
 async function ensureStore() {
   await mkdir(mutableDataDir, { recursive: true });
   if (!existsSync(storePath)) {
-    await writeStore(seedStore);
+    await writeStore(await readStoreSeed());
   }
 }
 
 async function readStore() {
   await ensureStore();
-  return JSON.parse(await readFile(storePath, "utf8"));
+  return normalizeStore(JSON.parse(await readFile(storePath, "utf8")));
 }
 
 async function readJsonCached(filePath, fallback = {}) {
@@ -1449,7 +1324,7 @@ async function buildHealthStatus() {
     jsonFileHealth("vPIC catalog", vpicCatalogPath, "rows"),
     jsonFileHealth("parts cross-reference", partsCrossReferencePath, "rows"),
     jsonFileHealth("Lishi master reference", lishiMasterReferencePath, "tools"),
-    jsonFileHealth("reference vault", referenceVaultPath, "entries"),
+    jsonFileHealth("reference vault", referenceVaultPath, "entries", true),
     jsonFileHealth("proof attachments", proofAttachmentsPath, "attachments", true),
   ]);
   const missing = files.filter((item) => !item.ok && !item.optional);

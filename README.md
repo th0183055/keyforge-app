@@ -23,6 +23,14 @@ Use these settings:
 
 The included `render.yaml` is a Render Blueprint for the same setup. If the deployed app shows `404` for `/api/vin/...`, the service was created as a Static Site or is pointing at the wrong Render service URL.
 
+## Job Store and Persistent Data
+
+Real job data should not live in Git. The app now keeps only `data/store.example.json` in the repository and creates the live store at `TIMLOCK_DATA_DIR/store.json`. Local development falls back to `data/store.json`, which is ignored.
+
+For Render production, `TIMLOCK_DATA_DIR` should point at the mounted persistent-data directory. The included `render.yaml` uses `/var/data/timlock` and attaches a `timlock-data` disk. Render persistent disks require a paid web service; Free web services have an ephemeral filesystem, so saved jobs can disappear on restart or redeploy if no external storage is attached.
+
+Before moving an existing live app to the persistent store, export a backup from the app. After the new service/disk is live, import that backup so the disk-backed `store.json` becomes the source of truth.
+
 ## What Exists Now
 
 - Clickable dashboard

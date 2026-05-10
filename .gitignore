@@ -1,6 +1,10 @@
 data/supplier-accounts.local.json
 data/.lockforge-secret
 data/key-innovations-*.html
+/data/store.json
+/data/proof-attachments.json
+/data/proof-attachments/
+/data/vehicle-profiles.json
 node_modules/
 .env
 .env.*
