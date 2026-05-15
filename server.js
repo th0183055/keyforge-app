@@ -2310,66 +2310,218 @@ function cleanIntelligenceRecord(input) {
   };
 }
 
+function aiContextSnapshot(context = {}) {
+  const workbench = context.workbench || {};
+  const profile = context.currentProfile || context.profile || {};
+  const vehicle = profile.vehicle || workbench.vehicle || {};
+  const partHistory = context.partHistory || {};
+  const proofVault = context.proofVault || {};
+  const codeDesk = context.codeDesk || {};
+  const lishi = context.lishi || {};
+  const coverage = context.coverage || {};
+  const globalSearch = context.globalSearch || {};
+  const brief = workbench.aiBrief || context.aiBrief || null;
+  const query = cleanString(context.query || workbench.activeQueries?.part || workbench.query || partHistory.primaryIdentifier || globalSearch.query);
+  const vehicleTitle = cleanString(profile.title || [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" "));
+  return {
+    activeView: cleanString(context.activeView || context.screen || "ai"),
+    screen: cleanString(context.screen || context.activeView || "AI Bench"),
+    query,
+    vehicleTitle,
+    vin: cleanString(profile.vin || workbench.vin),
+    workbenchTitle: cleanString(workbench.title || vehicleTitle || query),
+    brief,
+    activeQueries: workbench.activeQueries || {},
+    partHistory,
+    proofVault,
+    codeDesk,
+    lishi,
+    coverage,
+    globalSearch,
+    profile,
+  };
+}
+
+function aiIntent(prompt = "") {
+  const normalized = prompt.toLowerCase();
+  if (/quote|price|estimate|invoice|customer/.test(normalized)) return "quote";
+  if (/proof|vault|evidence|authorization|document|photo/.test(normalized)) return "proof";
+  if (/part|lr#?|mw#?|ti#?|oe|fcc|sku|order/.test(normalized)) return "parts";
+  if (/lishi|keyway|decode|pick|lock/.test(normalized)) return "lishi";
+  if (/code|bitting|cuts|depth|space|cutting/.test(normalized)) return "code";
+  if (/coverage|programmer|smart pro|autel|topdon|fdrs|success|worked/.test(normalized)) return "coverage";
+  if (/vin|vehicle|ymm|year|make|model/.test(normalized)) return "vin";
+  if (/next|now|dispatch|workbench|packet|prep|what should|summary|brief|checklist/.test(normalized)) return "next";
+  return "general";
+}
+
+function aiChecklistForIntent(intent, snapshot) {
+  const common = ["Confirm lawful authorization", "Verify VIN/YMM and customer identity", "Record the exact part/tool used after completion"];
+  const lists = {
+    next: [
+      "Open or refresh Job Workbench",
+      "Check part-history proof before ordering",
+      "Confirm Lishi/keyway at the lock or emergency insert",
+      "Attach proof photos/docs in Proof Vault",
+    ],
+    quote: [
+      "Confirm ownership and service address",
+      "Verify key type, FCC/frequency, blade/keyway, and programmer path",
+      "State parts/programming contingencies before final price",
+      "Save the customer-safe note with the job",
+    ],
+    proof: [
+      "Attach ID/registration or fleet authorization",
+      "Attach before/after key or programmer result photos",
+      "Record exact part number, programmer, and outcome",
+      "Mark warnings separately from proven outcomes",
+    ],
+    parts: [
+      "Start with LR/MW/TI/OE/FCC cross-reference family",
+      "Compare saved jobs for the same part family",
+      "Verify button count, frequency, blade, chip, and FCC before order",
+      "Log alternate if the first part is wrong",
+    ],
+    lishi: [
+      "Verify keyway from lock, insert, or authorized source",
+      "Confirm vehicle application row is the right year/model range",
+      "Do not rely on tool name alone",
+      "Record the confirmed Lishi/keyway in worked-job proof",
+    ],
+    code: [
+      "Use only authorized code data",
+      "Confirm correct depth-space system and blank",
+      "Compare bitting/code against vehicle/keyway context",
+      "Treat near matches as clues until verified at the lock/key",
+    ],
+    coverage: [
+      "Prioritize missing programmer proof",
+      "Clean up unknown outcomes",
+      "Add part numbers/OE/FCC to old jobs",
+      "Use coverage percentages as observed shop proof only",
+    ],
+    vin: [
+      "Confirm VIN has decoded to the expected vehicle",
+      "Select key family before ordering",
+      "Verify programmer coverage and keyway",
+      "Send the packet to Workbench before dispatch",
+    ],
+  };
+  return uniqueCleanValues([...(lists[intent] || lists.next), ...common]).slice(0, 7);
+}
+
+function aiActionsForIntent(intent, snapshot) {
+  const actions = [
+    { label: "Open Workbench", target: "workbench", prompt: "What should I do next from this packet?" },
+    { label: "Proof Vault", target: "proof-vault", prompt: "What proof is missing for this job?" },
+  ];
+  if (["parts", "next", "quote", "coverage"].includes(intent)) {
+    actions.push({ label: "Part History", target: "part-history", prompt: `Is ${snapshot.query || "this part"} proven enough to trust?` });
+  }
+  if (["lishi", "next", "vin"].includes(intent)) {
+    actions.push({ label: "Lishi Lookup", target: "lishi", prompt: "Build a Lishi verification checklist." });
+  }
+  if (["code", "next", "vin"].includes(intent)) {
+    actions.push({ label: "Code Desk", target: "code-desk", prompt: "What do I need before using code data?" });
+  }
+  if (["coverage", "proof"].includes(intent)) {
+    actions.push({ label: "Coverage", target: "coverage", prompt: "Where are my biggest coverage gaps?" });
+  }
+  return actions.slice(0, 6);
+}
+
+function aiSuggestedPrompts(intent, snapshot) {
+  const subject = snapshot.query || snapshot.vehicleTitle || "this job";
+  return uniqueCleanValues([
+    "What is the safest next move?",
+    `Create a technician checklist for ${subject}`,
+    `What proof is missing for ${subject}?`,
+    `Create a customer-facing note for ${subject}`,
+    intent !== "coverage" ? "What coverage gaps should I fix?" : "Which proof gaps should I fix first?",
+  ]).slice(0, 5);
+}
+
+function aiContextFacts(snapshot) {
+  return uniqueCleanValues([
+    snapshot.screen ? `Screen: ${snapshot.screen}` : "",
+    snapshot.vehicleTitle ? `Vehicle: ${snapshot.vehicleTitle}` : "",
+    snapshot.vin ? `VIN: ${snapshot.vin}` : "",
+    snapshot.query ? `Search: ${snapshot.query}` : "",
+    snapshot.brief?.decision ? `Workbench: ${snapshot.brief.decision}` : "",
+    snapshot.partHistory?.matchedJobs !== undefined ? `Part proof: ${snapshot.partHistory.matchedJobs} jobs / ${snapshot.partHistory.matchedReferenceRows || 0} reference rows` : "",
+    snapshot.proofVault?.matchingJobs !== undefined ? `Vault: ${snapshot.proofVault.matchingJobs} proof records` : "",
+    snapshot.lishi?.matchedTools !== undefined ? `Lishi: ${snapshot.lishi.matchedTools} tools` : "",
+    snapshot.codeDesk?.autoMatches !== undefined ? `Code Desk: ${snapshot.codeDesk.autoMatches} auto rows` : "",
+    snapshot.coverage?.observedCoveragePercent !== undefined ? `Coverage: ${snapshot.coverage.observedCoveragePercent}% observed` : "",
+  ]).slice(0, 8);
+}
+
+function aiResponseForIntent(intent, snapshot, checklist) {
+  const subject = snapshot.vehicleTitle || snapshot.query || snapshot.workbenchTitle || "this job";
+  const confidence = snapshot.brief?.confidencePercent ? ` Packet confidence is ${snapshot.brief.confidenceLabel || "developing"} at ${snapshot.brief.confidencePercent}%.` : "";
+  const lead = snapshot.brief?.decision || `Use ${subject} as the current job context.`;
+  const facts = aiContextFacts(snapshot).slice(0, 4).join(" ");
+  const playbooks = {
+    next: `${lead}${confidence} Best next move: verify authorization, then use the Workbench packet to move through part proof, Lishi/keyway verification, Code Desk only if authorized, and Proof Vault documentation. ${facts}`,
+    quote: `Quote prep for ${subject}: give a range only after authorization, exact key/FCC/blade confirmation, parts availability, programmer path, trip/after-hours factors, and any module/battery contingencies are clear. ${snapshot.brief?.customerNote || ""}`,
+    proof: `Proof review for ${subject}: the job is stronger when ID/registration or fleet authorization, exact part number, programmer result, outcome, and photos/docs are attached. ${facts}`,
+    parts: `Parts guidance for ${subject}: start from LR/MW/TI/OE/FCC cross-reference, compare saved jobs, and do not order from a single alias until buttons, FCC/frequency, blade/keyway, chip, and condition are verified.`,
+    lishi: `Lishi guidance for ${subject}: treat the imported tool match as a shortlist. Confirm keyway from the lock, insert, or authorized code source before using it, then save the confirmed tool/keyway to the worked job.`,
+    code: `Code Desk guidance for ${subject}: use only authorized code data, verify the exact depth-space system and blank, and treat reverse/bitting matches as verification clues until confirmed against the vehicle and lock.`,
+    coverage: `Coverage guidance: use the percentages as observed shop proof. Improve the score by adding programmer names, exact part numbers, outcomes, and proof attachments to jobs with missing data.`,
+    vin: `VIN guidance for ${subject}: make sure the decoded vehicle matches the customer vehicle, select the key family, verify parts/programmer/Lishi, then send the packet to Workbench before dispatch.`,
+    general: `${lead}${confidence} I can help turn the current screen into a technician checklist, proof audit, quote note, part verification path, or customer-safe summary. ${facts}`,
+  };
+  return `${playbooks[intent] || playbooks.general} Checklist: ${checklist.slice(0, 4).join("; ")}.`;
+}
+
 function aiDecision(prompt, context = {}) {
   const normalized = prompt.toLowerCase();
   const blocked = ["bypass", "steal", "break in", "hotwire", "hide from", "no permission"].some((term) =>
     normalized.includes(term),
   );
-  const workbench = context.workbench || context;
-  const brief = workbench?.aiBrief || context.aiBrief || null;
-  const activeQueries = workbench?.activeQueries || {};
+  const snapshot = aiContextSnapshot(context);
+  const intent = aiIntent(prompt);
+  const checklist = aiChecklistForIntent(intent, snapshot);
 
   if (blocked) {
     return {
+      title: "Blocked request",
       riskLevel: "blocked",
       policyDecision: "refused",
       response:
         "I can help with lawful locksmith workflow, verification, quote prep, and documentation. I cannot provide bypass instructions or guidance for unauthorized entry.",
-    };
-  }
-
-  if (brief && /next|now|dispatch|workbench|packet|prep|what should|summary|brief/i.test(prompt)) {
-    const evidence = (brief.evidence || []).slice(0, 3).map((item) => `Evidence: ${item}`);
-    const gaps = (brief.gaps || []).slice(0, 2).map((item) => `Gap: ${item}`);
-    const next = (brief.nextSteps || []).slice(0, 4).map((item, index) => `${index + 1}. ${item}`);
-    return {
-      riskLevel: "low",
-      policyDecision: "allowed_with_verified_job_context",
-      response: [
-        `${brief.decision} Confidence: ${brief.confidenceLabel || "developing"} (${brief.confidencePercent || 0}%).`,
-        ...evidence,
-        ...gaps,
-        next.length ? `Next moves: ${next.join(" ")}` : "",
-        activeQueries.part ? `Part thread: ${activeQueries.part}.` : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    };
-  }
-
-  if (normalized.includes("quote") || normalized.includes("price")) {
-    return {
-      riskLevel: "low",
-      policyDecision: "allowed",
-      response:
-        `Quote prep: confirm vehicle/lock details, key count, location distance, proof of ownership, parts availability, programming requirement, and after-hours rate before presenting the range.${brief?.customerNote ? ` Customer note: ${brief.customerNote}` : ""}`,
-    };
-  }
-
-  if (normalized.includes("ford") || normalized.includes("f-150")) {
-    return {
-      riskLevel: "medium",
-      policyDecision: "allowed_with_verified_job_context",
-      response:
-        "For the F-150 job: verify registration, attach ID photo, confirm keyway and remote style, check programmer support, add a contingency note for module or battery issues, then generate the customer authorization.",
+      checklist: ["Confirm authorization", "Keep notes customer-safe", "Use lawful service workflow only"],
+      nextActions: [{ label: "Proof Vault", target: "proof-vault", prompt: "What proof is required before this work?" }],
+      suggestedPrompts: ["Build a lawful verification checklist", "Create a customer-safe service note"],
+      contextSummary: aiContextFacts(snapshot),
     };
   }
 
   return {
+    title:
+      intent === "quote"
+        ? "Quote prep"
+        : intent === "proof"
+          ? "Proof audit"
+          : intent === "parts"
+            ? "Parts verification"
+            : intent === "lishi"
+              ? "Lishi verification"
+              : intent === "code"
+                ? "Code Desk guidance"
+                : intent === "coverage"
+                  ? "Coverage guidance"
+                  : "AI field brief",
     riskLevel: "low",
-    policyDecision: "allowed",
-    response:
-      "Safe next step: tie the request to a verified job, capture customer authorization, list parts and tools, then produce a clean technician checklist and customer-facing quote note.",
+    policyDecision: snapshot.brief ? "allowed_with_verified_job_context" : "allowed_with_screen_context",
+    intent,
+    response: aiResponseForIntent(intent, snapshot, checklist),
+    checklist,
+    nextActions: aiActionsForIntent(intent, snapshot),
+    suggestedPrompts: aiSuggestedPrompts(intent, snapshot),
+    contextSummary: aiContextFacts(snapshot),
+    recommendedRoute: aiActionsForIntent(intent, snapshot)[0]?.target || "workbench",
   };
 }
 
@@ -7624,9 +7776,16 @@ async function handleApi(request, response, pathname) {
       id: randomUUID(),
       jobId: body.jobId || null,
       prompt,
+      title: decision.title || "AI Bench",
       response: decision.response,
       riskLevel: decision.riskLevel,
       policyDecision: decision.policyDecision,
+      intent: decision.intent || "general",
+      checklist: decision.checklist || [],
+      nextActions: decision.nextActions || [],
+      suggestedPrompts: decision.suggestedPrompts || [],
+      contextSummary: decision.contextSummary || [],
+      recommendedRoute: decision.recommendedRoute || "",
       createdAt: new Date().toISOString(),
     };
 

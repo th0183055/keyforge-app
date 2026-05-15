@@ -27,6 +27,7 @@ let proofVaultAttachmentMaxBytes = 1_500_000;
 let codeDeskImportedRecords = [];
 let codeDeskCustomSystems = [];
 let latestCodeDeskAutoBaseline = null;
+let latestCodeDeskResult = null;
 let latestApiHealth = null;
 let latestLishiLookup = null;
 let lishiLookupRequestId = 0;
@@ -34,6 +35,7 @@ let vinLishiLookupRequestId = 0;
 let latestWorkbench = null;
 let latestReferenceList = null;
 let latestGlobalSearch = null;
+let latestAiResponse = null;
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -182,6 +184,15 @@ const connectionStatus = document.querySelector("#connectionStatus");
 const installAppButton = document.querySelector("#installAppButton");
 const aiForm = document.querySelector("#aiForm");
 const chatLogElement = document.querySelector("#chatLog");
+const aiRouteCard = document.querySelector("#aiRouteCard");
+const aiRouteEyebrow = document.querySelector("#aiRouteEyebrow");
+const aiRouteTitle = document.querySelector("#aiRouteTitle");
+const aiRouteSummary = document.querySelector("#aiRouteSummary");
+const aiRouteActions = document.querySelector("#aiRouteActions");
+const aiContextChips = document.querySelector("#aiContextChips");
+const aiQuickPrompts = document.querySelector("#aiQuickPrompts");
+const aiContextPanel = document.querySelector("#aiContextPanel");
+const aiActionPanel = document.querySelector("#aiActionPanel");
 const routeMeta = {
   command: {
     eyebrow: "Command center",
@@ -295,6 +306,7 @@ function showView(id, options = {}) {
   }
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
+  updateAiContextUi();
 }
 
 function goBackInApp() {
@@ -3668,6 +3680,7 @@ function renderPartHistory(payload) {
       </div>
     </section>
   `;
+  updateAiContextUi();
 }
 
 function coveragePercentLabel(value) {
@@ -3851,6 +3864,7 @@ function renderCoverageDashboard(payload = {}) {
       <p>${escapeHtml(payload.proofNote || "Coverage is observed from saved jobs.")}</p>
     </article>
   `;
+  updateAiContextUi();
 }
 
 function proofVaultLocalAttachments() {
@@ -4039,6 +4053,7 @@ function renderProofVault(payload = {}) {
       <p>${escapeHtml(payload.proofNote || "Proof Vault uses saved jobs, cross references, programmer evidence, and attachment proof.")}</p>
     </article>
   `;
+  updateAiContextUi();
 }
 
 async function loadProofVaultAttachments(jobId = "") {
@@ -4893,6 +4908,7 @@ function renderCodeDeskRecord(record) {
 
 function renderCodeDeskResult(result) {
   if (!codeDeskResult) return;
+  latestCodeDeskResult = result;
   const depthRows = codeDeskDepthRows(result.system);
   const cutRows = result.cutRows || [];
   const measurementRows = result.measurementRows || [];
@@ -4995,6 +5011,7 @@ function renderCodeDeskResult(result) {
       </div>
     </section>
   `;
+  updateAiContextUi();
 }
 
 function runCodeDesk() {
@@ -5205,6 +5222,7 @@ function renderCodeDeskAutoBaseline(payload = {}) {
       }
     </div>
   `;
+  updateAiContextUi();
 }
 
 async function loadCodeDeskAutoBaseline(query = codeDeskAutoForm?.elements.autoQuery?.value || "") {
@@ -5390,6 +5408,7 @@ function renderLishiLookup(payload = {}) {
       </div>
     </details>
   `;
+  updateAiContextUi();
 }
 
 async function loadLishiLookup(params = lishiLookupParamsFromForm()) {
@@ -5685,6 +5704,7 @@ function renderJobWorkbench(payload = {}) {
     </section>
     ${renderWorkbenchSources(payload)}
   `;
+  updateAiContextUi();
 }
 
 async function loadJobWorkbench(query = workbenchQueryFromForm()) {
@@ -5894,6 +5914,7 @@ function renderGlobalSearch(payload = {}) {
       ${groups.length ? groups.map(renderGlobalGroup).join("") : `<article class="assistant-card"><strong>No global matches</strong><p>Try a VIN, part number, keyway, make/model, OE number, FCC, or programmer name.</p></article>`}
     </div>
   `;
+  updateAiContextUi();
 }
 
 async function runGlobalSearch() {
@@ -6738,6 +6759,7 @@ function renderVinProfile(profile) {
 
   vinRecommendation.innerHTML = renderDispatchPack(profile);
   startLishiReferenceLookup(profile);
+  updateAiContextUi();
   return;
 
   vinResult.innerHTML = `
@@ -7106,10 +7128,364 @@ function renderVinError(message) {
   vinRecommendation.innerHTML = `<strong>Check VIN</strong><p>Confirm the 17-character VIN from the dash tag, door sticker, registration, or RO.</p>`;
 }
 
-function renderChat() {
-  chatLogElement.innerHTML = chatLog
-    .map((message) => `<div class="message ${message.role}">${escapeHtml(message.text).replace(/\n/g, "<br>")}</div>`)
+function routeDisplayLabel(id = activeViewId) {
+  return routeMeta[id]?.eyebrow || id.replace(/-/g, " ");
+}
+
+function compactList(value, limit = 5) {
+  return [...new Set((Array.isArray(value) ? value : [value]).flat().map((item) => cleanInput(item)).filter(Boolean))].slice(0, limit);
+}
+
+function vehicleTitleFromVehicle(vehicle = {}) {
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
+}
+
+function activeScreenQuery() {
+  return {
+    command: globalSearchQuery(),
+    workbench: workbenchQueryFromForm(),
+    "part-history": cleanInput(partHistoryForm?.elements.partNumber?.value || latestPartHistory?.query || ""),
+    "proof-vault": cleanInput(proofVaultForm?.elements.proofQuery?.value || latestProofVault?.query || ""),
+    "code-desk": cleanInput(codeDeskAutoForm?.elements.autoQuery?.value || codeDeskForm?.elements.query?.value || ""),
+    lishi: cleanInput(lishiLookupForm?.elements.lishiQuery?.value || latestLishiLookup?.query || ""),
+    coverage: latestCoverageDashboard ? "programmer coverage" : "",
+    vin: latestVinProfile?.vin || vehicleTitleFromVehicle(latestVinProfile?.vehicle || {}),
+  }[activeViewId] || "";
+}
+
+function compactProfileForAi(profile = currentWorkbenchProfile()) {
+  if (!profile?.vehicle) return null;
+  return {
+    vin: profile.vin || "",
+    lookupMode: profile.lookupMode || "",
+    vehicle: profile.vehicle,
+    title: vehicleTitleFromVehicle(profile.vehicle),
+    confidence: profile.confidence || "",
+    selectedPart: profile.selectedPart || null,
+    recommendation: profile.recommendation?.headline || profile.recommendation?.summary || "",
+    programmers: (profile.programmers || []).slice(0, 4).map((item) => item.name || item),
+    tools: (profile.tools || []).slice(0, 4).map((item) => item.name || item),
+    keys: (profile.keys || []).slice(0, 4).map((item) => item.name || item),
+    matchedJobs: profile.matchedJobs?.length || 0,
+    lishi: profile.lishiLookup
+      ? {
+          tools: (profile.lishiLookup.tools || []).slice(0, 4).map((tool) => tool.canonical || tool.tool),
+          matchedApplications: profile.lishiLookup.matchedApplications || 0,
+        }
+      : null,
+  };
+}
+
+function compactPartHistoryForAi(payload = latestPartHistory) {
+  if (!payload) return null;
+  return {
+    query: payload.query || "",
+    primaryIdentifier: payload.primaryIdentifier || "",
+    matchedJobs: payload.jobs?.length || 0,
+    matchedReferenceRows: payload.referenceStats?.matchedReferenceRows || payload.crossReferences?.length || 0,
+    identifiers: {
+      lr: compactList(payload.identifiers?.lr || [], 4),
+      mw: compactList(payload.identifiers?.mw || [], 4),
+      ti: compactList(payload.identifiers?.ti || [], 4),
+      oe: compactList(payload.identifiers?.oe || [], 6),
+    },
+    topProgrammers: (payload.programmerEvidence?.programmers || []).slice(0, 4).map((programmer) => ({
+      name: programmer.name,
+      jobs: programmer.jobs,
+      observedCoveragePercent: programmer.observedCoveragePercent,
+    })),
+  };
+}
+
+function compactProofVaultForAi(payload = latestProofVault) {
+  if (!payload) return null;
+  const summary = payload.summary || {};
+  return {
+    query: payload.query || "",
+    totalJobs: summary.totalJobs || 0,
+    matchingJobs: summary.matchingJobs || payload.records?.length || 0,
+    provenJobs: summary.provenJobs || 0,
+    warningJobs: summary.warningJobs || 0,
+    unknownJobs: summary.unknownJobs || 0,
+    files: proofVaultAttachmentCount(proofVaultAttachments()),
+  };
+}
+
+function compactCodeDeskForAi() {
+  const auto = latestCodeDeskAutoBaseline || {};
+  const result = latestCodeDeskResult || {};
+  return {
+    autoQuery: auto.query || cleanInput(codeDeskAutoForm?.elements.autoQuery?.value || ""),
+    autoMatches: auto.rows?.length || auto.returnedRows || 0,
+    totalAutoRows: auto.totalRows || 0,
+    selectedSystem: result.system?.name || selectedCodeDeskSystem?.().name || "",
+    mode: result.mode || codeDeskForm?.elements.mode?.value || "",
+    query: result.query || cleanInput(codeDeskForm?.elements.query?.value || ""),
+    bitting: result.bitting?.join("") || "",
+    verifiedCandidates: result.verifiedCandidates?.length || 0,
+    importedRecords: codeDeskImportedRecords.length,
+  };
+}
+
+function compactLishiForAi(payload = latestLishiLookup) {
+  if (!payload) return null;
+  return {
+    query: payload.query || cleanInput(lishiLookupForm?.elements.lishiQuery?.value || ""),
+    matchedTools: payload.tools?.length || payload.returnedTools || 0,
+    matchedApplications: payload.matchedApplications || payload.applications?.length || 0,
+    tools: (payload.tools || []).slice(0, 5).map((tool) => tool.canonical || tool.tool),
+    applications: (payload.applications || []).slice(0, 5).map((application) =>
+      [application.yearRange, application.manufacturer, application.model, application.tool].filter(Boolean).join(" "),
+    ),
+  };
+}
+
+function compactCoverageForAi(payload = latestCoverageDashboard) {
+  if (!payload) return null;
+  const summary = payload.summary || {};
+  return {
+    automotiveJobs: summary.automotiveJobs || 0,
+    observedCoveragePercent: summary.observedCoveragePercent,
+    programmerProofPercent: summary.programmerProofPercent,
+    partProofPercent: summary.partProofPercent,
+    topProgrammers: (payload.programmers || []).slice(0, 4).map((item) => ({
+      name: item.key,
+      jobs: item.jobs,
+      observedCoveragePercent: item.observedCoveragePercent,
+    })),
+    gaps: {
+      missingProgrammer: payload.gaps?.missingProgrammer?.length || 0,
+      missingPart: payload.gaps?.missingPart?.length || 0,
+      needsOutcome: payload.gaps?.needsOutcome?.length || 0,
+    },
+  };
+}
+
+function compactGlobalSearchForAi(payload = latestGlobalSearch) {
+  if (!payload) return null;
+  return {
+    query: payload.query || "",
+    results: payload.summary?.results || 0,
+    groups: (payload.groups || []).map((group) => `${group.label}: ${group.count}`).slice(0, 6),
+  };
+}
+
+function buildAiClientContext() {
+  const profile = compactProfileForAi();
+  return {
+    activeView: activeViewId,
+    screen: routeDisplayLabel(activeViewId),
+    appMode,
+    query: activeScreenQuery(),
+    currentProfile: profile,
+    workbench: latestWorkbench
+      ? {
+          title: latestWorkbench.title,
+          query: latestWorkbench.query,
+          activeQueries: latestWorkbench.activeQueries,
+          overview: latestWorkbench.overview,
+          aiBrief: latestWorkbench.aiBrief,
+          warnings: latestWorkbench.warnings,
+          vehicle: latestWorkbench.vehicle,
+        }
+      : null,
+    partHistory: compactPartHistoryForAi(),
+    proofVault: compactProofVaultForAi(),
+    codeDesk: compactCodeDeskForAi(),
+    lishi: compactLishiForAi(),
+    coverage: compactCoverageForAi(),
+    globalSearch: compactGlobalSearchForAi(),
+    jobs: jobs.slice(0, 4).map((job) => ({
+      title: [job.vehicle?.year, job.vehicle?.make, job.vehicle?.model].filter(Boolean).join(" ") || job.customer || job.id,
+      status: job.status,
+      service: job.service,
+    })),
+  };
+}
+
+function aiContextSummaryText(context = buildAiClientContext()) {
+  const vehicle = context.currentProfile?.title || vehicleTitleFromVehicle(context.workbench?.vehicle || {});
+  const query = context.query || context.workbench?.activeQueries?.part || context.globalSearch?.query || "";
+  const pieces = [
+    `${context.screen || "Current screen"} is active`,
+    vehicle ? `vehicle ${vehicle}` : "",
+    query ? `query ${query}` : "",
+    context.workbench?.aiBrief?.confidencePercent ? `${context.workbench.aiBrief.confidencePercent}% packet confidence` : "",
+    context.partHistory?.matchedJobs ? `${context.partHistory.matchedJobs} part-history jobs` : "",
+    context.proofVault?.matchingJobs ? `${context.proofVault.matchingJobs} proof records` : "",
+  ].filter(Boolean);
+  return pieces.join(" | ") || "No job context loaded yet";
+}
+
+function aiPromptSuggestions(context = buildAiClientContext()) {
+  const q = context.query || context.workbench?.activeQueries?.part || "this job";
+  const base = {
+    command: [`Where should I open this search next?`, `Build a job plan from the current search`, `What proof should I look for first?`],
+    vin: [`Build the next-step checklist for this VIN`, `What should I verify before ordering?`, `Summarize this job for the customer`],
+    workbench: [`What should I do next from this packet?`, `What proof is missing?`, `Create a technician checklist`],
+    "part-history": [`Is ${q} proven enough to trust?`, `What programmer proof exists for ${q}?`, `What should I save after this job?`],
+    "proof-vault": [`What proof is missing for ${q}?`, `Write a customer-safe proof summary`, `What would improve coverage percentage?`],
+    "code-desk": [`What do I need before using code data?`, `Explain this bitting/code result safely`, `What should I verify before cutting?`],
+    lishi: [`Which Lishi result should I verify first?`, `Build a Lishi verification checklist`, `What should I confirm at the lock?`],
+    coverage: [`Where are my biggest coverage gaps?`, `Which programmer evidence is strongest?`, `What should I log on the next job?`],
+    learn: [`Check this worked-job entry before saving`, `What fields matter most for proof?`, `How should I describe the outcome?`],
+    ai: [`What is the safest next move?`, `Create a technician checklist`, `Create a customer-facing note`],
+  };
+  return [...(base[context.activeView] || base.command), `Create a quote-prep checklist for ${q}`].slice(0, 6);
+}
+
+function renderAiContextChips(context = buildAiClientContext()) {
+  const chips = [
+    context.screen,
+    context.query ? `Search: ${context.query}` : "",
+    context.currentProfile?.title,
+    context.workbench?.aiBrief?.confidencePercent ? `AI ${context.workbench.aiBrief.confidencePercent}%` : "",
+    context.coverage?.observedCoveragePercent ? `${context.coverage.observedCoveragePercent}% coverage` : "",
+  ].filter(Boolean);
+  return chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("");
+}
+
+function renderAiContextPanel(context = buildAiClientContext()) {
+  const facts = [
+    ["Screen", context.screen],
+    ["Active search", context.query || "No active search"],
+    ["Vehicle", context.currentProfile?.title || vehicleTitleFromVehicle(context.workbench?.vehicle || {}) || "No VIN/YMM context"],
+    ["Workbench", context.workbench?.aiBrief?.decision || "No packet built yet"],
+    ["Part proof", context.partHistory ? `${context.partHistory.matchedJobs} jobs / ${context.partHistory.matchedReferenceRows} reference rows` : "Not loaded"],
+    ["Proof vault", context.proofVault ? `${context.proofVault.matchingJobs} matches / ${context.proofVault.files} files` : "Not loaded"],
+    ["Lishi", context.lishi ? `${context.lishi.matchedTools} tools / ${context.lishi.matchedApplications} applications` : "Not loaded"],
+    ["Code Desk", context.codeDesk ? `${context.codeDesk.autoMatches} auto rows / ${context.codeDesk.verifiedCandidates} verified candidates` : "Not loaded"],
+    ["Coverage", context.coverage ? `${context.coverage.automotiveJobs} jobs / ${context.coverage.observedCoveragePercent ?? "N/A"}% observed` : "Not loaded"],
+  ];
+  return facts
+    .map(
+      ([label, value]) => `
+        <article>
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+        </article>
+      `,
+    )
     .join("");
+}
+
+function renderAiActions(actions = [], prompts = []) {
+  const actionButtons = actions
+    .slice(0, 5)
+    .map(
+      (action) => `
+        <button class="secondary-action small" type="button" data-ai-action-target="${escapeHtml(action.target || "ai")}" data-ai-action-prompt="${escapeHtml(action.prompt || "")}">
+          ${escapeHtml(action.label || "Open")}
+        </button>
+      `,
+    )
+    .join("");
+  const promptButtons = prompts
+    .slice(0, 4)
+    .map((prompt) => `<button class="secondary-action small" type="button" data-ai-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`)
+    .join("");
+  return `${actionButtons}${promptButtons}`;
+}
+
+function renderAiMessage(message) {
+  const checklist = Array.isArray(message.checklist) && message.checklist.length
+    ? `<ul>${message.checklist.slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : "";
+  const actions = message.role === "assistant" && message.actions?.length
+    ? `<div class="ai-message-actions">${renderAiActions(message.actions)}</div>`
+    : "";
+  return `
+    <div class="message ${escapeHtml(message.role)}">
+      ${message.title ? `<strong>${escapeHtml(message.title)}</strong>` : ""}
+      <p>${escapeHtml(message.text).replace(/\n/g, "<br>")}</p>
+      ${checklist}
+      ${actions}
+    </div>
+  `;
+}
+
+function renderChat() {
+  if (!chatLogElement) return;
+  chatLogElement.innerHTML = chatLog.map(renderAiMessage).join("");
+  chatLogElement.scrollTop = chatLogElement.scrollHeight;
+}
+
+function renderAiResponsePanel(payload = latestAiResponse) {
+  if (!aiActionPanel) return;
+  if (!payload) {
+    aiActionPanel.innerHTML = `
+      <p class="eyebrow">Guardrails</p>
+      <ul class="plain-list">
+        <li>Ownership and authorization first</li>
+        <li>Parts, proof, and programmer verification</li>
+        <li>Customer-safe summaries and technician checklists</li>
+        <li>No bypass or unauthorized-entry instructions</li>
+      </ul>
+    `;
+    return;
+  }
+  aiActionPanel.innerHTML = `
+    <p class="eyebrow">AI recommended actions</p>
+    <div class="ai-action-list">${renderAiActions(payload.nextActions || [], payload.suggestedPrompts || [])}</div>
+    ${
+      payload.checklist?.length
+        ? `<div class="ai-checklist"><strong>Checklist</strong><ul>${payload.checklist.slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+        : ""
+    }
+  `;
+}
+
+function updateAiContextUi() {
+  const context = buildAiClientContext();
+  const prompts = aiPromptSuggestions(context);
+  if (aiRouteEyebrow) aiRouteEyebrow.textContent = "Screen-aware AI";
+  if (aiRouteTitle) aiRouteTitle.textContent = `${routeDisplayLabel(context.activeView)} copilot`;
+  if (aiRouteSummary) aiRouteSummary.textContent = aiContextSummaryText(context);
+  if (aiRouteActions) {
+    aiRouteActions.innerHTML = renderAiActions([{ label: "Open AI Bench", target: "ai" }], prompts.slice(0, 2));
+  }
+  if (aiContextChips) aiContextChips.innerHTML = renderAiContextChips(context);
+  if (aiQuickPrompts) {
+    aiQuickPrompts.innerHTML = prompts.map((prompt) => `<button type="button" data-ai-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`).join("");
+  }
+  if (aiContextPanel) aiContextPanel.innerHTML = renderAiContextPanel(context);
+  renderAiResponsePanel();
+}
+
+async function askAi(prompt, { open = true } = {}) {
+  const cleanPrompt = cleanInput(prompt);
+  if (!cleanPrompt) return;
+  if (open && activeViewId !== "ai") showView("ai");
+  const context = buildAiClientContext();
+  chatLog.push({ role: "user", text: cleanPrompt });
+  chatLog.push({ role: "assistant", text: "Reading the current screen context...", title: "Working" });
+  renderChat();
+  updateAiContextUi();
+
+  try {
+    const payload = await api("/api/ai", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: cleanPrompt,
+        jobId: jobs[0]?.id || null,
+        context,
+      }),
+      timeoutMs: 16000,
+    });
+    latestAiResponse = payload;
+    chatLog.splice(chatLog.length - 1, 1, {
+      role: "assistant",
+      title: payload.title || "AI Bench",
+      text: payload.response,
+      checklist: payload.checklist || [],
+      actions: payload.nextActions || [],
+    });
+  } catch (error) {
+    chatLog.splice(chatLog.length - 1, 1, { role: "assistant", title: "AI unavailable", text: `Backend error: ${error.message}` });
+  } finally {
+    renderChat();
+    updateAiContextUi();
+  }
 }
 
 function apiUrls(path) {
@@ -7384,6 +7760,7 @@ clearWorkbenchButton?.addEventListener("click", () => {
   if (workbenchResult) {
     workbenchResult.innerHTML = `<article class="assistant-card"><strong>Workbench cleared</strong><p>Run a VIN lookup or search a part number to build a fresh job packet.</p></article>`;
   }
+  updateAiContextUi();
 });
 
 referenceListForm?.addEventListener("submit", (event) => {
@@ -7421,6 +7798,25 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const aiPromptButton = event.target.closest("[data-ai-prompt]");
+  if (aiPromptButton) {
+    askAi(aiPromptButton.dataset.aiPrompt);
+    return;
+  }
+
+  const aiActionButton = event.target.closest("[data-ai-action-target]");
+  if (aiActionButton) {
+    const target = aiActionButton.dataset.aiActionTarget || "ai";
+    const prompt = cleanInput(aiActionButton.dataset.aiActionPrompt || "");
+    if (target && target !== "ai") {
+      showView(target);
+      return;
+    }
+    showView("ai");
+    if (prompt) askAi(prompt, { open: false });
+    return;
+  }
+
   const codeSystemButton = event.target.closest("[data-code-system]");
   if (codeSystemButton) {
     renderCodeDesk();
@@ -7473,6 +7869,7 @@ document.addEventListener("click", (event) => {
       globalSearchResult.innerHTML = "";
     }
     if (globalSearchStatus) globalSearchStatus.textContent = "";
+    updateAiContextUi();
     return;
   }
 
@@ -8048,30 +8445,8 @@ aiForm.addEventListener("submit", async (event) => {
   const data = new FormData(aiForm);
   const prompt = data.get("prompt").trim();
   if (!prompt) return;
-
-  chatLog.push({ role: "user", text: prompt });
-  renderChat();
   aiForm.reset();
-
-  try {
-    const payload = await api("/api/ai", {
-      method: "POST",
-      body: JSON.stringify({
-        prompt,
-        jobId: jobs[0]?.id || null,
-        context: {
-          workbench: latestWorkbench,
-          currentProfile: currentWorkbenchProfile(),
-          globalSearch: latestGlobalSearch,
-        },
-      }),
-    });
-    chatLog.push({ role: "assistant", text: payload.response });
-  } catch (error) {
-    chatLog.push({ role: "assistant", text: `Backend error: ${error.message}` });
-  } finally {
-    renderChat();
-  }
+  await askAi(prompt, { open: false });
 });
 
 vinForm.addEventListener("submit", async (event) => {

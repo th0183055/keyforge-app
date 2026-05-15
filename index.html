@@ -72,6 +72,14 @@
           <span id="connectionStatus">Online</span>
           <button class="secondary-action small" type="button" id="installAppButton">Install app</button>
         </section>
+        <section class="ai-route-card" id="aiRouteCard">
+          <div>
+            <p class="eyebrow" id="aiRouteEyebrow">Screen-aware AI</p>
+            <strong id="aiRouteTitle">Ready to help with the current screen</strong>
+            <span id="aiRouteSummary">Ask for the next move, proof gaps, parts checks, quote prep, or a clean technician checklist.</span>
+          </div>
+          <div class="ai-route-actions" id="aiRouteActions"></div>
+        </section>
         <section class="view active global-command-panel" id="command">
           <div class="global-command-head">
             <div>
@@ -811,35 +819,33 @@
         </section>
 
         <section class="view" id="ai">
-          <div class="split-layout">
-            <section class="panel wide">
+          <div class="ai-workspace">
+            <section class="panel wide ai-bench-panel">
               <div class="panel-header">
                 <div>
                   <p class="eyebrow">Professional assistant</p>
                   <h3>AI Bench</h3>
                 </div>
+                <button class="secondary-action small" type="button" data-ai-prompt="What should I do next from the current screen?">Next Move</button>
               </div>
+              <div class="ai-context-chip-row" id="aiContextChips"></div>
+              <div class="ai-prompt-grid" id="aiQuickPrompts"></div>
               <div class="chat-log" id="chatLog"></div>
               <form id="aiForm" class="prompt-row">
-                <input name="prompt" placeholder="Ask about quote prep, parts checklist, customer notes, or job workflow..." />
+                <input name="prompt" placeholder="Ask about this screen, proof gaps, quote prep, parts checklist, Lishi, Code Desk, or job workflow..." autocomplete="off" />
                 <button class="primary-action" type="submit">Ask</button>
               </form>
             </section>
 
-            <section class="panel">
+            <section class="panel ai-context-panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Guardrails</p>
-                  <h3>Allowed Output</h3>
+                  <p class="eyebrow">Live context</p>
+                  <h3>What AI can see</h3>
                 </div>
               </div>
-              <ul class="plain-list">
-                <li>Ownership verification checklist</li>
-                <li>VIN/job record organization</li>
-                <li>Quote and parts prep</li>
-                <li>Tool compatibility notes</li>
-                <li>Refusal for bypass or unauthorized entry</li>
-              </ul>
+              <div class="ai-context-body" id="aiContextPanel"></div>
+              <div class="ai-action-panel" id="aiActionPanel"></div>
             </section>
           </div>
         </section>
