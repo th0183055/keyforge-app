@@ -98,11 +98,15 @@ function applyAppMode(mode = loadAppMode()) {
 
 const navItems = document.querySelectorAll(".nav-item");
 const views = document.querySelectorAll(".view");
+const mainElement = document.querySelector("main");
 const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
 const mobileMenuBackdrop = document.querySelector(".mobile-menu-backdrop");
 const primarySidebar = document.querySelector("#primarySidebar");
 const modeButtons = document.querySelectorAll("[data-set-mode]");
 const modeCaption = document.querySelector("#modeCaption");
+const appBackButton = document.querySelector("#appBackButton");
+const topbarEyebrow = document.querySelector(".topbar .eyebrow");
+const topbarTitle = document.querySelector(".topbar h2");
 const globalSearchForm = document.querySelector("#globalSearchForm");
 const globalSearchStatus = document.querySelector("#globalSearchStatus");
 const globalSearchResult = document.querySelector("#globalSearchResult");
@@ -178,12 +182,110 @@ const connectionStatus = document.querySelector("#connectionStatus");
 const installAppButton = document.querySelector("#installAppButton");
 const aiForm = document.querySelector("#aiForm");
 const chatLogElement = document.querySelector("#chatLog");
+const routeMeta = {
+  command: {
+    eyebrow: "Command center",
+    title: "Search everything. Open the exact tool as a clean page.",
+  },
+  vin: {
+    eyebrow: "VIN to key",
+    title: "Scan a VIN. See the vehicle, keys, tools, and programming path.",
+  },
+  workbench: {
+    eyebrow: "Unified job context",
+    title: "Build one packet for parts, proof, tools, and the next move.",
+  },
+  "part-history": {
+    eyebrow: "Proof trail",
+    title: "Search part numbers against cross-reference and saved jobs.",
+  },
+  "proof-vault": {
+    eyebrow: "Evidence locker",
+    title: "Find job proof, attachments, authorization, and coverage evidence.",
+  },
+  "code-desk": {
+    eyebrow: "Lock decode",
+    title: "Look up code systems, bitting, cuts, and automotive code baseline.",
+  },
+  lishi: {
+    eyebrow: "Pick / decode reference",
+    title: "Find Lishi tools and vehicle applications from your master list.",
+  },
+  "reference-lists": {
+    eyebrow: "Owner reference shelf",
+    title: "Inspect the raw lists that power the app.",
+  },
+  coverage: {
+    eyebrow: "Observed proof",
+    title: "See programmer and part coverage from saved work.",
+  },
+  learn: {
+    eyebrow: "Teach TimLock-App",
+    title: "Save worked jobs so the app gets sharper.",
+  },
+  settings: {
+    eyebrow: "Parts setup",
+    title: "Connect suppliers and app data sources.",
+  },
+  about: {
+    eyebrow: "TimLock-App",
+    title: "Professional locksmith intelligence, built around verified work.",
+  },
+  ai: {
+    eyebrow: "Professional assistant",
+    title: "Ask for safe prep, quote, and technician workflow help.",
+  },
+};
+let activeViewId = document.querySelector(".view.active")?.id || "command";
+const appRouteStack = [];
 
-function showView(id) {
+function routeExists(id) {
+  return Array.from(views).some((view) => view.id === id);
+}
+
+function routeFromLocation() {
+  const id = decodeURIComponent(window.location.hash.replace(/^#/, "") || "");
+  return routeExists(id) ? id : "";
+}
+
+function updateRouteChrome(id) {
+  const meta = routeMeta[id] || routeMeta.command;
+  if (topbarEyebrow) topbarEyebrow.textContent = meta.eyebrow;
+  if (topbarTitle) topbarTitle.textContent = meta.title;
+  if (appBackButton) appBackButton.hidden = id === "command";
+}
+
+function replaceRouteHash(id) {
+  const hash = `#${encodeURIComponent(id)}`;
+  if (window.location.hash !== hash) {
+    window.history.replaceState({ view: id, timlock: true }, "", hash);
+  }
+}
+
+function pushRouteHash(id) {
+  const hash = `#${encodeURIComponent(id)}`;
+  if (window.location.hash !== hash) {
+    window.history.pushState({ view: id, timlock: true }, "", hash);
+  }
+}
+
+function showView(id, options = {}) {
+  const { push = true, scroll = true } = options;
   if (appMode === "subscriber" && isOwnerOnlyView(id)) id = "workbench";
+  if (!routeExists(id)) id = "command";
+  const previousViewId = activeViewId;
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
+  activeViewId = id;
+  updateRouteChrome(id);
+  if (push && previousViewId && previousViewId !== id) {
+    appRouteStack.push(previousViewId);
+    pushRouteHash(id);
+  } else if (!push) {
+    replaceRouteHash(id);
+  }
   closeMobileMenu();
+  if (scroll) mainElement?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
@@ -193,6 +295,17 @@ function showView(id) {
   }
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
+}
+
+function goBackInApp() {
+  const previous = appRouteStack.pop();
+  if (previous && routeExists(previous)) {
+    showView(previous, { push: false });
+    replaceRouteHash(previous);
+    return;
+  }
+  showView("command", { push: false });
+  replaceRouteHash("command");
 }
 
 function setMobileMenu(open) {
@@ -5484,6 +5597,53 @@ function renderWorkbenchSources(payload = {}) {
   `;
 }
 
+function renderWorkbenchAiBrief(payload = {}) {
+  const brief = payload.aiBrief || {};
+  if (!brief.decision) return "";
+  const evidence = brief.evidence || [];
+  const gaps = brief.gaps || [];
+  const nextSteps = brief.nextSteps || [];
+  return `
+    <section class="ai-brief-panel">
+      <div class="ai-brief-main">
+        <p class="eyebrow">${escapeHtml(brief.headline || "AI field brief")}</p>
+        <h3>${escapeHtml(brief.decision)}</h3>
+        <p>${escapeHtml(brief.technicianNote || "Use the verified data in this packet before dispatch.")}</p>
+        <button class="secondary-action small" type="button" data-workbench-open="ai">Ask AI Bench</button>
+      </div>
+      <div class="ai-brief-score">
+        <span>${escapeHtml(brief.confidenceLabel || "Developing")}</span>
+        <strong>${escapeHtml(brief.confidencePercent || 0)}%</strong>
+        <small>Packet confidence</small>
+      </div>
+      <div class="ai-brief-columns">
+        <article>
+          <strong>Evidence</strong>
+          <ul>
+            ${
+              evidence.length
+                ? evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+                : `<li>No matching proof yet.</li>`
+            }
+          </ul>
+        </article>
+        <article>
+          <strong>Gaps</strong>
+          <ul>
+            ${gaps.length ? gaps.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>No major gaps beyond normal verification.</li>`}
+          </ul>
+        </article>
+        <article>
+          <strong>Next</strong>
+          <ul>
+            ${nextSteps.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+          </ul>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderJobWorkbench(payload = {}) {
   if (!workbenchResult) return;
   latestWorkbench = payload;
@@ -5496,6 +5656,7 @@ function renderJobWorkbench(payload = {}) {
     ["Coverage", overview.observedCoveragePercent ?? "N/A", "Observed shop proof"],
   ];
   workbenchResult.innerHTML = `
+    ${renderWorkbenchAiBrief(payload)}
     <section class="history-summary-grid">
       ${metrics
         .map(
@@ -6947,7 +7108,7 @@ function renderVinError(message) {
 
 function renderChat() {
   chatLogElement.innerHTML = chatLog
-    .map((message) => `<div class="message ${message.role}">${message.text}</div>`)
+    .map((message) => `<div class="message ${message.role}">${escapeHtml(message.text).replace(/\n/g, "<br>")}</div>`)
     .join("");
 }
 
@@ -7137,6 +7298,8 @@ navItems.forEach((item) => {
   item.addEventListener("click", () => showView(item.dataset.view));
 });
 
+appBackButton?.addEventListener("click", goBackInApp);
+
 mobileMenuToggle?.addEventListener("click", () => {
   setMobileMenu(!document.body.classList.contains("mobile-menu-open"));
 });
@@ -7147,9 +7310,18 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeMobileMenu();
 });
 
+window.addEventListener("popstate", () => {
+  const route = routeFromLocation() || "command";
+  showView(route, { push: false });
+});
+
 document.querySelectorAll("[data-view-target]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.viewTarget));
 });
+
+const initialRoute = routeFromLocation() || activeViewId || "command";
+replaceRouteHash(initialRoute);
+showView(initialRoute, { push: false, scroll: false });
 
 globalSearchForm?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -7884,7 +8056,15 @@ aiForm.addEventListener("submit", async (event) => {
   try {
     const payload = await api("/api/ai", {
       method: "POST",
-      body: JSON.stringify({ prompt, jobId: jobs[0]?.id || null }),
+      body: JSON.stringify({
+        prompt,
+        jobId: jobs[0]?.id || null,
+        context: {
+          workbench: latestWorkbench,
+          currentProfile: currentWorkbenchProfile(),
+          globalSearch: latestGlobalSearch,
+        },
+      }),
     });
     chatLog.push({ role: "assistant", text: payload.response });
   } catch (error) {

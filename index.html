@@ -28,8 +28,10 @@
         </div>
 
         <nav class="nav-list" aria-label="Main navigation">
-          <button class="nav-item active" data-view="vin">VIN Lookup</button>
+          <button class="nav-item active" data-view="command">Command Center</button>
+          <button class="nav-item" data-view="vin">VIN Lookup</button>
           <button class="nav-item" data-view="workbench">Job Workbench</button>
+          <button class="nav-item" data-view="ai">AI Bench</button>
           <button class="nav-item" data-view="part-history">Part History</button>
           <button class="nav-item" data-view="proof-vault">Proof Vault</button>
           <button class="nav-item" data-view="code-desk">Code Desk</button>
@@ -66,10 +68,11 @@
           <button class="primary-action" data-view-target="settings" data-owner-only>Parts Setup</button>
         </header>
         <section class="app-status-banner" id="appStatusBanner">
+          <button class="secondary-action small app-back-button" type="button" id="appBackButton" hidden>Back</button>
           <span id="connectionStatus">Online</span>
           <button class="secondary-action small" type="button" id="installAppButton">Install app</button>
         </section>
-        <section class="global-command-panel" id="globalCommandPanel">
+        <section class="view active global-command-panel" id="command">
           <div class="global-command-head">
             <div>
               <p class="eyebrow">Command center</p>
@@ -91,7 +94,7 @@
           <div class="global-search-result" id="globalSearchResult" hidden></div>
         </section>
 
-        <section class="view active" id="vin">
+        <section class="view" id="vin">
           <div class="vin-layout">
             <section class="panel wide vin-main-panel">
               <div class="panel-header">

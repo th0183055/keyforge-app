@@ -405,6 +405,10 @@ main {
   margin-bottom: 12px;
 }
 
+.app-back-button {
+  margin-right: auto;
+}
+
 .app-status-banner span {
   border-radius: 999px;
   padding: 7px 10px;
@@ -444,6 +448,14 @@ main {
   padding: 14px;
   background: rgba(250, 251, 252, 0.96);
   box-shadow: var(--shadow);
+}
+
+.global-command-panel.view {
+  display: none;
+}
+
+.global-command-panel.view.active {
+  display: grid;
 }
 
 .global-command-head {
@@ -5213,6 +5225,83 @@ textarea:focus {
   background: linear-gradient(135deg, #8a949f, #5e6670);
 }
 
+.ai-brief-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 14px;
+  border: 1px solid #bfc7d1;
+  border-radius: 8px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(235, 240, 245, 0.94));
+  box-shadow: 0 14px 30px rgba(22, 29, 37, 0.12);
+}
+
+.ai-brief-main h3 {
+  margin: 3px 0 7px;
+  font-size: clamp(1.15rem, 2vw, 1.55rem);
+  line-height: 1.12;
+}
+
+.ai-brief-main p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.42;
+}
+
+.ai-brief-score {
+  display: grid;
+  min-width: 118px;
+  justify-items: end;
+  gap: 3px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #151a20;
+  color: #f8fafc;
+}
+
+.ai-brief-score span,
+.ai-brief-score small {
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ai-brief-score strong {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.ai-brief-columns {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-brief-columns article {
+  min-width: 0;
+  border: 1px solid #d7dde4;
+  border-radius: 6px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ai-brief-columns strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.ai-brief-columns ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .lishi-tool-list.compact,
 .auto-baseline-list.compact,
 .proof-record-list.compact,
@@ -5708,6 +5797,8 @@ textarea:focus {
   .reference-list-form,
   .global-search-form,
   .global-result-grid,
+  .ai-brief-panel,
+  .ai-brief-columns,
   .code-desk-summary-grid,
   .code-desk-grid,
   .lishi-result-grid,
@@ -5727,6 +5818,10 @@ textarea:focus {
   }
 
   .verified-code-score {
+    justify-items: start;
+  }
+
+  .ai-brief-score {
     justify-items: start;
   }
 

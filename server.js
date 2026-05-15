@@ -2310,11 +2310,14 @@ function cleanIntelligenceRecord(input) {
   };
 }
 
-function aiDecision(prompt) {
+function aiDecision(prompt, context = {}) {
   const normalized = prompt.toLowerCase();
   const blocked = ["bypass", "steal", "break in", "hotwire", "hide from", "no permission"].some((term) =>
     normalized.includes(term),
   );
+  const workbench = context.workbench || context;
+  const brief = workbench?.aiBrief || context.aiBrief || null;
+  const activeQueries = workbench?.activeQueries || {};
 
   if (blocked) {
     return {
@@ -2325,12 +2328,31 @@ function aiDecision(prompt) {
     };
   }
 
+  if (brief && /next|now|dispatch|workbench|packet|prep|what should|summary|brief/i.test(prompt)) {
+    const evidence = (brief.evidence || []).slice(0, 3).map((item) => `Evidence: ${item}`);
+    const gaps = (brief.gaps || []).slice(0, 2).map((item) => `Gap: ${item}`);
+    const next = (brief.nextSteps || []).slice(0, 4).map((item, index) => `${index + 1}. ${item}`);
+    return {
+      riskLevel: "low",
+      policyDecision: "allowed_with_verified_job_context",
+      response: [
+        `${brief.decision} Confidence: ${brief.confidenceLabel || "developing"} (${brief.confidencePercent || 0}%).`,
+        ...evidence,
+        ...gaps,
+        next.length ? `Next moves: ${next.join(" ")}` : "",
+        activeQueries.part ? `Part thread: ${activeQueries.part}.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
+  }
+
   if (normalized.includes("quote") || normalized.includes("price")) {
     return {
       riskLevel: "low",
       policyDecision: "allowed",
       response:
-        "Quote prep: confirm vehicle/lock details, key count, location distance, proof of ownership, parts availability, programming requirement, and after-hours rate before presenting the range.",
+        `Quote prep: confirm vehicle/lock details, key count, location distance, proof of ownership, parts availability, programming requirement, and after-hours rate before presenting the range.${brief?.customerNote ? ` Customer note: ${brief.customerNote}` : ""}`,
     };
   }
 
@@ -4654,6 +4676,18 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     !partHistory?.jobs?.length && partQuery ? "No saved job proof matched this part yet." : "",
     !lishiLookup?.tools?.length ? "No Lishi tool matched the current vehicle/keyway query." : "",
   ]).slice(0, 8);
+  const aiBrief = buildWorkbenchAiBrief({
+    body,
+    profile,
+    vehicle,
+    partQuery,
+    partHistory,
+    proofVault,
+    lishiLookup,
+    autoBaseline,
+    coverage,
+    warnings,
+  });
   return {
     generatedAt: new Date().toISOString(),
     title: workbenchVehicleLabel(profile, body.q),
@@ -4684,6 +4718,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       { label: "Review auto code/programming baseline", target: "code-desk", tone: autoBaseline.rows?.length ? "ready" : "verify" },
       { label: "Save worked job when complete", target: "learn", tone: "required" },
     ],
+    aiBrief,
     warnings,
     partHistory: partHistory ? compactPartHistory(partHistory) : null,
     proofVault: compactProofVault(proofVault),
@@ -4732,6 +4767,71 @@ function globalGroup(id, label, target, results = [], note = "") {
     note,
     count: results.length,
     results,
+  };
+}
+
+function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, warnings = [] }) {
+  const matchedProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0), Number(profile.matchedJobs?.length || 0));
+  const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
+  const lishiTools = Number(lishiLookup?.tools?.length || 0);
+  const autoRows = Number(autoBaseline?.rows?.length || 0);
+  const observedCoverage = Number(coverage?.summary?.observedCoveragePercent);
+  const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
+  const hasVin = Boolean(profile.vin || body.vin);
+  const confidencePercent = Math.max(
+    38,
+    Math.min(
+      100,
+      42 +
+        (hasVin ? 10 : 0) +
+        (hasVehicle ? 8 : 0) +
+        Math.min(matchedProof * 8, 28) +
+        Math.min(partRows * 5, 12) +
+        (lishiTools ? 6 : 0) +
+        (autoRows ? 4 : 0) +
+        (Number.isFinite(observedCoverage) ? Math.min(observedCoverage / 10, 8) : 0),
+    ),
+  );
+  const title = workbenchVehicleLabel(profile, body.q) || cleanString(body.q || "current job");
+  const decision = matchedProof
+    ? `Start from saved proof for ${title}.`
+    : partRows
+      ? `Use the part cross-reference as the starting point for ${title}.`
+      : hasVehicle
+        ? `Use vehicle identity first, then verify keyway/FCC before ordering.`
+        : `Start with a VIN, YMM, LR#, MW#, TI#, OE#, FCC, or keyway search.`;
+  const evidence = uniqueCleanValues([
+    matchedProof ? `${matchedProof} saved proof record${matchedProof === 1 ? "" : "s"} matched this packet.` : "",
+    partRows ? `${partRows} part cross-reference row${partRows === 1 ? "" : "s"} matched ${partQuery || body.q || "the search"}.` : "",
+    lishiTools ? `${lishiTools} Lishi tool match${lishiTools === 1 ? "" : "es"} are available from the imported master reference.` : "",
+    autoRows ? `${autoRows} automotive code/programming baseline row${autoRows === 1 ? "" : "s"} matched.` : "",
+    Number.isFinite(observedCoverage) ? `${observedCoverage}% observed shop coverage is represented in the saved-job set.` : "",
+  ]).slice(0, 5);
+  const gaps = uniqueCleanValues([
+    !matchedProof ? "No saved worked-job proof matched yet." : "",
+    !partRows && partQuery ? "No cross-reference row matched the part query." : "",
+    !lishiTools ? "No Lishi/keyway match is confirmed from the current query." : "",
+    !hasVin ? "VIN-level identity is not attached to this packet yet." : "",
+    ...(warnings || []),
+  ]).slice(0, 5);
+  const nextSteps = uniqueCleanValues([
+    "Confirm authorization and attach proof before sensitive work.",
+    partQuery ? `Review part history for ${partQuery}.` : "Search the part number family if a key is selected.",
+    lishiTools ? "Open matched Lishi tools and verify against the lock/keyway." : "Confirm keyway from the lock, insert, or decoded source.",
+    autoRows ? "Review Code Desk auto baseline before importing/using authorized code data." : "Use Code Desk only after the correct system/depth-space card is verified.",
+    "Save the worked job outcome after completion so coverage percentages improve.",
+  ]).slice(0, 5);
+
+  return {
+    headline: "AI field brief",
+    decision,
+    confidencePercent: Math.round(confidencePercent),
+    confidenceLabel: confidencePercent >= 88 ? "High" : confidencePercent >= 70 ? "Good" : confidencePercent >= 55 ? "Developing" : "Needs proof",
+    evidence,
+    gaps,
+    nextSteps,
+    technicianNote: `Best move: ${decision} ${nextSteps[0] || "Keep the job tied to verified proof."}`,
+    customerNote: "We will verify the exact key, authorization, and programming path before finalizing parts or pricing.",
   };
 }
 
@@ -7519,7 +7619,7 @@ async function handleApi(request, response, pathname) {
       return;
     }
 
-    const decision = aiDecision(prompt);
+    const decision = aiDecision(prompt, body.context || {});
     const entry = {
       id: randomUUID(),
       jobId: body.jobId || null,
