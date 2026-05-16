@@ -2617,6 +2617,245 @@ function aiFieldPacket(intent, snapshot, checklist) {
   return packet;
 }
 
+function aiRecentIntentCounts(auditLog = []) {
+  const counts = {};
+  for (const entry of (auditLog || []).slice(0, 40)) {
+    const intent = cleanString(entry.intent || "general") || "general";
+    counts[intent] = (counts[intent] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([intent, count]) => ({ intent, count }))
+    .sort((a, b) => b.count - a.count || a.intent.localeCompare(b.intent));
+}
+
+function aiAdvisorAction({ id, title, detail, target = "workbench", prompt = "", impact = "medium", priority = 50, source = "TimLock AI" }) {
+  return {
+    id,
+    title,
+    detail,
+    target,
+    prompt,
+    impact,
+    priority,
+    source,
+  };
+}
+
+function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAttachments = {} }) {
+  const coverage = buildCoverageDashboard(jobs, partsReference);
+  const recentProof = buildProofVault("", jobs, partsReference);
+  const summary = coverage.summary || {};
+  const intentCounts = aiRecentIntentCounts(auditLog);
+  const attachmentJobIds = new Set(Object.entries(proofAttachments || {}).filter(([, files]) => Array.isArray(files) && files.length).map(([jobId]) => jobId));
+  const recentAutomotiveJobs = (recentProof.records || []).filter((record) => coverageVehicleForJob(record).automotive).slice(0, 12);
+  const recentJobsWithoutFiles = recentAutomotiveJobs.filter((record) => !attachmentJobIds.has(record.id));
+  const topProgrammer = (coverage.programmers || []).find((item) => item.key !== "Programmer not recorded");
+  const topPart = (coverage.parts || []).find((item) => item.key !== "Part number not recorded");
+  const strongestMake = (coverage.makes || [])[0];
+  const actions = [];
+
+  if (!summary.totalJobs) {
+    actions.push(
+      aiAdvisorAction({
+        id: "import-worked-jobs",
+        title: "Import or save your first worked jobs",
+        detail: "The AI becomes dramatically better once it can see real job outcomes, programmers, parts, and notes.",
+        target: "learn",
+        prompt: "What fields should I capture on every worked job?",
+        impact: "high",
+        priority: 98,
+        source: "Job memory",
+      }),
+    );
+  }
+
+  if ((coverage.gaps?.missingProgrammer || []).length) {
+    const first = coverage.gaps.missingProgrammer[0];
+    actions.push(
+      aiAdvisorAction({
+        id: "missing-programmer-proof",
+        title: "Add missing programmer proof",
+        detail: `${coverage.gaps.missingProgrammer.length} automotive job${coverage.gaps.missingProgrammer.length === 1 ? "" : "s"} need a programmer/tool name. First: ${first.vehicle || first.title || first.id}.`,
+        target: "coverage",
+        prompt: "Build my cleanup plan for missing programmer proof.",
+        impact: "high",
+        priority: 94,
+        source: "Coverage cleanup",
+      }),
+    );
+  }
+
+  if ((coverage.gaps?.missingPart || []).length) {
+    const first = coverage.gaps.missingPart[0];
+    actions.push(
+      aiAdvisorAction({
+        id: "missing-part-proof",
+        title: "Add exact part numbers to old jobs",
+        detail: `${coverage.gaps.missingPart.length} job${coverage.gaps.missingPart.length === 1 ? "" : "s"} are not feeding part-history confidence yet. First: ${first.vehicle || first.title || first.id}.`,
+        target: "coverage",
+        prompt: "Build my cleanup plan for missing part numbers.",
+        impact: "high",
+        priority: 90,
+        source: "Part proof",
+      }),
+    );
+  }
+
+  if ((coverage.gaps?.needsOutcome || []).length) {
+    actions.push(
+      aiAdvisorAction({
+        id: "unknown-outcomes",
+        title: "Clean up unknown outcomes",
+        detail: `${coverage.gaps.needsOutcome.length} job${coverage.gaps.needsOutcome.length === 1 ? "" : "s"} need worked/failed/alternate outcome cleanup so coverage percentages become stronger.`,
+        target: "coverage",
+        prompt: "Which unknown outcomes should I clean up first?",
+        impact: "medium",
+        priority: 82,
+        source: "Coverage scoring",
+      }),
+    );
+  }
+
+  if (summary.partProofPercent !== undefined && summary.partProofPercent < 85 && summary.automotiveJobs) {
+    actions.push(
+      aiAdvisorAction({
+        id: "part-proof-percent",
+        title: "Raise part-proof percentage",
+        detail: `Part proof is ${summary.partProofPercent}%. Add LR/MW/TI/OE/FCC/SKU values to saved jobs to make search and subscriber proof sharper.`,
+        target: "part-history",
+        prompt: "How do I improve part-history proof percentage fastest?",
+        impact: "medium",
+        priority: 76,
+        source: "Parts intelligence",
+      }),
+    );
+  }
+
+  if (summary.programmerProofPercent !== undefined && summary.programmerProofPercent < 90 && summary.automotiveJobs) {
+    actions.push(
+      aiAdvisorAction({
+        id: "programmer-proof-percent",
+        title: "Raise programmer-proof percentage",
+        detail: `Programmer proof is ${summary.programmerProofPercent}%. Naming the programmer makes coverage claims much more trustworthy.`,
+        target: "coverage",
+        prompt: "How do I improve programmer coverage proof fastest?",
+        impact: "medium",
+        priority: 74,
+        source: "Programmer coverage",
+      }),
+    );
+  }
+
+  if (recentJobsWithoutFiles.length) {
+    actions.push(
+      aiAdvisorAction({
+        id: "attach-proof-files",
+        title: "Attach proof to recent jobs",
+        detail: `${recentJobsWithoutFiles.length} recent automotive proof record${recentJobsWithoutFiles.length === 1 ? "" : "s"} have no attachment linked. Start with ${recentJobsWithoutFiles[0].vehicle || recentJobsWithoutFiles[0].title}.`,
+        target: "proof-vault",
+        prompt: "What attachments should I add to make this proof stronger?",
+        impact: "high",
+        priority: 88,
+        source: "Proof Vault",
+      }),
+    );
+  }
+
+  if (topProgrammer) {
+    actions.push(
+      aiAdvisorAction({
+        id: "top-programmer-proof",
+        title: `Promote ${topProgrammer.key} as proven coverage`,
+        detail: `${topProgrammer.jobs} saved job${topProgrammer.jobs === 1 ? "" : "s"} with ${coveragePercent(topProgrammer.successes, topProgrammer.warnings) ?? "N/A"}% observed success. This is strong subscriber-facing proof when jobs have parts and outcomes.`,
+        target: "coverage",
+        prompt: `Create a professional coverage summary for ${topProgrammer.key}.`,
+        impact: "medium",
+        priority: 62,
+        source: "Coverage proof",
+      }),
+    );
+  }
+
+  if (topPart && topPart.key !== "Part number not recorded") {
+    actions.push(
+      aiAdvisorAction({
+        id: "top-part-family",
+        title: `Strengthen ${topPart.key} part history`,
+        detail: `${topPart.jobs} job${topPart.jobs === 1 ? "" : "s"} feed this part family. Open it and verify aliases/OE sources are clean.`,
+        target: "part-history",
+        prompt: `Audit part history for ${topPart.key}.`,
+        impact: "medium",
+        priority: 58,
+        source: "Part history",
+      }),
+    );
+  }
+
+  if (intentCounts[0]) {
+    actions.push(
+      aiAdvisorAction({
+        id: "recent-ai-focus",
+        title: `Recent AI focus: ${intentCounts[0].intent}`,
+        detail: `Your last AI questions lean toward ${intentCounts[0].intent}. Turn that into a repeatable checklist or cleanup workflow.`,
+        target: "ai",
+        prompt: `Turn my recent ${intentCounts[0].intent} AI questions into a repeatable workflow.`,
+        impact: "low",
+        priority: 42,
+        source: "AI memory",
+      }),
+    );
+  }
+
+  const sortedActions = actions
+    .sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title))
+    .slice(0, 10);
+  const readiness = aiReadinessScore({
+    hasVehicle: Boolean(strongestMake),
+    hasSearch: Boolean(topPart && topPart.key !== "Part number not recorded"),
+    hasWorkbench: true,
+    partJobs: summary.jobsWithPartNumbers || 0,
+    partReferenceRows: summary.crossReferenceLinkedJobs || 0,
+    proofMatches: recentProof.summary?.matchingJobs || 0,
+    proofFiles: attachmentJobIds.size,
+    lishiTools: 0,
+    lishiApplications: 0,
+    codeRows: 0,
+    codeCandidates: 0,
+    codeImports: 0,
+    coveragePercent: summary.observedCoveragePercent,
+  });
+
+  return {
+    generatedAt: new Date().toISOString(),
+    headline: sortedActions[0]?.title || "AI is ready",
+    summary: [
+      `${summary.automotiveJobs || 0} automotive jobs in memory`,
+      `${summary.observedCoveragePercent ?? "N/A"}% observed success across scored jobs`,
+      `${summary.programmerProofPercent ?? 0}% programmer proof`,
+      `${summary.partProofPercent ?? 0}% part proof`,
+      `${attachmentJobIds.size} jobs with proof attachments`,
+    ],
+    readinessScore: readiness,
+    readinessLabel: aiReadinessLabel(readiness),
+    topAction: sortedActions[0] || null,
+    actions: sortedActions,
+    memory: {
+      totalJobs: summary.totalJobs || 0,
+      automotiveJobs: summary.automotiveJobs || 0,
+      topProgrammer: topProgrammer?.key || "",
+      topPart: topPart?.key || "",
+      strongestMake: strongestMake?.key || "",
+      recentIntentCounts: intentCounts.slice(0, 6),
+    },
+    proofStats: {
+      missingProgrammer: coverage.gaps?.missingProgrammer?.length || 0,
+      missingPart: coverage.gaps?.missingPart?.length || 0,
+      needsOutcome: coverage.gaps?.needsOutcome?.length || 0,
+      recentJobsWithoutFiles: recentJobsWithoutFiles.length,
+    },
+  };
+}
+
 function aiActionsForIntent(intent, snapshot) {
   const actions = [
     { label: "Open Workbench", target: "workbench", prompt: "What should I do next from this packet?" },
@@ -7570,6 +7809,24 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/audit-log") {
     sendJson(response, 200, { auditLog: store.auditLog });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/ai/advisor") {
+    const body = await readJsonBody(request);
+    const partsReference = await readPartsCrossReference();
+    const proofAttachmentVault = await readProofAttachments();
+    const jobs = mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []);
+    sendJson(
+      response,
+      200,
+      buildAiAdvisor({
+        jobs,
+        partsReference,
+        auditLog: store.auditLog,
+        proofAttachments: groupAttachmentsByJob(proofAttachmentVault.attachments),
+      }),
+    );
     return;
   }
 

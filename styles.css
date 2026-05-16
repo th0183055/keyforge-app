@@ -995,6 +995,84 @@ textarea {
   font-weight: 900;
 }
 
+.ai-opportunity-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ai-advisor-overview,
+.ai-opportunity-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #cfd8e0;
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(250, 251, 252, 0.94);
+}
+
+.ai-opportunity-card {
+  grid-template-columns: 1fr;
+}
+
+.ai-advisor-overview h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.ai-advisor-overview p,
+.ai-opportunity-card span {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.ai-score.mini {
+  width: 58px;
+  min-width: 58px;
+}
+
+.ai-score.mini strong {
+  font-size: 1.15rem;
+}
+
+.ai-opportunity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-opportunity-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d7dde4;
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.ai-opportunity-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.ai-opportunity-list strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.ai-opportunity-list p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .ai-prompt-grid button {
   border: 1px solid #cfd5dc;
   border-radius: 999px;
@@ -4485,7 +4563,9 @@ textarea {
   }
 
   .ai-field-head,
-  .ai-route-plan article {
+  .ai-route-plan article,
+  .ai-advisor-overview,
+  .ai-opportunity-list article {
     grid-template-columns: 1fr;
   }
 

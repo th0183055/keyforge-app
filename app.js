@@ -36,6 +36,7 @@ let latestWorkbench = null;
 let latestReferenceList = null;
 let latestGlobalSearch = null;
 let latestAiResponse = null;
+let latestAiAdvisor = null;
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -190,6 +191,7 @@ const aiRouteTitle = document.querySelector("#aiRouteTitle");
 const aiRouteSummary = document.querySelector("#aiRouteSummary");
 const aiRouteActions = document.querySelector("#aiRouteActions");
 const aiContextChips = document.querySelector("#aiContextChips");
+const aiOpportunityPanel = document.querySelector("#aiOpportunityPanel");
 const aiQuickPrompts = document.querySelector("#aiQuickPrompts");
 const aiContextPanel = document.querySelector("#aiContextPanel");
 const aiActionPanel = document.querySelector("#aiActionPanel");
@@ -7352,6 +7354,14 @@ function aiPromptSuggestions(context = buildAiClientContext()) {
 
 function aiRouteQuickActions(context = buildAiClientContext()) {
   const subject = context.query || context.currentProfile?.title || context.workbench?.title || "current screen";
+  const top = latestAiAdvisor?.topAction;
+  if (top) {
+    return [
+      { label: "Do Next", target: top.target || "ai", prompt: top.prompt || `Help me with ${top.title}` },
+      { label: "AI Audit", target: "ai", prompt: `Run a complete locksmith field audit for ${subject}.` },
+      { label: "Open AI Bench", target: "ai" },
+    ];
+  }
   return [
     { label: "AI Audit", target: "ai", prompt: `Run a complete locksmith field audit for ${subject}.` },
     { label: "Dispatch Plan", target: "ai", prompt: `Build a dispatch plan for ${subject}.` },
@@ -7392,6 +7402,65 @@ function renderAiContextPanel(context = buildAiClientContext()) {
       `,
     )
     .join("");
+}
+
+function aiAdvisorScoreClass(score) {
+  const value = Number(score);
+  if (value >= 80) return "ready";
+  if (value >= 55) return "warn";
+  return "danger";
+}
+
+function renderAiAdvisorPanel(advisor = latestAiAdvisor) {
+  if (!aiOpportunityPanel) return;
+  if (!advisor) {
+    aiOpportunityPanel.innerHTML = `
+      <article class="ai-opportunity-card loading">
+        <div>
+          <p class="eyebrow">AI opportunities</p>
+          <strong>Scanning saved jobs, proof, and coverage...</strong>
+          <span>The assistant will surface the best cleanup or workflow move here.</span>
+        </div>
+      </article>
+    `;
+    return;
+  }
+  const actions = advisor.actions || [];
+  const top = advisor.topAction || actions[0];
+  aiOpportunityPanel.innerHTML = `
+    <section class="ai-advisor-overview">
+      <div class="ai-score mini ${aiAdvisorScoreClass(advisor.readinessScore)}">
+        <strong>${escapeHtml(advisor.readinessScore ?? 0)}</strong>
+        <span>memory</span>
+      </div>
+      <div>
+        <p class="eyebrow">AI opportunities</p>
+        <h3>${escapeHtml(advisor.headline || "AI is ready")}</h3>
+        <p>${escapeHtml((advisor.summary || []).join(" | "))}</p>
+      </div>
+      ${
+        top
+          ? `<button class="primary-action small" type="button" data-ai-advisor-open="${escapeHtml(top.target || "ai")}" data-ai-advisor-prompt="${escapeHtml(top.prompt || "")}">Do Next</button>`
+          : ""
+      }
+    </section>
+    ${
+      actions.length
+        ? `<div class="ai-opportunity-list">
+            ${actions.slice(0, 4).map((action) => `
+              <article>
+                <div>
+                  <span>${escapeHtml(action.source || action.impact || "AI")}</span>
+                  <strong>${escapeHtml(action.title)}</strong>
+                  <p>${escapeHtml(action.detail)}</p>
+                </div>
+                <button class="secondary-action small" type="button" data-ai-advisor-open="${escapeHtml(action.target || "ai")}" data-ai-advisor-prompt="${escapeHtml(action.prompt || "")}">Open</button>
+              </article>
+            `).join("")}
+          </div>`
+        : ""
+    }
+  `;
 }
 
 function renderAiActions(actions = [], prompts = []) {
@@ -7569,6 +7638,7 @@ function updateAiContextUi() {
     aiQuickPrompts.innerHTML = prompts.map((prompt) => `<button type="button" data-ai-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`).join("");
   }
   if (aiContextPanel) aiContextPanel.innerHTML = renderAiContextPanel(context);
+  renderAiAdvisorPanel();
   renderAiResponsePanel();
 }
 
@@ -7722,6 +7792,7 @@ async function loadJobs() {
   rememberJobs(jobs);
   renderJobs();
   syncLocalJobsToServer();
+  loadAiAdvisor();
 }
 
 async function loadCoverageDashboard() {
@@ -7737,6 +7808,29 @@ async function loadCoverageDashboard() {
   } catch (error) {
     if (coverageDashboardStatus) coverageDashboardStatus.textContent = error.message;
     coverageDashboard.innerHTML = `<article class="assistant-card"><strong>Coverage unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+async function loadAiAdvisor() {
+  try {
+    const payload = await api("/api/ai/advisor", {
+      method: "POST",
+      body: JSON.stringify({ jobs: localArchivedJobs() }),
+      timeoutMs: 14000,
+      noStatus: true,
+    });
+    latestAiAdvisor = payload;
+    renderAiAdvisorPanel(payload);
+    updateAiContextUi();
+  } catch (error) {
+    latestAiAdvisor = {
+      headline: "AI advisor unavailable",
+      summary: [error.message],
+      readinessScore: 0,
+      readinessLabel: "Offline",
+      actions: [],
+    };
+    renderAiAdvisorPanel(latestAiAdvisor);
   }
 }
 
@@ -7951,6 +8045,19 @@ document.addEventListener("click", (event) => {
             key === "customerNote" ? "Copy Customer Note" : key === "workOrderNote" ? "Copy Work Order Note" : "Copy Tech Checklist";
         }, 1400);
       });
+    }
+    return;
+  }
+
+  const aiAdvisorButton = event.target.closest("[data-ai-advisor-open]");
+  if (aiAdvisorButton) {
+    const target = aiAdvisorButton.dataset.aiAdvisorOpen || "ai";
+    const prompt = cleanInput(aiAdvisorButton.dataset.aiAdvisorPrompt || "");
+    if (target === "ai") {
+      showView("ai");
+      if (prompt) askAi(prompt, { open: false });
+    } else {
+      showView(target);
     }
     return;
   }
@@ -8714,11 +8821,13 @@ renderReferenceVault();
 renderPublicReferenceSources();
 renderPartHistoryRecents();
 renderCodeDesk();
+renderAiAdvisorPanel();
 updateConnectionStatus();
 refreshApiHealth({ quiet: true });
 window.setInterval(() => refreshApiHealth({ quiet: true }), 60000);
 bootTask("jobs", loadJobs);
 bootTask("coverage dashboard", loadCoverageDashboard);
+bootTask("ai advisor", loadAiAdvisor);
 bootTask("vehicles", loadVehicles);
 bootTask("insights", loadInsights);
 bootTask("key intelligence", loadKeyIntelligence);
