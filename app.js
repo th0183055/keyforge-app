@@ -37,6 +37,7 @@ let latestReferenceList = null;
 let latestGlobalSearch = null;
 let latestAiResponse = null;
 let latestAiAdvisor = null;
+let latestAiMemory = null;
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -59,7 +60,8 @@ const apiFallbackOrigin = "https://keyforge-app-x7o0.onrender.com";
 const chatLog = [
   {
     role: "assistant",
-    text: "Pick a job and I will help with safe prep: customer verification, parts checklist, tool readiness, quote range, and documentation.",
+    title: "TimLock Field Copilot",
+    text: "Pick a VIN, part, job, or workflow and I will help with safe prep: proof, parts, programmer readiness, quote notes, and what to save back so the next job gets easier.",
   },
 ];
 
@@ -7404,6 +7406,61 @@ function renderAiContextPanel(context = buildAiClientContext()) {
     .join("");
 }
 
+function aiMemoryFromState(advisor = latestAiAdvisor) {
+  const memory = latestAiMemory || {};
+  const advisorMemory = advisor?.memory || {};
+  return {
+    personality: memory.personality || advisorMemory.personality || {
+      name: "TimLock Field Copilot",
+      voice: "Direct, verification-first, and built around locksmith proof.",
+      catchphrase: "Verify the job, then move clean.",
+    },
+    feedback: memory.feedback || advisorMemory.feedback || {},
+    shopRules: {
+      total: memory.shopRules?.total ?? advisorMemory.shopRules ?? 0,
+      relevant: memory.shopRules?.relevant || [],
+    },
+    corrections: memory.corrections || [],
+    learningSignals: memory.learningSignals || [],
+    totalJobs: advisorMemory.totalJobs || 0,
+    automotiveJobs: advisorMemory.automotiveJobs || 0,
+  };
+}
+
+function renderAiPersonalityPanel(advisor = latestAiAdvisor) {
+  const memory = aiMemoryFromState(advisor);
+  const personality = memory.personality || {};
+  const feedback = memory.feedback || {};
+  const signals = [
+    ...(memory.learningSignals || []),
+    memory.corrections?.length ? `${memory.corrections.length} correction${memory.corrections.length === 1 ? "" : "s"} matched` : "",
+    memory.totalJobs ? `${memory.totalJobs} saved jobs in memory` : "",
+  ].filter(Boolean);
+  const ruleChips = (memory.shopRules?.relevant || []).slice(0, 3).map((rule) => `Rule: ${rule.title}`);
+  return `
+    <section class="ai-personality-strip">
+      <div class="ai-personality-mark">TL</div>
+      <div class="ai-personality-copy">
+        <p class="eyebrow">AI personality</p>
+        <h3>${escapeHtml(personality.name || "TimLock Field Copilot")}</h3>
+        <p>${escapeHtml(personality.voice || "Verification-first locksmith field assistant.")}</p>
+        <span>${escapeHtml(personality.catchphrase || "Verify the job, then move clean.")}</span>
+      </div>
+      <div class="ai-memory-metrics">
+        <article><strong>${escapeHtml(memory.shopRules?.total || 0)}</strong><span>shop rules</span></article>
+        <article><strong>${escapeHtml(feedback.used || 0)}</strong><span>used</span></article>
+        <article><strong>${escapeHtml(feedback.helpful || 0)}</strong><span>helpful</span></article>
+        <article><strong>${escapeHtml(feedback.wrong || 0)}</strong><span>corrections</span></article>
+      </div>
+    </section>
+    ${
+      signals.length || ruleChips.length
+        ? `<div class="ai-learning-strip">${[...ruleChips, ...signals].slice(0, 8).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+        : ""
+    }
+  `;
+}
+
 function aiAdvisorScoreClass(score) {
   const value = Number(score);
   if (value >= 80) return "ready";
@@ -7415,6 +7472,7 @@ function renderAiAdvisorPanel(advisor = latestAiAdvisor) {
   if (!aiOpportunityPanel) return;
   if (!advisor) {
     aiOpportunityPanel.innerHTML = `
+      ${renderAiPersonalityPanel(advisor)}
       <article class="ai-opportunity-card loading">
         <div>
           <p class="eyebrow">AI opportunities</p>
@@ -7428,6 +7486,7 @@ function renderAiAdvisorPanel(advisor = latestAiAdvisor) {
   const actions = advisor.actions || [];
   const top = advisor.topAction || actions[0];
   aiOpportunityPanel.innerHTML = `
+    ${renderAiPersonalityPanel(advisor)}
     <section class="ai-advisor-overview">
       <div class="ai-score mini ${aiAdvisorScoreClass(advisor.readinessScore)}">
         <strong>${escapeHtml(advisor.readinessScore ?? 0)}</strong>
@@ -7580,13 +7639,28 @@ function renderAiMessage(message) {
     ? `<div class="ai-message-actions">${renderAiActions(message.actions)}</div>`
     : "";
   const fieldPacket = message.role === "assistant" ? renderAiFieldPacket(message.fieldPacket, { compact: true }) : "";
+  const personality = message.personality || message.memory?.personality || message.fieldPacket?.personality || latestAiMemory?.personality;
+  const persona = message.role === "assistant" && personality?.name
+    ? `<div class="message-personality"><span>${escapeHtml(personality.name)}</span>${personality.catchphrase ? `<small>${escapeHtml(personality.catchphrase)}</small>` : ""}</div>`
+    : "";
+  const feedback = message.role === "assistant" && message.responseId
+    ? `<div class="ai-feedback-row" data-ai-feedback-row="${escapeHtml(message.responseId)}">
+        <button type="button" data-ai-feedback="helpful" data-ai-response-id="${escapeHtml(message.responseId)}">Helpful</button>
+        <button type="button" data-ai-feedback="used" data-ai-response-id="${escapeHtml(message.responseId)}">Used it</button>
+        <button type="button" data-ai-feedback="wrong" data-ai-response-id="${escapeHtml(message.responseId)}">Wrong</button>
+        <button type="button" data-ai-feedback="save-rule" data-ai-response-id="${escapeHtml(message.responseId)}">Save rule</button>
+        ${message.feedbackStatus ? `<span>${escapeHtml(message.feedbackStatus)}</span>` : ""}
+      </div>`
+    : "";
   return `
     <div class="message ${escapeHtml(message.role)}">
+      ${persona}
       ${message.title ? `<strong>${escapeHtml(message.title)}</strong>` : ""}
       <p>${escapeHtml(message.text).replace(/\n/g, "<br>")}</p>
       ${fieldPacket}
       ${checklist}
       ${actions}
+      ${feedback}
     </div>
   `;
 }
@@ -7663,7 +7737,9 @@ async function askAi(prompt, { open = true } = {}) {
       timeoutMs: 16000,
     });
     payload.contextView = context.activeView;
+    payload.prompt = cleanPrompt;
     latestAiResponse = payload;
+    latestAiMemory = payload.memory || latestAiMemory;
     chatLog.splice(chatLog.length - 1, 1, {
       role: "assistant",
       title: payload.title || "AI Bench",
@@ -7671,12 +7747,82 @@ async function askAi(prompt, { open = true } = {}) {
       checklist: payload.checklist || [],
       actions: payload.nextActions || [],
       fieldPacket: payload.fieldPacket || null,
+      responseId: payload.id,
+      prompt: cleanPrompt,
+      contextView: context.activeView,
+      contextSummary: payload.contextSummary || [],
+      personality: payload.personality || payload.memory?.personality || null,
+      memory: payload.memory || null,
     });
   } catch (error) {
     chatLog.splice(chatLog.length - 1, 1, { role: "assistant", title: "AI unavailable", text: `Backend error: ${error.message}` });
   } finally {
     renderChat();
     updateAiContextUi();
+  }
+}
+
+async function loadAiMemory() {
+  try {
+    latestAiMemory = await api("/api/ai/memory", { timeoutMs: 10000, noStatus: true });
+    renderAiAdvisorPanel();
+    renderChat();
+  } catch (error) {
+    console.warn("AI memory unavailable", error);
+  }
+}
+
+async function submitAiFeedback(value, responseId, button = null) {
+  const message = chatLog.find((item) => item.responseId === responseId);
+  if (!message) return;
+  const context = buildAiClientContext();
+  const label = {
+    helpful: "Helpful",
+    used: "Used",
+    wrong: "Marked wrong",
+    "save-rule": "Saved as rule",
+    suppress: "Suppressed",
+  }[value] || "Saved";
+  const ruleSeed =
+    message.fieldPacket?.dispatchDecision ||
+    message.checklist?.slice(0, 3).join("; ") ||
+    message.text ||
+    message.prompt ||
+    "Remember this AI guidance for similar jobs.";
+  button?.setAttribute("disabled", "disabled");
+  try {
+    const payload = await api("/api/ai/feedback", {
+      method: "POST",
+      body: JSON.stringify({
+        responseId,
+        value,
+        title: `${label}: ${message.title || routeDisplayLabel(message.contextView || activeViewId)}`,
+        note:
+          value === "wrong"
+            ? `Marked wrong from ${routeDisplayLabel(message.contextView || activeViewId)}. Re-check assumptions before repeating this answer.`
+            : ruleSeed,
+        prompt: message.prompt || latestAiResponse?.prompt || "",
+        target: message.contextView || activeViewId,
+        contextSummary: message.contextSummary || latestAiResponse?.contextSummary || [],
+        query: context.query || context.workbench?.activeQueries?.part || "",
+        vehicle: context.currentProfile?.title || vehicleTitleFromVehicle(context.workbench?.vehicle || {}),
+        tags: [context.screen, value].filter(Boolean),
+        ruleTitle: value === "save-rule" ? `Shop rule: ${context.query || context.screen || "AI guidance"}` : "",
+        ruleBody: value === "save-rule" ? ruleSeed : "",
+      }),
+      timeoutMs: 10000,
+      noStatus: true,
+    });
+    latestAiMemory = payload.memory || latestAiMemory;
+    message.feedbackStatus = payload.rule ? "Rule saved into AI memory" : `${label} feedback saved`;
+    renderChat();
+    renderAiAdvisorPanel();
+    loadAiAdvisor();
+  } catch (error) {
+    message.feedbackStatus = `Feedback failed: ${error.message}`;
+    renderChat();
+  } finally {
+    button?.removeAttribute("disabled");
   }
 }
 
@@ -7882,6 +8028,7 @@ applyAppMode(loadAppMode());
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     applyAppMode(button.dataset.setMode);
+    loadAiMemory();
     if (latestGlobalSearch && globalSearchQuery()) runGlobalSearch();
   });
 });
@@ -8014,6 +8161,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const aiFeedbackButton = event.target.closest("[data-ai-feedback]");
+  if (aiFeedbackButton) {
+    submitAiFeedback(aiFeedbackButton.dataset.aiFeedback, aiFeedbackButton.dataset.aiResponseId, aiFeedbackButton);
+    return;
+  }
+
   const aiPromptButton = event.target.closest("[data-ai-prompt]");
   if (aiPromptButton) {
     askAi(aiPromptButton.dataset.aiPrompt);
@@ -8828,6 +8981,7 @@ window.setInterval(() => refreshApiHealth({ quiet: true }), 60000);
 bootTask("jobs", loadJobs);
 bootTask("coverage dashboard", loadCoverageDashboard);
 bootTask("ai advisor", loadAiAdvisor);
+bootTask("ai memory", loadAiMemory);
 bootTask("vehicles", loadVehicles);
 bootTask("insights", loadInsights);
 bootTask("key intelligence", loadKeyIntelligence);

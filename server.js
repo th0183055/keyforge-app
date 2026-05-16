@@ -104,6 +104,13 @@ const emptyStore = {
   jobs: [],
   vehicles: [],
   auditLog: [],
+  aiFeedback: [],
+  shopRules: [],
+  aiPreferences: {
+    voice: "field-pro",
+    ownerTone: "direct",
+    subscriberTone: "polished",
+  },
 };
 
 const mimeTypes = {
@@ -123,6 +130,12 @@ function normalizeStore(store = {}) {
     jobs: Array.isArray(store.jobs) ? store.jobs : [],
     vehicles: Array.isArray(store.vehicles) ? store.vehicles : [],
     auditLog: Array.isArray(store.auditLog) ? store.auditLog : [],
+    aiFeedback: Array.isArray(store.aiFeedback) ? store.aiFeedback : [],
+    shopRules: Array.isArray(store.shopRules) ? store.shopRules : [],
+    aiPreferences: {
+      ...emptyStore.aiPreferences,
+      ...(store.aiPreferences && typeof store.aiPreferences === "object" ? store.aiPreferences : {}),
+    },
   };
 }
 
@@ -2310,6 +2323,204 @@ function cleanIntelligenceRecord(input) {
   };
 }
 
+function aiPersonalityProfile(mode = "owner", preferences = {}) {
+  const subscriber = mode === "subscriber";
+  return {
+    id: "timlock-field-copilot",
+    name: "TimLock Field Copilot",
+    role: "Senior locksmith dispatcher, proof auditor, and parts/programmer verifier",
+    voice: subscriber
+      ? "Polished, concise, verification-first, and customer-safe."
+      : "Direct, field-smart, proof-hungry, and comfortable calling out weak data.",
+    catchphrase: subscriber
+      ? "Verify the job, then move clean."
+      : "Here is what I would verify before you burn time or money.",
+    principles: [
+      "Authorization before procedure",
+      "Proof beats guesses",
+      "VIN/YMM starts the packet; physical verification finishes it",
+      "Coverage percentages are shop evidence, not universal promises",
+      "Every completed job should teach the next one",
+    ],
+    preferences: {
+      voice: preferences.voice || "field-pro",
+      ownerTone: preferences.ownerTone || "direct",
+      subscriberTone: preferences.subscriberTone || "polished",
+    },
+  };
+}
+
+function aiFeedbackSummary(feedback = []) {
+  const counts = {};
+  for (const item of feedback || []) {
+    const value = cleanString(item.value || item.feedback || "unknown") || "unknown";
+    counts[value] = (counts[value] || 0) + 1;
+  }
+  return {
+    total: feedback.length,
+    helpful: counts.helpful || 0,
+    wrong: counts.wrong || 0,
+    used: counts.used || 0,
+    savedRules: counts["save-rule"] || counts.savedRule || 0,
+    suppressed: counts.suppress || 0,
+    counts,
+  };
+}
+
+function relevantAiCorrections(feedback = [], snapshot = {}, prompt = "") {
+  const haystack = [
+    prompt,
+    snapshot.query,
+    snapshot.vehicleTitle,
+    snapshot.vin,
+    snapshot.screen,
+    snapshot.workbenchTitle,
+    snapshot.activeQueries || {},
+  ]
+    .flat(Infinity)
+    .map((item) => (item && typeof item === "object" ? JSON.stringify(item) : item))
+    .join(" ");
+  const text = compactToken(haystack);
+  if (!text) return [];
+  return (feedback || [])
+    .filter((item) => ["wrong", "suppress"].includes(cleanString(item.value).toLowerCase()))
+    .filter((item) => {
+      const terms = uniqueCleanValues([item.prompt, item.note, item.target, item.contextSummary || [], item.title]).filter((term) => cleanString(term).length >= 4);
+      return terms.some((term) => {
+        const token = compactToken(term);
+        return token.length >= 4 && text.includes(token.slice(0, 32));
+      });
+    })
+    .slice(0, 4)
+    .map((item) => ({
+      id: item.id,
+      title: item.title || item.prompt || "Prior correction",
+      note: item.note || "Marked as wrong or suppressed.",
+      target: item.target || "",
+      value: item.value || "wrong",
+      createdAt: item.createdAt || "",
+    }));
+}
+
+function aiRuleMatches(rule = {}, haystack = "") {
+  if (rule.disabled) return false;
+  const text = compactToken(haystack);
+  if (!text) return false;
+  const terms = uniqueCleanValues([
+    rule.matchTerms || [],
+    rule.query,
+    rule.vehicle,
+    rule.tags || [],
+    String(rule.title || "")
+      .split(/\s+/)
+      .filter((token) => token.length >= 4),
+  ]);
+  return terms.some((term) => {
+    const token = compactToken(term);
+    return token.length >= 3 && text.includes(token);
+  });
+}
+
+function relevantAiShopRules(shopRules = [], snapshot = {}, prompt = "") {
+  const haystack = [
+    prompt,
+    snapshot.query,
+    snapshot.vehicleTitle,
+    snapshot.vin,
+    snapshot.screen,
+    snapshot.workbenchTitle,
+    snapshot.activeQueries || {},
+  ]
+    .flat(Infinity)
+    .map((item) => (item && typeof item === "object" ? JSON.stringify(item) : item))
+    .join(" ");
+  const activeRules = (shopRules || []).filter((rule) => !rule.disabled);
+  const matched = activeRules.filter((rule) => aiRuleMatches(rule, haystack));
+  return (matched.length ? matched : activeRules)
+    .sort((a, b) => (Date.parse(b.updatedAt || b.createdAt) || 0) - (Date.parse(a.updatedAt || a.createdAt) || 0))
+    .slice(0, 5)
+    .map((rule) => ({
+      id: rule.id,
+      title: rule.title,
+      body: rule.body,
+      scope: rule.scope || "shop",
+      query: rule.query || "",
+      vehicle: rule.vehicle || "",
+      tags: rule.tags || [],
+      source: rule.source || "shop-rule",
+    }));
+}
+
+function aiMemorySummary(store = {}, context = {}, prompt = "") {
+  const snapshot = aiContextSnapshot(context);
+  const feedback = store.aiFeedback || [];
+  const shopRules = store.shopRules || [];
+  const summary = aiFeedbackSummary(feedback);
+  const relevantRules = relevantAiShopRules(shopRules, snapshot, prompt);
+  const corrections = relevantAiCorrections(feedback, snapshot, prompt);
+  return {
+    personality: aiPersonalityProfile(context.appMode || "owner", store.aiPreferences || {}),
+    feedback: summary,
+    shopRules: {
+      total: shopRules.filter((rule) => !rule.disabled).length,
+      relevant: relevantRules,
+    },
+    corrections,
+    learningSignals: [
+      summary.used ? `${summary.used} AI recommendation${summary.used === 1 ? "" : "s"} marked used` : "",
+      summary.helpful ? `${summary.helpful} helpful response${summary.helpful === 1 ? "" : "s"}` : "",
+      summary.wrong ? `${summary.wrong} wrong response${summary.wrong === 1 ? "" : "s"} to avoid repeating` : "",
+      relevantRules.length ? `${relevantRules.length} shop rule${relevantRules.length === 1 ? "" : "s"} in play` : "",
+      corrections.length ? `${corrections.length} prior correction${corrections.length === 1 ? "" : "s"} matched this context` : "",
+    ].filter(Boolean),
+  };
+}
+
+function cleanAiFeedback(input = {}) {
+  const allowed = new Set(["helpful", "wrong", "used", "save-rule", "suppress"]);
+  const value = cleanString(input.value || input.feedback || "helpful").toLowerCase();
+  return {
+    id: randomUUID(),
+    responseId: cleanString(input.responseId || input.aiResponseId || ""),
+    value: allowed.has(value) ? value : "helpful",
+    title: cleanString(input.title || ""),
+    note: cleanString(input.note || input.reason || ""),
+    prompt: cleanString(input.prompt || ""),
+    target: cleanString(input.target || ""),
+    contextSummary: Array.isArray(input.contextSummary) ? input.contextSummary.map(cleanString).filter(Boolean).slice(0, 10) : [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function cleanShopRule(input = {}, sourceFeedback = null) {
+  const tags = uniqueCleanValues([input.tags || [], input.matchTerms || []]).slice(0, 12);
+  const contextSummary = Array.isArray(input.contextSummary) ? input.contextSummary.map(cleanString).filter(Boolean) : [];
+  const title =
+    cleanString(input.title) ||
+    cleanString(sourceFeedback?.note) ||
+    cleanString(sourceFeedback?.prompt) ||
+    "Shop rule";
+  const body =
+    cleanString(input.body || input.rule || input.note) ||
+    cleanString(sourceFeedback?.note) ||
+    `Remember this pattern: ${cleanString(sourceFeedback?.prompt || title)}`;
+  return {
+    id: cleanString(input.id) || randomUUID(),
+    title: title.slice(0, 120),
+    body,
+    scope: cleanString(input.scope || input.target || sourceFeedback?.target || "shop") || "shop",
+    query: cleanString(input.query || ""),
+    vehicle: cleanString(input.vehicle || ""),
+    matchTerms: uniqueCleanValues([input.matchTerms || [], tags, input.query, input.vehicle]).slice(0, 18),
+    tags,
+    source: cleanString(input.source || (sourceFeedback ? "ai-feedback" : "manual")) || "manual",
+    contextSummary: contextSummary.slice(0, 10),
+    disabled: Boolean(input.disabled),
+    createdAt: input.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function aiContextSnapshot(context = {}) {
   const workbench = context.workbench || {};
   const profile = context.currentProfile || context.profile || {};
@@ -2355,8 +2566,11 @@ function aiIntent(prompt = "") {
   return "general";
 }
 
-function aiChecklistForIntent(intent, snapshot) {
+function aiChecklistForIntent(intent, snapshot, memory = {}) {
   const common = ["Confirm lawful authorization", "Verify VIN/YMM and customer identity", "Record the exact part/tool used after completion"];
+  const ruleSteps = (memory.shopRules?.relevant || [])
+    .slice(0, 2)
+    .map((rule) => `Apply shop rule: ${rule.title}`);
   const lists = {
     next: [
       "Open or refresh Job Workbench",
@@ -2407,7 +2621,7 @@ function aiChecklistForIntent(intent, snapshot) {
       "Send the packet to Workbench before dispatch",
     ],
   };
-  return uniqueCleanValues([...(lists[intent] || lists.next), ...common]).slice(0, 7);
+  return uniqueCleanValues([...ruleSteps, ...(lists[intent] || lists.next), ...common]).slice(0, 8);
 }
 
 function aiMetric(value, fallback = 0) {
@@ -2566,7 +2780,7 @@ function aiCopyBlocks(intent, snapshot, checklist, packet) {
   };
 }
 
-function aiFieldPacket(intent, snapshot, checklist) {
+function aiFieldPacket(intent, snapshot, checklist, memory = {}) {
   const evidence = aiEvidenceProfile(snapshot);
   const readinessScore = aiReadinessScore(evidence);
   const readinessLabel = aiReadinessLabel(readinessScore);
@@ -2592,6 +2806,9 @@ function aiFieldPacket(intent, snapshot, checklist) {
     nextBestAction: routePlan[0] || { target: "workbench", label: "Job Workbench", prompt: "Run a full field audit." },
     evidence,
     confidenceDrivers: uniqueCleanValues([
+      memory.shopRules?.relevant?.length ? `${memory.shopRules.relevant.length} shop rule${memory.shopRules.relevant.length === 1 ? "" : "s"} matched` : "",
+      memory.feedback?.used ? `${memory.feedback.used} prior AI recommendation${memory.feedback.used === 1 ? "" : "s"} marked used` : "",
+      memory.corrections?.length ? `${memory.corrections.length} prior correction${memory.corrections.length === 1 ? "" : "s"} matched` : "",
       evidence.hasVehicle ? "Vehicle identity present" : "",
       evidence.hasWorkbench ? "Workbench packet active" : "",
       evidence.partJobs ? `${evidence.partJobs} saved worked-job proof match${evidence.partJobs === 1 ? "" : "es"}` : "",
@@ -2604,6 +2821,9 @@ function aiFieldPacket(intent, snapshot, checklist) {
     warnings,
     proofGaps,
     routePlan,
+    shopRules: memory.shopRules?.relevant || [],
+    personality: memory.personality || aiPersonalityProfile(),
+    learningSignals: memory.learningSignals || [],
     technicianPlan: checklist,
     saveBackChecklist: [
       "Exact LR/MW/TI/OE/FCC/part used",
@@ -2641,11 +2861,13 @@ function aiAdvisorAction({ id, title, detail, target = "workbench", prompt = "",
   };
 }
 
-function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAttachments = {} }) {
+function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAttachments = {}, feedback = [], shopRules = [], preferences = {} }) {
   const coverage = buildCoverageDashboard(jobs, partsReference);
   const recentProof = buildProofVault("", jobs, partsReference);
   const summary = coverage.summary || {};
   const intentCounts = aiRecentIntentCounts(auditLog);
+  const feedbackSummary = aiFeedbackSummary(feedback);
+  const activeRules = (shopRules || []).filter((rule) => !rule.disabled);
   const attachmentJobIds = new Set(Object.entries(proofAttachments || {}).filter(([, files]) => Array.isArray(files) && files.length).map(([jobId]) => jobId));
   const recentAutomotiveJobs = (recentProof.records || []).filter((record) => coverageVehicleForJob(record).automotive).slice(0, 12);
   const recentJobsWithoutFiles = recentAutomotiveJobs.filter((record) => !attachmentJobIds.has(record.id));
@@ -2806,6 +3028,36 @@ function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAt
     );
   }
 
+  if (!activeRules.length && summary.automotiveJobs) {
+    actions.push(
+      aiAdvisorAction({
+        id: "create-first-shop-rule",
+        title: "Save your first shop rule",
+        detail: "Mark a useful AI answer as a shop rule so future packets can apply your preferred parts, programmer habits, and verification warnings automatically.",
+        target: "ai",
+        prompt: "Help me create my first shop rule from recent worked jobs.",
+        impact: "medium",
+        priority: 68,
+        source: "AI learning",
+      }),
+    );
+  }
+
+  if (feedbackSummary.wrong) {
+    actions.push(
+      aiAdvisorAction({
+        id: "review-wrong-ai-feedback",
+        title: "Review AI answers marked wrong",
+        detail: `${feedbackSummary.wrong} AI response${feedbackSummary.wrong === 1 ? " was" : "s were"} marked wrong. Turn the correction into a shop rule so the app stops repeating it.`,
+        target: "ai",
+        prompt: "Review my wrong AI feedback and suggest shop rules.",
+        impact: "medium",
+        priority: 66,
+        source: "AI feedback",
+      }),
+    );
+  }
+
   const sortedActions = actions
     .sort((a, b) => b.priority - a.priority || a.title.localeCompare(b.title))
     .slice(0, 10);
@@ -2846,6 +3098,9 @@ function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAt
       topPart: topPart?.key || "",
       strongestMake: strongestMake?.key || "",
       recentIntentCounts: intentCounts.slice(0, 6),
+      feedback: feedbackSummary,
+      shopRules: activeRules.length,
+      personality: aiPersonalityProfile("owner", preferences),
     },
     proofStats: {
       missingProgrammer: coverage.gaps?.missingProgrammer?.length || 0,
@@ -2902,7 +3157,7 @@ function aiContextFacts(snapshot) {
   ]).slice(0, 8);
 }
 
-function aiResponseForIntent(intent, snapshot, checklist, fieldPacket = null) {
+function aiResponseForIntent(intent, snapshot, checklist, fieldPacket = null, memory = {}) {
   const subject = snapshot.vehicleTitle || snapshot.query || snapshot.workbenchTitle || "this job";
   const confidence = snapshot.brief?.confidencePercent ? ` Packet confidence is ${snapshot.brief.confidenceLabel || "developing"} at ${snapshot.brief.confidencePercent}%.` : "";
   const lead = snapshot.brief?.decision || `Use ${subject} as the current job context.`;
@@ -2910,29 +3165,36 @@ function aiResponseForIntent(intent, snapshot, checklist, fieldPacket = null) {
   const fieldReadiness = fieldPacket
     ? ` AI readiness is ${fieldPacket.readinessScore}% (${fieldPacket.readinessLabel}). ${fieldPacket.dispatchDecision}`
     : "";
+  const personaLine = memory.personality?.catchphrase ? `${memory.personality.catchphrase} ` : "";
+  const ruleLine = memory.shopRules?.relevant?.length
+    ? ` Shop memory in play: ${memory.shopRules.relevant.slice(0, 2).map((rule) => rule.title).join("; ")}.`
+    : "";
+  const correctionLine = memory.corrections?.length
+    ? ` Prior correction to respect: ${memory.corrections.slice(0, 2).map((item) => item.note || item.title).join("; ")}.`
+    : "";
   const playbooks = {
-    next: `${lead}${confidence}${fieldReadiness} Best next move: verify authorization, then use the Workbench packet to move through part proof, Lishi/keyway verification, Code Desk only if authorized, and Proof Vault documentation. ${facts}`,
-    quote: `Quote prep for ${subject}:${fieldReadiness} Give a range only after authorization, exact key/FCC/blade confirmation, parts availability, programmer path, trip/after-hours factors, and any module/battery contingencies are clear. ${snapshot.brief?.customerNote || ""}`,
-    proof: `Proof review for ${subject}:${fieldReadiness} The job is stronger when ID/registration or fleet authorization, exact part number, programmer result, outcome, and photos/docs are attached. ${facts}`,
-    parts: `Parts guidance for ${subject}:${fieldReadiness} Start from LR/MW/TI/OE/FCC cross-reference, compare saved jobs, and do not order from a single alias until buttons, FCC/frequency, blade/keyway, chip, and condition are verified.`,
-    lishi: `Lishi guidance for ${subject}:${fieldReadiness} Treat the imported tool match as a shortlist. Confirm keyway from the lock, insert, or authorized code source before using it, then save the confirmed tool/keyway to the worked job.`,
-    code: `Code Desk guidance for ${subject}:${fieldReadiness} Use only authorized code data, verify the exact depth-space system and blank, and treat reverse/bitting matches as verification clues until confirmed against the vehicle and lock.`,
-    coverage: `Coverage guidance:${fieldReadiness} Use the percentages as observed shop proof. Improve the score by adding programmer names, exact part numbers, outcomes, and proof attachments to jobs with missing data.`,
-    vin: `VIN guidance for ${subject}:${fieldReadiness} Make sure the decoded vehicle matches the customer vehicle, select the key family, verify parts/programmer/Lishi, then send the packet to Workbench before dispatch.`,
-    general: `${lead}${confidence}${fieldReadiness} I can help turn the current screen into a technician checklist, proof audit, quote note, part verification path, or customer-safe summary. ${facts}`,
+    next: `${personaLine}${lead}${confidence}${fieldReadiness} Best next move: verify authorization, then use the Workbench packet to move through part proof, Lishi/keyway verification, Code Desk only if authorized, and Proof Vault documentation.${ruleLine}${correctionLine} ${facts}`,
+    quote: `${personaLine}Quote prep for ${subject}:${fieldReadiness} Give a range only after authorization, exact key/FCC/blade confirmation, parts availability, programmer path, trip/after-hours factors, and any module/battery contingencies are clear.${ruleLine}${correctionLine} ${snapshot.brief?.customerNote || ""}`,
+    proof: `${personaLine}Proof review for ${subject}:${fieldReadiness} The job is stronger when ID/registration or fleet authorization, exact part number, programmer result, outcome, and photos/docs are attached.${ruleLine}${correctionLine} ${facts}`,
+    parts: `${personaLine}Parts guidance for ${subject}:${fieldReadiness} Start from LR/MW/TI/OE/FCC cross-reference, compare saved jobs, and do not order from a single alias until buttons, FCC/frequency, blade/keyway, chip, and condition are verified.${ruleLine}${correctionLine}`,
+    lishi: `${personaLine}Lishi guidance for ${subject}:${fieldReadiness} Treat the imported tool match as a shortlist. Confirm keyway from the lock, insert, or authorized code source before using it, then save the confirmed tool/keyway to the worked job.${ruleLine}${correctionLine}`,
+    code: `${personaLine}Code Desk guidance for ${subject}:${fieldReadiness} Use only authorized code data, verify the exact depth-space system and blank, and treat reverse/bitting matches as verification clues until confirmed against the vehicle and lock.${ruleLine}${correctionLine}`,
+    coverage: `${personaLine}Coverage guidance:${fieldReadiness} Use the percentages as observed shop proof. Improve the score by adding programmer names, exact part numbers, outcomes, and proof attachments to jobs with missing data.${ruleLine}${correctionLine}`,
+    vin: `${personaLine}VIN guidance for ${subject}:${fieldReadiness} Make sure the decoded vehicle matches the customer vehicle, select the key family, verify parts/programmer/Lishi, then send the packet to Workbench before dispatch.${ruleLine}${correctionLine}`,
+    general: `${personaLine}${lead}${confidence}${fieldReadiness} I can help turn the current screen into a technician checklist, proof audit, quote note, part verification path, or customer-safe summary.${ruleLine}${correctionLine} ${facts}`,
   };
   return `${playbooks[intent] || playbooks.general} Checklist: ${checklist.slice(0, 4).join("; ")}.`;
 }
 
-function aiDecision(prompt, context = {}) {
+function aiDecision(prompt, context = {}, memory = {}) {
   const normalized = prompt.toLowerCase();
   const blocked = ["bypass", "steal", "break in", "hotwire", "hide from", "no permission"].some((term) =>
     normalized.includes(term),
   );
   const snapshot = aiContextSnapshot(context);
   const intent = aiIntent(prompt);
-  const checklist = aiChecklistForIntent(intent, snapshot);
-  const fieldPacket = aiFieldPacket(intent, snapshot, checklist);
+  const checklist = aiChecklistForIntent(intent, snapshot, memory);
+  const fieldPacket = aiFieldPacket(intent, snapshot, checklist, memory);
 
   if (blocked) {
     return {
@@ -2945,6 +3207,8 @@ function aiDecision(prompt, context = {}) {
       nextActions: [{ label: "Proof Vault", target: "proof-vault", prompt: "What proof is required before this work?" }],
       suggestedPrompts: ["Build a lawful verification checklist", "Create a customer-safe service note"],
       contextSummary: aiContextFacts(snapshot),
+      personality: memory.personality || aiPersonalityProfile(),
+      memory,
       fieldPacket: {
         ...fieldPacket,
         readinessScore: 0,
@@ -2979,13 +3243,15 @@ function aiDecision(prompt, context = {}) {
     riskLevel: "low",
     policyDecision: snapshot.brief ? "allowed_with_verified_job_context" : "allowed_with_screen_context",
     intent,
-    response: aiResponseForIntent(intent, snapshot, checklist, fieldPacket),
+    response: aiResponseForIntent(intent, snapshot, checklist, fieldPacket, memory),
     checklist,
     nextActions,
     suggestedPrompts: aiSuggestedPrompts(intent, snapshot),
     contextSummary: aiContextFacts(snapshot),
     recommendedRoute: nextActions[0]?.target || fieldPacket.nextBestAction?.target || "workbench",
     fieldPacket,
+    personality: memory.personality || aiPersonalityProfile(context.appMode || "owner"),
+    memory,
   };
 }
 
@@ -7824,9 +8090,63 @@ async function handleApi(request, response, pathname) {
         jobs,
         partsReference,
         auditLog: store.auditLog,
+        feedback: store.aiFeedback,
+        shopRules: store.shopRules,
+        preferences: store.aiPreferences,
         proofAttachments: groupAttachmentsByJob(proofAttachmentVault.attachments),
       }),
     );
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/ai/feedback") {
+    const body = await readJsonBody(request);
+    const feedback = cleanAiFeedback(body);
+    store.aiFeedback.unshift(feedback);
+    store.aiFeedback = store.aiFeedback.slice(0, 1000);
+    let rule = null;
+    if (feedback.value === "save-rule") {
+      rule = cleanShopRule(
+        {
+          title: body.ruleTitle || feedback.note || feedback.prompt,
+          body: body.ruleBody || feedback.note || feedback.prompt,
+          query: body.query || "",
+          vehicle: body.vehicle || "",
+          target: feedback.target || body.target,
+          tags: body.tags || [],
+          contextSummary: feedback.contextSummary,
+        },
+        feedback,
+      );
+      store.shopRules.unshift(rule);
+      store.shopRules = store.shopRules.slice(0, 500);
+    }
+    await writeStore(store);
+    sendJson(response, 201, { feedback, rule, memory: aiMemorySummary(store, {}, "") });
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/ai/memory") {
+    sendJson(response, 200, aiMemorySummary(store, {}, ""));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/ai/shop-rules") {
+    sendJson(response, 200, {
+      rules: store.shopRules.filter((rule) => !rule.disabled),
+      personality: aiPersonalityProfile("owner", store.aiPreferences),
+      feedback: aiFeedbackSummary(store.aiFeedback),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/ai/shop-rules") {
+    const body = await readJsonBody(request);
+    const rule = cleanShopRule(body);
+    store.shopRules.unshift(rule);
+    store.shopRules = store.shopRules.slice(0, 500);
+    await writeStore(store);
+    sendJson(response, 201, { rule, memory: aiMemorySummary(store, {}, "") });
     return;
   }
 
@@ -8253,7 +8573,8 @@ async function handleApi(request, response, pathname) {
       return;
     }
 
-    const decision = aiDecision(prompt, body.context || {});
+    const memory = aiMemorySummary(store, body.context || {}, prompt);
+    const decision = aiDecision(prompt, body.context || {}, memory);
     const entry = {
       id: randomUUID(),
       jobId: body.jobId || null,
@@ -8269,6 +8590,8 @@ async function handleApi(request, response, pathname) {
       contextSummary: decision.contextSummary || [],
       recommendedRoute: decision.recommendedRoute || "",
       fieldPacket: decision.fieldPacket || null,
+      personality: decision.personality || memory.personality,
+      memory: decision.memory || memory,
       createdAt: new Date().toISOString(),
     };
 
