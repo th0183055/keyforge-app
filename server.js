@@ -2347,11 +2347,11 @@ function aiIntent(prompt = "") {
   if (/quote|price|estimate|invoice|customer/.test(normalized)) return "quote";
   if (/proof|vault|evidence|authorization|document|photo/.test(normalized)) return "proof";
   if (/part|lr#?|mw#?|ti#?|oe|fcc|sku|order/.test(normalized)) return "parts";
-  if (/lishi|keyway|decode|pick|lock/.test(normalized)) return "lishi";
+  if (/\blishi\b|keyway|decode|pick|door lock|ignition lock|lock cylinder|cylinder/.test(normalized)) return "lishi";
   if (/code|bitting|cuts|depth|space|cutting/.test(normalized)) return "code";
   if (/coverage|programmer|smart pro|autel|topdon|fdrs|success|worked/.test(normalized)) return "coverage";
   if (/vin|vehicle|ymm|year|make|model/.test(normalized)) return "vin";
-  if (/next|now|dispatch|workbench|packet|prep|what should|summary|brief|checklist/.test(normalized)) return "next";
+  if (/audit|next|now|dispatch|workbench|packet|prep|what should|summary|brief|checklist|field plan|field/.test(normalized)) return "next";
   return "general";
 }
 
@@ -2410,6 +2410,213 @@ function aiChecklistForIntent(intent, snapshot) {
   return uniqueCleanValues([...(lists[intent] || lists.next), ...common]).slice(0, 7);
 }
 
+function aiMetric(value, fallback = 0) {
+  if (Array.isArray(value)) return value.length;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function aiEvidenceProfile(snapshot = {}) {
+  const partHistory = snapshot.partHistory || {};
+  const proofVault = snapshot.proofVault || {};
+  const codeDesk = snapshot.codeDesk || {};
+  const lishi = snapshot.lishi || {};
+  const coverage = snapshot.coverage || {};
+  const workbench = snapshot.brief || {};
+  return {
+    hasVehicle: Boolean(snapshot.vehicleTitle || snapshot.vin),
+    hasSearch: Boolean(snapshot.query || snapshot.workbenchTitle),
+    hasWorkbench: Boolean(workbench.decision || snapshot.workbenchTitle),
+    partJobs: aiMetric(partHistory.matchedJobs),
+    partReferenceRows: aiMetric(partHistory.matchedReferenceRows),
+    proofMatches: aiMetric(proofVault.matchingJobs),
+    proofFiles: aiMetric(proofVault.files),
+    proofWarnings: aiMetric(proofVault.warningJobs),
+    lishiTools: aiMetric(lishi.matchedTools),
+    lishiApplications: aiMetric(lishi.matchedApplications),
+    codeRows: aiMetric(codeDesk.autoMatches),
+    codeCandidates: aiMetric(codeDesk.verifiedCandidates),
+    codeImports: aiMetric(codeDesk.importedRecords),
+    coveragePercent: Number.isFinite(Number(coverage.observedCoveragePercent)) ? Number(coverage.observedCoveragePercent) : null,
+    coverageJobs: aiMetric(coverage.automotiveJobs),
+    missingProgrammer: aiMetric(coverage.gaps?.missingProgrammer),
+    missingPart: aiMetric(coverage.gaps?.missingPart),
+    needsOutcome: aiMetric(coverage.gaps?.needsOutcome),
+  };
+}
+
+function aiReadinessScore(evidence = {}) {
+  let score = 18;
+  if (evidence.hasVehicle) score += 14;
+  if (evidence.hasSearch) score += 10;
+  if (evidence.hasWorkbench) score += 10;
+  if (evidence.partReferenceRows) score += 10;
+  if (evidence.partJobs) score += Math.min(14, 8 + evidence.partJobs);
+  if (evidence.proofMatches) score += 8;
+  if (evidence.proofFiles) score += 6;
+  if (evidence.lishiTools || evidence.lishiApplications) score += 7;
+  if (evidence.codeRows || evidence.codeCandidates || evidence.codeImports) score += 7;
+  if (evidence.coveragePercent !== null) score += Math.min(10, Math.round(evidence.coveragePercent / 10));
+  return Math.max(0, Math.min(100, score));
+}
+
+function aiReadinessLabel(score) {
+  if (score >= 85) return "Field-ready with verification";
+  if (score >= 70) return "Strong packet";
+  if (score >= 52) return "Usable, needs checks";
+  if (score >= 35) return "Thin proof";
+  return "Build context first";
+}
+
+function aiProofGaps(intent, snapshot, evidence) {
+  const gaps = [];
+  if (!evidence.hasVehicle) gaps.push("Vehicle identity is not loaded yet");
+  if (!evidence.hasSearch) gaps.push("No active VIN, part, keyway, or vehicle search is attached");
+  if (!evidence.partReferenceRows && ["parts", "next", "quote", "coverage"].includes(intent)) gaps.push("No part cross-reference row is tied to the current question");
+  if (!evidence.partJobs && ["parts", "next", "coverage"].includes(intent)) gaps.push("No saved worked-job proof matched this part/search");
+  if (!evidence.proofMatches) gaps.push("Proof Vault has no matching job record for this context");
+  if (!evidence.proofFiles) gaps.push("No server/browser proof attachments are linked to this context");
+  if (!evidence.lishiTools && ["lishi", "vin", "next"].includes(intent)) gaps.push("Lishi/keyway still needs confirmation from the lock or insert");
+  if (!evidence.codeRows && !evidence.codeCandidates && intent === "code") gaps.push("No code system or authorized code-data result is active");
+  if (evidence.missingProgrammer) gaps.push(`${evidence.missingProgrammer} saved automotive job${evidence.missingProgrammer === 1 ? "" : "s"} still need programmer names`);
+  if (evidence.missingPart) gaps.push(`${evidence.missingPart} saved automotive job${evidence.missingPart === 1 ? "" : "s"} still need exact part numbers`);
+  if (evidence.needsOutcome) gaps.push(`${evidence.needsOutcome} saved automotive job${evidence.needsOutcome === 1 ? "" : "s"} still need worked/failed outcome cleanup`);
+  return uniqueCleanValues(gaps).slice(0, 8);
+}
+
+function aiRiskFlags(intent, snapshot, evidence) {
+  const warnings = [];
+  if (intent === "code") warnings.push("Code/cut data must come from authorized data or your own decoded/imported records");
+  if (intent === "lishi") warnings.push("Lishi matches are a shortlist; confirm the actual keyway at the vehicle");
+  if (intent === "quote") warnings.push("Quote should stay conditional until part/FCC/blade/programmer path is verified");
+  if (evidence.proofWarnings) warnings.push(`${evidence.proofWarnings} matching proof record${evidence.proofWarnings === 1 ? "" : "s"} includes warning/failure language`);
+  if (evidence.coveragePercent !== null && evidence.coveragePercent < 70) warnings.push("Observed programmer coverage is below 70% for the current evidence set");
+  if (!snapshot.vin && snapshot.vehicleTitle) warnings.push("YMM lookup is useful, but VIN still matters for trim/key package confidence");
+  return uniqueCleanValues(warnings).slice(0, 6);
+}
+
+function aiRoutePlan(intent, snapshot, evidence) {
+  const subject = snapshot.query || snapshot.vehicleTitle || "current job";
+  const routes = [
+    {
+      target: "workbench",
+      label: "Job Workbench",
+      status: evidence.hasWorkbench ? "Packet built" : "Build packet",
+      reason: evidence.hasWorkbench ? "Use the unified packet as the source of truth" : "Unify VIN, parts, proof, Lishi, Code Desk, and coverage",
+      prompt: `Run a full field audit for ${subject}`,
+    },
+    {
+      target: "part-history",
+      label: "Part History",
+      status: evidence.partJobs ? `${evidence.partJobs} worked proof` : "Needs proof",
+      reason: evidence.partReferenceRows ? "Cross-reference data exists" : "Search LR/MW/TI/OE/FCC before ordering",
+      prompt: `Is ${subject} proven enough to trust?`,
+    },
+    {
+      target: "proof-vault",
+      label: "Proof Vault",
+      status: evidence.proofMatches ? `${evidence.proofMatches} matches` : "Needs evidence",
+      reason: evidence.proofFiles ? "Attachments are present" : "Attach authorization, result photos, and final part/programmer proof",
+      prompt: `What proof is missing for ${subject}?`,
+    },
+    {
+      target: "lishi",
+      label: "Lishi Lookup",
+      status: evidence.lishiTools ? `${evidence.lishiTools} tools` : "Verify keyway",
+      reason: "Use as keyway/decode shortlist, not as the only decision",
+      prompt: `Build a Lishi verification checklist for ${subject}`,
+    },
+    {
+      target: "code-desk",
+      label: "Code Desk",
+      status: evidence.codeCandidates ? `${evidence.codeCandidates} candidates` : evidence.codeRows ? `${evidence.codeRows} auto rows` : "Needs authorized data",
+      reason: "Use depth/space and bitting only when the system and authorization are verified",
+      prompt: `What do I need before using code data for ${subject}?`,
+    },
+    {
+      target: "coverage",
+      label: "Coverage",
+      status: evidence.coveragePercent !== null ? `${evidence.coveragePercent}% observed` : "Build proof",
+      reason: "Coverage is your saved-shop evidence, not a manufacturer guarantee",
+      prompt: "Where are my biggest programmer coverage gaps?",
+    },
+  ];
+  if (intent === "parts") return routes.filter((route) => ["workbench", "part-history", "proof-vault", "coverage"].includes(route.target));
+  if (intent === "proof") return routes.filter((route) => ["proof-vault", "workbench", "coverage", "part-history"].includes(route.target));
+  if (intent === "lishi") return routes.filter((route) => ["lishi", "workbench", "part-history", "proof-vault"].includes(route.target));
+  if (intent === "code") return routes.filter((route) => ["code-desk", "workbench", "proof-vault", "part-history"].includes(route.target));
+  if (intent === "coverage") return routes.filter((route) => ["coverage", "part-history", "proof-vault", "workbench"].includes(route.target));
+  return routes;
+}
+
+function aiCopyBlocks(intent, snapshot, checklist, packet) {
+  const subject = snapshot.vehicleTitle || snapshot.query || snapshot.workbenchTitle || "current locksmith job";
+  const customerNote = `We will verify authorization, confirm the exact vehicle/key system, match the correct part and programming path, and document the completed result before closing the job. ${packet.dispatchDecision}`;
+  const workOrderNote = [
+    `AI field packet: ${subject}`,
+    `Readiness: ${packet.readinessScore}% - ${packet.readinessLabel}`,
+    `Decision: ${packet.dispatchDecision}`,
+    `Next: ${packet.nextBestAction?.label || "Open Workbench"}`,
+    `Proof gaps: ${(packet.proofGaps || []).slice(0, 4).join("; ") || "Normal verification only"}`,
+  ].join("\n");
+  return {
+    customerNote,
+    workOrderNote,
+    technicianChecklist: checklist.map((item, index) => `${index + 1}. ${item}`).join("\n"),
+  };
+}
+
+function aiFieldPacket(intent, snapshot, checklist) {
+  const evidence = aiEvidenceProfile(snapshot);
+  const readinessScore = aiReadinessScore(evidence);
+  const readinessLabel = aiReadinessLabel(readinessScore);
+  const proofGaps = aiProofGaps(intent, snapshot, evidence);
+  const warnings = aiRiskFlags(intent, snapshot, evidence);
+  const routePlan = aiRoutePlan(intent, snapshot, evidence);
+  const blockers = proofGaps.filter((gap) =>
+    /authorization|vehicle identity|No active|authorized code/i.test(gap),
+  );
+  const dispatchDecision =
+    readinessScore >= 85
+      ? "Ready to proceed with normal field verification."
+      : readinessScore >= 70
+        ? "Proceed after the listed proof and part checks are confirmed."
+        : readinessScore >= 52
+          ? "Usable for planning, but verify missing proof before ordering or programming."
+          : "Hold for more context before relying on this packet.";
+  const packet = {
+    readinessScore,
+    readinessLabel,
+    priority: blockers.length ? "Fix blockers first" : warnings.length ? "Verify warnings" : "Normal verification",
+    dispatchDecision,
+    nextBestAction: routePlan[0] || { target: "workbench", label: "Job Workbench", prompt: "Run a full field audit." },
+    evidence,
+    confidenceDrivers: uniqueCleanValues([
+      evidence.hasVehicle ? "Vehicle identity present" : "",
+      evidence.hasWorkbench ? "Workbench packet active" : "",
+      evidence.partJobs ? `${evidence.partJobs} saved worked-job proof match${evidence.partJobs === 1 ? "" : "es"}` : "",
+      evidence.partReferenceRows ? `${evidence.partReferenceRows} part reference row${evidence.partReferenceRows === 1 ? "" : "s"}` : "",
+      evidence.proofFiles ? `${evidence.proofFiles} proof attachment${evidence.proofFiles === 1 ? "" : "s"}` : "",
+      evidence.lishiTools ? `${evidence.lishiTools} Lishi tool match${evidence.lishiTools === 1 ? "" : "es"}` : "",
+      evidence.coveragePercent !== null ? `${evidence.coveragePercent}% observed coverage` : "",
+    ]).slice(0, 8),
+    blockers,
+    warnings,
+    proofGaps,
+    routePlan,
+    technicianPlan: checklist,
+    saveBackChecklist: [
+      "Exact LR/MW/TI/OE/FCC/part used",
+      "Programmer/tool used and software path if known",
+      "Worked/failed outcome with reason",
+      "Vehicle VIN/YMM and keyway/Lishi if confirmed",
+      "Authorization and final result proof attachment",
+    ],
+  };
+  packet.copyBlocks = aiCopyBlocks(intent, snapshot, checklist, packet);
+  return packet;
+}
+
 function aiActionsForIntent(intent, snapshot) {
   const actions = [
     { label: "Open Workbench", target: "workbench", prompt: "What should I do next from this packet?" },
@@ -2456,21 +2663,24 @@ function aiContextFacts(snapshot) {
   ]).slice(0, 8);
 }
 
-function aiResponseForIntent(intent, snapshot, checklist) {
+function aiResponseForIntent(intent, snapshot, checklist, fieldPacket = null) {
   const subject = snapshot.vehicleTitle || snapshot.query || snapshot.workbenchTitle || "this job";
   const confidence = snapshot.brief?.confidencePercent ? ` Packet confidence is ${snapshot.brief.confidenceLabel || "developing"} at ${snapshot.brief.confidencePercent}%.` : "";
   const lead = snapshot.brief?.decision || `Use ${subject} as the current job context.`;
   const facts = aiContextFacts(snapshot).slice(0, 4).join(" ");
+  const fieldReadiness = fieldPacket
+    ? ` AI readiness is ${fieldPacket.readinessScore}% (${fieldPacket.readinessLabel}). ${fieldPacket.dispatchDecision}`
+    : "";
   const playbooks = {
-    next: `${lead}${confidence} Best next move: verify authorization, then use the Workbench packet to move through part proof, Lishi/keyway verification, Code Desk only if authorized, and Proof Vault documentation. ${facts}`,
-    quote: `Quote prep for ${subject}: give a range only after authorization, exact key/FCC/blade confirmation, parts availability, programmer path, trip/after-hours factors, and any module/battery contingencies are clear. ${snapshot.brief?.customerNote || ""}`,
-    proof: `Proof review for ${subject}: the job is stronger when ID/registration or fleet authorization, exact part number, programmer result, outcome, and photos/docs are attached. ${facts}`,
-    parts: `Parts guidance for ${subject}: start from LR/MW/TI/OE/FCC cross-reference, compare saved jobs, and do not order from a single alias until buttons, FCC/frequency, blade/keyway, chip, and condition are verified.`,
-    lishi: `Lishi guidance for ${subject}: treat the imported tool match as a shortlist. Confirm keyway from the lock, insert, or authorized code source before using it, then save the confirmed tool/keyway to the worked job.`,
-    code: `Code Desk guidance for ${subject}: use only authorized code data, verify the exact depth-space system and blank, and treat reverse/bitting matches as verification clues until confirmed against the vehicle and lock.`,
-    coverage: `Coverage guidance: use the percentages as observed shop proof. Improve the score by adding programmer names, exact part numbers, outcomes, and proof attachments to jobs with missing data.`,
-    vin: `VIN guidance for ${subject}: make sure the decoded vehicle matches the customer vehicle, select the key family, verify parts/programmer/Lishi, then send the packet to Workbench before dispatch.`,
-    general: `${lead}${confidence} I can help turn the current screen into a technician checklist, proof audit, quote note, part verification path, or customer-safe summary. ${facts}`,
+    next: `${lead}${confidence}${fieldReadiness} Best next move: verify authorization, then use the Workbench packet to move through part proof, Lishi/keyway verification, Code Desk only if authorized, and Proof Vault documentation. ${facts}`,
+    quote: `Quote prep for ${subject}:${fieldReadiness} Give a range only after authorization, exact key/FCC/blade confirmation, parts availability, programmer path, trip/after-hours factors, and any module/battery contingencies are clear. ${snapshot.brief?.customerNote || ""}`,
+    proof: `Proof review for ${subject}:${fieldReadiness} The job is stronger when ID/registration or fleet authorization, exact part number, programmer result, outcome, and photos/docs are attached. ${facts}`,
+    parts: `Parts guidance for ${subject}:${fieldReadiness} Start from LR/MW/TI/OE/FCC cross-reference, compare saved jobs, and do not order from a single alias until buttons, FCC/frequency, blade/keyway, chip, and condition are verified.`,
+    lishi: `Lishi guidance for ${subject}:${fieldReadiness} Treat the imported tool match as a shortlist. Confirm keyway from the lock, insert, or authorized code source before using it, then save the confirmed tool/keyway to the worked job.`,
+    code: `Code Desk guidance for ${subject}:${fieldReadiness} Use only authorized code data, verify the exact depth-space system and blank, and treat reverse/bitting matches as verification clues until confirmed against the vehicle and lock.`,
+    coverage: `Coverage guidance:${fieldReadiness} Use the percentages as observed shop proof. Improve the score by adding programmer names, exact part numbers, outcomes, and proof attachments to jobs with missing data.`,
+    vin: `VIN guidance for ${subject}:${fieldReadiness} Make sure the decoded vehicle matches the customer vehicle, select the key family, verify parts/programmer/Lishi, then send the packet to Workbench before dispatch.`,
+    general: `${lead}${confidence}${fieldReadiness} I can help turn the current screen into a technician checklist, proof audit, quote note, part verification path, or customer-safe summary. ${facts}`,
   };
   return `${playbooks[intent] || playbooks.general} Checklist: ${checklist.slice(0, 4).join("; ")}.`;
 }
@@ -2483,6 +2693,7 @@ function aiDecision(prompt, context = {}) {
   const snapshot = aiContextSnapshot(context);
   const intent = aiIntent(prompt);
   const checklist = aiChecklistForIntent(intent, snapshot);
+  const fieldPacket = aiFieldPacket(intent, snapshot, checklist);
 
   if (blocked) {
     return {
@@ -2495,9 +2706,22 @@ function aiDecision(prompt, context = {}) {
       nextActions: [{ label: "Proof Vault", target: "proof-vault", prompt: "What proof is required before this work?" }],
       suggestedPrompts: ["Build a lawful verification checklist", "Create a customer-safe service note"],
       contextSummary: aiContextFacts(snapshot),
+      fieldPacket: {
+        ...fieldPacket,
+        readinessScore: 0,
+        readinessLabel: "Blocked",
+        priority: "Refused",
+        dispatchDecision: "This request cannot be supported. Use lawful verification and documentation workflow only.",
+        copyBlocks: {
+          customerNote: "This request requires lawful authorization and cannot proceed as described. We can continue only with verified ownership/authorization and normal locksmith documentation.",
+          workOrderNote: "AI blocked an unsafe or unauthorized-style request. Continue only with verified authorization, proof capture, and lawful service workflow.",
+          technicianChecklist: "1. Confirm authorization\n2. Document customer identity or fleet approval\n3. Use lawful service workflow only",
+        },
+      },
     };
   }
 
+  const nextActions = aiActionsForIntent(intent, snapshot);
   return {
     title:
       intent === "quote"
@@ -2516,12 +2740,13 @@ function aiDecision(prompt, context = {}) {
     riskLevel: "low",
     policyDecision: snapshot.brief ? "allowed_with_verified_job_context" : "allowed_with_screen_context",
     intent,
-    response: aiResponseForIntent(intent, snapshot, checklist),
+    response: aiResponseForIntent(intent, snapshot, checklist, fieldPacket),
     checklist,
-    nextActions: aiActionsForIntent(intent, snapshot),
+    nextActions,
     suggestedPrompts: aiSuggestedPrompts(intent, snapshot),
     contextSummary: aiContextFacts(snapshot),
-    recommendedRoute: aiActionsForIntent(intent, snapshot)[0]?.target || "workbench",
+    recommendedRoute: nextActions[0]?.target || fieldPacket.nextBestAction?.target || "workbench",
+    fieldPacket,
   };
 }
 
@@ -7786,6 +8011,7 @@ async function handleApi(request, response, pathname) {
       suggestedPrompts: decision.suggestedPrompts || [],
       contextSummary: decision.contextSummary || [],
       recommendedRoute: decision.recommendedRoute || "",
+      fieldPacket: decision.fieldPacket || null,
       createdAt: new Date().toISOString(),
     };
 

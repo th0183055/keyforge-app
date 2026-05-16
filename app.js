@@ -7270,6 +7270,19 @@ function compactGlobalSearchForAi(payload = latestGlobalSearch) {
   };
 }
 
+function compactRecentJobsForAi() {
+  return jobs.slice(0, 8).map((job) => ({
+    id: job.id,
+    title: [job.vehicle?.year, job.vehicle?.make, job.vehicle?.model].filter(Boolean).join(" ") || job.vehicle || job.title || job.customer || job.id,
+    vin: job.vin || "",
+    status: job.status || "",
+    service: job.service || "",
+    programmer: job.programmer || "",
+    partNumber: job.partNumber || job.exactPart || job.sku || "",
+    outcome: job.outcome?.key || job.outcome || "",
+  }));
+}
+
 function buildAiClientContext() {
   const profile = compactProfileForAi();
   return {
@@ -7277,6 +7290,13 @@ function buildAiClientContext() {
     screen: routeDisplayLabel(activeViewId),
     appMode,
     query: activeScreenQuery(),
+    workflow: {
+      vinStep: vinWorkflowStep,
+      selectedKeyFamily,
+      selectedKeyPackage,
+      selectedPartChoiceKey,
+      selectedProgrammerKey,
+    },
     currentProfile: profile,
     workbench: latestWorkbench
       ? {
@@ -7295,11 +7315,7 @@ function buildAiClientContext() {
     lishi: compactLishiForAi(),
     coverage: compactCoverageForAi(),
     globalSearch: compactGlobalSearchForAi(),
-    jobs: jobs.slice(0, 4).map((job) => ({
-      title: [job.vehicle?.year, job.vehicle?.make, job.vehicle?.model].filter(Boolean).join(" ") || job.customer || job.id,
-      status: job.status,
-      service: job.service,
-    })),
+    jobs: compactRecentJobsForAi(),
   };
 }
 
@@ -7320,18 +7336,27 @@ function aiContextSummaryText(context = buildAiClientContext()) {
 function aiPromptSuggestions(context = buildAiClientContext()) {
   const q = context.query || context.workbench?.activeQueries?.part || "this job";
   const base = {
-    command: [`Where should I open this search next?`, `Build a job plan from the current search`, `What proof should I look for first?`],
-    vin: [`Build the next-step checklist for this VIN`, `What should I verify before ordering?`, `Summarize this job for the customer`],
-    workbench: [`What should I do next from this packet?`, `What proof is missing?`, `Create a technician checklist`],
-    "part-history": [`Is ${q} proven enough to trust?`, `What programmer proof exists for ${q}?`, `What should I save after this job?`],
-    "proof-vault": [`What proof is missing for ${q}?`, `Write a customer-safe proof summary`, `What would improve coverage percentage?`],
-    "code-desk": [`What do I need before using code data?`, `Explain this bitting/code result safely`, `What should I verify before cutting?`],
-    lishi: [`Which Lishi result should I verify first?`, `Build a Lishi verification checklist`, `What should I confirm at the lock?`],
-    coverage: [`Where are my biggest coverage gaps?`, `Which programmer evidence is strongest?`, `What should I log on the next job?`],
-    learn: [`Check this worked-job entry before saving`, `What fields matter most for proof?`, `How should I describe the outcome?`],
-    ai: [`What is the safest next move?`, `Create a technician checklist`, `Create a customer-facing note`],
+    command: [`Run a complete locksmith field audit for this search`, `Where should I open this search next?`, `Build a job plan from the current search`, `What proof should I look for first?`],
+    vin: [`Run a VIN-to-key readiness audit`, `Build the next-step checklist for this VIN`, `What should I verify before ordering?`, `Summarize this job for the customer`],
+    workbench: [`Run a complete field audit from this packet`, `What proof is missing?`, `Create a technician checklist`, `Build a dispatch plan`],
+    "part-history": [`Is ${q} proven enough to trust?`, `What programmer proof exists for ${q}?`, `What should I save after this job?`, `Build the best part verification path`],
+    "proof-vault": [`What proof is missing for ${q}?`, `Write a customer-safe proof summary`, `What would improve coverage percentage?`, `Build the attachment checklist`],
+    "code-desk": [`What do I need before using code data?`, `Explain this bitting/code result safely`, `What should I verify before cutting?`, `Build a code-use authorization checklist`],
+    lishi: [`Which Lishi result should I verify first?`, `Build a Lishi verification checklist`, `What should I confirm at the lock?`, `Turn this into a decode workflow`],
+    coverage: [`Where are my biggest coverage gaps?`, `Which programmer evidence is strongest?`, `What should I log on the next job?`, `Build my next coverage cleanup list`],
+    learn: [`Check this worked-job entry before saving`, `What fields matter most for proof?`, `How should I describe the outcome?`, `Make this saved job useful for future AI`],
+    ai: [`Run a complete locksmith field audit`, `Create a technician checklist`, `Create a customer-facing note`, `Build a save-back checklist`],
   };
   return [...(base[context.activeView] || base.command), `Create a quote-prep checklist for ${q}`].slice(0, 6);
+}
+
+function aiRouteQuickActions(context = buildAiClientContext()) {
+  const subject = context.query || context.currentProfile?.title || context.workbench?.title || "current screen";
+  return [
+    { label: "AI Audit", target: "ai", prompt: `Run a complete locksmith field audit for ${subject}.` },
+    { label: "Dispatch Plan", target: "ai", prompt: `Build a dispatch plan for ${subject}.` },
+    { label: "Open AI Bench", target: "ai" },
+  ];
 }
 
 function renderAiContextChips(context = buildAiClientContext()) {
@@ -7387,6 +7412,97 @@ function renderAiActions(actions = [], prompts = []) {
   return `${actionButtons}${promptButtons}`;
 }
 
+function renderAiFieldPacket(packet = {}, { compact = false } = {}) {
+  if (!packet || !Number.isFinite(Number(packet.readinessScore))) return "";
+  const score = Number(packet.readinessScore);
+  const scoreClass = score >= 80 ? "ready" : score >= 55 ? "warn" : "danger";
+  const blockers = packet.blockers || [];
+  const warnings = packet.warnings || [];
+  const proofGaps = packet.proofGaps || [];
+  const routePlan = packet.routePlan || [];
+  const plan = packet.technicianPlan || [];
+  const saveBack = packet.saveBackChecklist || [];
+  const copyBlocks = packet.copyBlocks || {};
+  return `
+    <section class="ai-field-packet ${compact ? "compact" : ""}">
+      <div class="ai-field-head">
+        <div class="ai-score ${scoreClass}">
+          <strong>${escapeHtml(score)}</strong>
+          <span>readiness</span>
+        </div>
+        <div>
+          <p class="eyebrow">${escapeHtml(packet.priority || "AI field packet")}</p>
+          <h3>${escapeHtml(packet.readinessLabel || "Field readiness")}</h3>
+          <p>${escapeHtml(packet.dispatchDecision || "Use this packet as a planning aid and verify at the job.")}</p>
+        </div>
+      </div>
+      ${
+        packet.confidenceDrivers?.length
+          ? `<div class="ai-driver-row">${packet.confidenceDrivers.slice(0, 6).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+          : ""
+      }
+      ${
+        blockers.length || warnings.length || proofGaps.length
+          ? `<div class="ai-alert-grid">
+              <article class="${blockers.length ? "danger" : ""}">
+                <strong>Blockers</strong>
+                <ul>${(blockers.length ? blockers : ["No hard blockers from current context."]).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+              </article>
+              <article class="${warnings.length ? "warn" : ""}">
+                <strong>Warnings</strong>
+                <ul>${(warnings.length ? warnings : ["Normal verification only."]).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+              </article>
+              <article>
+                <strong>Proof gaps</strong>
+                <ul>${(proofGaps.length ? proofGaps : ["No major proof gaps beyond standard authorization."]).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+              </article>
+            </div>`
+          : ""
+      }
+      ${
+        routePlan.length
+          ? `<div class="ai-route-plan">
+              <strong>Route plan</strong>
+              ${routePlan.slice(0, compact ? 3 : 6).map((route) => `
+                <article>
+                  <div>
+                    <span>${escapeHtml(route.status || "Next")}</span>
+                    <strong>${escapeHtml(route.label || route.target || "Tool")}</strong>
+                    <p>${escapeHtml(route.reason || "Open this tool for more detail.")}</p>
+                  </div>
+                  <button class="secondary-action small" type="button" data-ai-action-target="${escapeHtml(route.target || "ai")}" data-ai-action-prompt="${escapeHtml(route.prompt || "")}">Open</button>
+                </article>
+              `).join("")}
+            </div>`
+          : ""
+      }
+      ${
+        !compact && plan.length
+          ? `<div class="ai-two-column">
+              <article>
+                <strong>Technician plan</strong>
+                <ul>${plan.slice(0, 7).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+              </article>
+              <article>
+                <strong>Save back after job</strong>
+                <ul>${saveBack.slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+              </article>
+            </div>`
+          : ""
+      }
+      ${
+        !compact && Object.keys(copyBlocks).length
+          ? `<div class="ai-copy-grid">
+              <button class="secondary-action small" type="button" data-copy-ai-block="technicianChecklist">Copy Tech Checklist</button>
+              <button class="secondary-action small" type="button" data-copy-ai-block="customerNote">Copy Customer Note</button>
+              <button class="secondary-action small" type="button" data-copy-ai-block="workOrderNote">Copy Work Order Note</button>
+            </div>`
+          : ""
+      }
+    </section>
+  `;
+}
+
 function renderAiMessage(message) {
   const checklist = Array.isArray(message.checklist) && message.checklist.length
     ? `<ul>${message.checklist.slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
@@ -7394,10 +7510,12 @@ function renderAiMessage(message) {
   const actions = message.role === "assistant" && message.actions?.length
     ? `<div class="ai-message-actions">${renderAiActions(message.actions)}</div>`
     : "";
+  const fieldPacket = message.role === "assistant" ? renderAiFieldPacket(message.fieldPacket, { compact: true }) : "";
   return `
     <div class="message ${escapeHtml(message.role)}">
       ${message.title ? `<strong>${escapeHtml(message.title)}</strong>` : ""}
       <p>${escapeHtml(message.text).replace(/\n/g, "<br>")}</p>
+      ${fieldPacket}
       ${checklist}
       ${actions}
     </div>
@@ -7426,6 +7544,8 @@ function renderAiResponsePanel(payload = latestAiResponse) {
   }
   aiActionPanel.innerHTML = `
     <p class="eyebrow">AI recommended actions</p>
+    ${payload.contextView && payload.contextView !== activeViewId ? `<p class="muted-copy">Last AI response came from ${escapeHtml(routeDisplayLabel(payload.contextView))}. Run a fresh audit for this screen when needed.</p>` : ""}
+    ${renderAiFieldPacket(payload.fieldPacket)}
     <div class="ai-action-list">${renderAiActions(payload.nextActions || [], payload.suggestedPrompts || [])}</div>
     ${
       payload.checklist?.length
@@ -7442,7 +7562,7 @@ function updateAiContextUi() {
   if (aiRouteTitle) aiRouteTitle.textContent = `${routeDisplayLabel(context.activeView)} copilot`;
   if (aiRouteSummary) aiRouteSummary.textContent = aiContextSummaryText(context);
   if (aiRouteActions) {
-    aiRouteActions.innerHTML = renderAiActions([{ label: "Open AI Bench", target: "ai" }], prompts.slice(0, 2));
+    aiRouteActions.innerHTML = renderAiActions(aiRouteQuickActions(context), prompts.slice(0, 1));
   }
   if (aiContextChips) aiContextChips.innerHTML = renderAiContextChips(context);
   if (aiQuickPrompts) {
@@ -7472,6 +7592,7 @@ async function askAi(prompt, { open = true } = {}) {
       }),
       timeoutMs: 16000,
     });
+    payload.contextView = context.activeView;
     latestAiResponse = payload;
     chatLog.splice(chatLog.length - 1, 1, {
       role: "assistant",
@@ -7479,6 +7600,7 @@ async function askAi(prompt, { open = true } = {}) {
       text: payload.response,
       checklist: payload.checklist || [],
       actions: payload.nextActions || [],
+      fieldPacket: payload.fieldPacket || null,
     });
   } catch (error) {
     chatLog.splice(chatLog.length - 1, 1, { role: "assistant", title: "AI unavailable", text: `Backend error: ${error.message}` });
@@ -7814,6 +7936,22 @@ document.addEventListener("click", (event) => {
     }
     showView("ai");
     if (prompt) askAi(prompt, { open: false });
+    return;
+  }
+
+  const aiCopyButton = event.target.closest("[data-copy-ai-block]");
+  if (aiCopyButton) {
+    const key = aiCopyButton.dataset.copyAiBlock;
+    const text = latestAiResponse?.fieldPacket?.copyBlocks?.[key] || "";
+    if (text && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        aiCopyButton.textContent = "Copied";
+        window.setTimeout(() => {
+          aiCopyButton.textContent =
+            key === "customerNote" ? "Copy Customer Note" : key === "workOrderNote" ? "Copy Work Order Note" : "Copy Tech Checklist";
+        }, 1400);
+      });
+    }
     return;
   }
 
