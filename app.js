@@ -38,8 +38,11 @@ let latestGlobalSearch = null;
 let latestAiResponse = null;
 let latestAiAdvisor = null;
 let latestAiMemory = null;
+let latestAiCommander = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
+let latestAuthStatus = null;
+let authRoleSelection = "owner";
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -80,6 +83,9 @@ function isOwnerOnlyView(id) {
 }
 
 function applyAppMode(mode = loadAppMode()) {
+  if (latestAuthStatus?.enabled && latestAuthStatus.authenticated && latestAuthStatus.role === "subscriber") {
+    mode = "subscriber";
+  }
   appMode = mode === "subscriber" ? "subscriber" : "owner";
   try {
     localStorage.setItem(appModeKey, appMode);
@@ -114,6 +120,12 @@ const modeCaption = document.querySelector("#modeCaption");
 const appBackButton = document.querySelector("#appBackButton");
 const topbarEyebrow = document.querySelector(".topbar .eyebrow");
 const topbarTitle = document.querySelector(".topbar h2");
+const authGate = document.querySelector("#authGate");
+const authForm = document.querySelector("#authForm");
+const authStatus = document.querySelector("#authStatus");
+const authStatusPill = document.querySelector("#authStatusPill");
+const logoutButton = document.querySelector("#logoutButton");
+const authRoleButtons = document.querySelectorAll("[data-auth-role]");
 const globalSearchForm = document.querySelector("#globalSearchForm");
 const globalSearchStatus = document.querySelector("#globalSearchStatus");
 const globalSearchResult = document.querySelector("#globalSearchResult");
@@ -208,6 +220,8 @@ const aiOpportunityPanel = document.querySelector("#aiOpportunityPanel");
 const aiQuickPrompts = document.querySelector("#aiQuickPrompts");
 const aiContextPanel = document.querySelector("#aiContextPanel");
 const aiActionPanel = document.querySelector("#aiActionPanel");
+const aiCommanderPanel = document.querySelector("#aiCommanderPanel");
+const refreshAiCommanderButton = document.querySelector("#refreshAiCommander");
 const routeMeta = {
   command: {
     eyebrow: "Command center",
@@ -374,6 +388,68 @@ function updateConnectionStatus() {
     return;
   }
   setAppStatus("Checking server", "busy", "Confirming the API is awake.");
+}
+
+function renderAuthStatus() {
+  const status = latestAuthStatus || { enabled: false, authenticated: true, role: "owner", mode: "open-dev" };
+  const locked = Boolean(status.enabled && !status.authenticated);
+  document.body.classList.toggle("auth-required", locked);
+  if (authGate) authGate.hidden = !locked;
+  if (authStatusPill) {
+    authStatusPill.textContent = status.enabled
+      ? status.authenticated
+        ? `${status.role === "owner" ? "Owner" : "Subscriber"} session`
+        : "Sign in required"
+      : "Open owner mode";
+    authStatusPill.title = status.warning || (status.enabled ? "Role-protected API is active." : "Set TIMLOCK_OWNER_PASSWORD to enforce sign-in.");
+  }
+  if (logoutButton) logoutButton.hidden = !(status.enabled && status.authenticated);
+  authRoleButtons.forEach((button) => {
+    const active = button.dataset.authRole === authRoleSelection;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.disabled = Boolean(status.enabled && status.roles && !status.roles[button.dataset.authRole]);
+  });
+  if (authStatus && locked && !authStatus.textContent) {
+    authStatus.textContent = status.roles?.owner ? "Owner password required." : "Auth is enabled but no owner login is configured.";
+  }
+}
+
+async function loadAuthStatus() {
+  try {
+    latestAuthStatus = await api("/api/auth/status", { timeoutMs: 6000, noStatus: true, noFallback: true });
+    if (latestAuthStatus.enabled && latestAuthStatus.authenticated) {
+      applyAppMode(latestAuthStatus.role === "subscriber" ? "subscriber" : loadAppMode());
+    } else if (!latestAuthStatus.enabled) {
+      applyAppMode(loadAppMode());
+    }
+  } catch (error) {
+    latestAuthStatus = { enabled: true, authenticated: false, role: "guest", mode: "locked", warning: error.message };
+  } finally {
+    renderAuthStatus();
+  }
+}
+
+async function signIn(role, password) {
+  if (authStatus) authStatus.textContent = "Signing in...";
+  latestAuthStatus = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ role, password }),
+    timeoutMs: 8000,
+    noStatus: true,
+    noFallback: true,
+  });
+  renderAuthStatus();
+  applyAppMode(latestAuthStatus.role === "subscriber" ? "subscriber" : "owner");
+  if (authStatus) authStatus.textContent = "Signed in.";
+  await Promise.allSettled([loadJobs(), loadAiAdvisor(), loadAiMemory(), loadAiCommander({ quiet: true }), loadStorageStatus({ quiet: true })]);
+}
+
+async function signOut() {
+  await api("/api/auth/logout", { method: "POST", timeoutMs: 6000, noStatus: true, noFallback: true }).catch(() => null);
+  latestAuthStatus = { enabled: true, authenticated: false, role: "guest", mode: "locked" };
+  renderAuthStatus();
+  applyAppMode("subscriber");
 }
 
 function updateInstallButton() {
@@ -7852,6 +7928,78 @@ function renderAiAdvisorPanel(advisor = latestAiAdvisor) {
   `;
 }
 
+function renderAiCommanderPanel(commander = latestAiCommander) {
+  if (!aiCommanderPanel) return;
+  if (!commander) {
+    aiCommanderPanel.innerHTML = `
+      <article class="ai-commander-card loading">
+        <div class="ai-score mini warn"><strong>--</strong><span>ready</span></div>
+        <div>
+          <p class="eyebrow">Field Commander</p>
+          <h3>Waiting for job context</h3>
+          <p>Open a VIN, Workbench, Part History, Proof Vault, Lishi, or Code Desk result and the AI will build a command plan from it.</p>
+        </div>
+      </article>
+    `;
+    return;
+  }
+  const scoreClass = aiAdvisorScoreClass(commander.readinessScore);
+  const actions = commander.actionStack || [];
+  const risks = commander.riskRadar || [];
+  const cards = commander.dataScorecards || [];
+  const learning = commander.learningLoop || {};
+  aiCommanderPanel.innerHTML = `
+    <section class="ai-commander-card">
+      <div class="ai-score mini ${scoreClass}">
+        <strong>${escapeHtml(commander.readinessScore ?? 0)}</strong>
+        <span>ready</span>
+      </div>
+      <div>
+        <p class="eyebrow">${escapeHtml(commander.title || "Field Commander")}</p>
+        <h3>${escapeHtml(commander.headline || "Command plan ready")}</h3>
+        <p>${escapeHtml(commander.mission?.decision || "Use this as the job command layer and verify the field details.")}</p>
+      </div>
+      <button class="secondary-action small" type="button" id="refreshAiCommanderInline">Refresh</button>
+    </section>
+    ${
+      cards.length
+        ? `<div class="ai-command-scorecards">${cards.map((card) => `
+            <article class="${escapeHtml(card.tone || "")}">
+              <span>${escapeHtml(card.label)}</span>
+              <strong>${escapeHtml(card.value)}</strong>
+            </article>
+          `).join("")}</div>`
+        : ""
+    }
+    <div class="ai-command-grid">
+      <section>
+        <p class="eyebrow">Next moves</p>
+        ${actions.slice(0, 5).map((action) => `
+          <article>
+            <div>
+              <strong>${escapeHtml(action.title)}</strong>
+              <p>${escapeHtml(action.detail)}</p>
+            </div>
+            <button class="secondary-action small" type="button" data-ai-action-target="${escapeHtml(action.target || "ai")}" data-ai-action-prompt="${escapeHtml(action.prompt || "")}">Open</button>
+          </article>
+        `).join("") || `<article><div><strong>No command actions yet</strong><p>Run a search or build a workbench packet first.</p></div></article>`}
+      </section>
+      <section>
+        <p class="eyebrow">Risk radar</p>
+        ${(risks.length ? risks : ["No major risk flags beyond standard authorization."]).slice(0, 5).map((risk) => `
+          <article>
+            <div>
+              <strong>${escapeHtml(risk)}</strong>
+              <p>${escapeHtml(learning.trainingInstruction || "Save the final outcome so the next recommendation improves.")}</p>
+            </div>
+          </article>
+        `).join("")}
+      </section>
+    </div>
+  `;
+  aiCommanderPanel.querySelector("#refreshAiCommanderInline")?.addEventListener("click", () => loadAiCommander());
+}
+
 function renderAiActions(actions = [], prompts = []) {
   const actionButtons = actions
     .slice(0, 5)
@@ -8042,6 +8190,7 @@ function updateAiContextUi() {
     aiQuickPrompts.innerHTML = prompts.map((prompt) => `<button type="button" data-ai-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`).join("");
   }
   if (aiContextPanel) aiContextPanel.innerHTML = renderAiContextPanel(context);
+  renderAiCommanderPanel();
   renderAiAdvisorPanel();
   renderAiResponsePanel();
 }
@@ -8070,6 +8219,7 @@ async function askAi(prompt, { open = true } = {}) {
     payload.prompt = cleanPrompt;
     latestAiResponse = payload;
     latestAiMemory = payload.memory || latestAiMemory;
+    loadAiCommander({ quiet: true });
     chatLog.splice(chatLog.length - 1, 1, {
       role: "assistant",
       title: payload.title || "AI Bench",
@@ -8180,7 +8330,7 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 async function api(path, options = {}) {
   let lastError = null;
   const urls = apiUrls(path);
-  const { timeoutMs, noStatus, headers = {}, ...fetchOptions } = options;
+  const { timeoutMs, noStatus, noFallback = false, headers = {}, ...fetchOptions } = options;
   const defaultTimeout = path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup") ? 15000 : 12000;
   const requestTimeout = Number(timeoutMs) || defaultTimeout;
 
@@ -8199,7 +8349,11 @@ async function api(path, options = {}) {
         throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
       }
       if (!response.ok) {
-        throw new Error(payload.error || `Request failed with ${response.status}`);
+        const requestError = new Error(payload.error || `Request failed with ${response.status}`);
+        requestError.code = payload.code || "";
+        requestError.auth = payload.auth || null;
+        requestError.status = response.status;
+        throw requestError;
       }
       if (!noStatus && path !== "/api/health" && navigator.onLine !== false) {
         if (latestApiHealth?.status === "degraded") latestApiHealth = null;
@@ -8207,14 +8361,23 @@ async function api(path, options = {}) {
       }
       return payload;
     } catch (error) {
+      if (error?.auth) {
+        latestAuthStatus = error.auth;
+        renderAuthStatus();
+      }
+      if (["AUTH_REQUIRED", "OWNER_REQUIRED", "BAD_LOGIN", "ROLE_NOT_CONFIGURED"].includes(error?.code)) {
+        throw error;
+      }
       const message =
         error?.name === "AbortError"
           ? `The app server took longer than ${Math.round(requestTimeout / 1000)} seconds for ${path}.`
           : error.message;
       lastError = new Error(message);
+      if (error?.code) lastError.code = error.code;
       if (!noStatus && path !== "/api/health") {
         setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
       }
+      if (noFallback) throw lastError;
       if (!url.startsWith("http")) continue;
       throw lastError;
     }
@@ -8248,6 +8411,9 @@ function bootTask(label, task) {
     .then(task)
     .catch((error) => {
       console.warn(`${label} failed`, error);
+      if (["AUTH_REQUIRED", "OWNER_REQUIRED"].includes(error?.code)) {
+        return;
+      }
       if (navigator.onLine !== false) {
         latestApiHealth = { status: "degraded", error: error.message };
         updateConnectionStatus();
@@ -8310,6 +8476,46 @@ async function loadAiAdvisor() {
   }
 }
 
+async function loadAiCommander({ quiet = false } = {}) {
+  if (!aiCommanderPanel) return null;
+  try {
+    if (!quiet) {
+      aiCommanderPanel.innerHTML = `
+        <article class="ai-commander-card loading">
+          <div class="ai-score mini warn"><strong>...</strong><span>AI</span></div>
+          <div>
+            <p class="eyebrow">Field Commander</p>
+            <h3>Building command plan</h3>
+            <p>Reading active screen, proof, parts, coverage, saved jobs, AI feedback, and shop rules.</p>
+          </div>
+        </article>
+      `;
+    }
+    const payload = await api("/api/ai/commander", {
+      method: "POST",
+      body: JSON.stringify({ context: buildAiClientContext(), jobs: localArchivedJobs() }),
+      timeoutMs: 14000,
+      noStatus: true,
+    });
+    latestAiCommander = payload;
+    renderAiCommanderPanel(payload);
+    return payload;
+  } catch (error) {
+    latestAiCommander = {
+      title: "Field Commander unavailable",
+      headline: "AI command layer is offline",
+      readinessScore: 0,
+      readinessLabel: "Offline",
+      mission: { decision: error.message },
+      actionStack: [],
+      riskRadar: [error.message],
+      dataScorecards: [],
+    };
+    renderAiCommanderPanel(latestAiCommander);
+    return null;
+  }
+}
+
 async function loadVehicles() {
   const payload = await api("/api/vehicles");
   vehicles = payload.vehicles;
@@ -8362,6 +8568,28 @@ modeButtons.forEach((button) => {
     if (latestGlobalSearch && globalSearchQuery()) runGlobalSearch();
   });
 });
+
+authRoleButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    authRoleSelection = button.dataset.authRole === "subscriber" ? "subscriber" : "owner";
+    if (authStatus) authStatus.textContent = authRoleSelection === "owner" ? "Owner password required." : "Subscriber password required.";
+    renderAuthStatus();
+  });
+});
+
+authForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const data = new FormData(authForm);
+  const password = String(data.get("password") || "");
+  try {
+    await signIn(authRoleSelection, password);
+    authForm.reset();
+  } catch (error) {
+    if (authStatus) authStatus.textContent = error.message;
+  }
+});
+
+logoutButton?.addEventListener("click", signOut);
 
 navItems.forEach((item) => {
   item.addEventListener("click", () => showView(item.dataset.view));
@@ -8440,6 +8668,7 @@ codeDeskAutoForm?.addEventListener("submit", (event) => {
   loadCodeDeskAutoBaseline();
 });
 exportCodeDeskAutoButton?.addEventListener("click", exportCodeDeskAutoBaseline);
+refreshAiCommanderButton?.addEventListener("click", () => loadAiCommander());
 
 lishiLookupForm?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -9322,13 +9551,17 @@ renderPartHistoryRecents();
 renderCodeDesk();
 renderStorageStatus();
 renderAiAdvisorPanel();
+renderAiCommanderPanel();
+renderAuthStatus();
 updateConnectionStatus();
 refreshApiHealth({ quiet: true });
 window.setInterval(() => refreshApiHealth({ quiet: true }), 60000);
+bootTask("auth status", loadAuthStatus);
 bootTask("jobs", loadJobs);
 bootTask("coverage dashboard", loadCoverageDashboard);
 bootTask("ai advisor", loadAiAdvisor);
 bootTask("ai memory", loadAiMemory);
+bootTask("ai commander", () => loadAiCommander({ quiet: true }));
 bootTask("vehicles", loadVehicles);
 bootTask("insights", loadInsights);
 bootTask("key intelligence", loadKeyIntelligence);

@@ -13,6 +13,29 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <section class="auth-gate" id="authGate" hidden>
+      <form class="auth-card" id="authForm">
+        <div class="brand mini">
+          <div class="brand-mark">TL</div>
+          <div>
+            <p class="eyebrow">Secure field access</p>
+            <h1>TimLock-App</h1>
+          </div>
+        </div>
+        <h2>Sign in to unlock the shop workspace</h2>
+        <p>Owner mode protects reference lists, backups, proof uploads, supplier settings, and raw job memory. Subscriber mode keeps the field tools clean.</p>
+        <div class="mode-toggle auth-role-toggle" aria-label="Sign in role">
+          <button type="button" class="active" data-auth-role="owner">Owner</button>
+          <button type="button" data-auth-role="subscriber">Subscriber</button>
+        </div>
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="current-password" />
+        </label>
+        <button class="primary-action" type="submit">Sign in</button>
+        <div class="form-status" id="authStatus"></div>
+      </form>
+    </section>
     <div class="app-shell">
       <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="primarySidebar">
         <span></span>
@@ -71,6 +94,8 @@
         <section class="app-status-banner" id="appStatusBanner">
           <button class="secondary-action small app-back-button" type="button" id="appBackButton" hidden>Back</button>
           <span id="connectionStatus">Online</span>
+          <span id="authStatusPill">Open owner mode</span>
+          <button class="secondary-action small" type="button" id="logoutButton" hidden>Sign out</button>
           <button class="secondary-action small" type="button" id="installAppButton">Install app</button>
         </section>
         <section class="ai-route-card" id="aiRouteCard">
@@ -829,12 +854,14 @@
                   <h3>AI Bench</h3>
                 </div>
                 <div class="ai-bench-actions">
+                  <button class="secondary-action small" type="button" id="refreshAiCommander">Field Commander</button>
                   <button class="secondary-action small" type="button" data-ai-prompt="Run a complete locksmith field audit for the current screen.">Full Audit</button>
                   <button class="secondary-action small" type="button" data-ai-prompt="Build a dispatch plan from the current screen context.">Dispatch Plan</button>
                   <button class="secondary-action small" type="button" data-ai-prompt="Create a customer-safe note from the current screen context.">Customer Note</button>
                 </div>
               </div>
               <div class="ai-context-chip-row" id="aiContextChips"></div>
+              <div class="ai-commander-panel" id="aiCommanderPanel"></div>
               <div class="ai-opportunity-panel" id="aiOpportunityPanel"></div>
               <div class="ai-prompt-grid" id="aiQuickPrompts"></div>
               <div class="chat-log" id="chatLog"></div>

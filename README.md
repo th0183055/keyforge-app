@@ -33,11 +33,21 @@ Before moving an existing live app to the persistent store, export a backup from
 
 Owners can check this inside **Settings -> Backup & Sync**. That panel shows the live job store mode, Proof Vault attachment mode, AI memory counts, and warnings when the app is still using repo-local or server-local storage. Use **Export Server Backup** before changing hosting storage, then **Import Server Backup** after the new storage is live.
 
+## Owner and Subscriber Access
+
+By default, local development stays open. For a shared or subscriber-facing deployment, set:
+
+- `TIMLOCK_OWNER_PASSWORD`
+- Optional: `TIMLOCK_SUBSCRIBER_PASSWORD`
+- Optional: `TIMLOCK_AUTH_SECRET`
+
+When auth is configured, the backend requires sign-in for API access and blocks subscriber sessions from owner-only tools such as raw reference lists, backups/imports, supplier settings, proof-file uploads/deletes, worked-job writes, and AI memory/rule writes.
+
 ## What Exists Now
 
 - Clickable dashboard
 - Job intake and job board backed by a local API
-- AI Bench assistant route with safety refusals and audit logging
+- AI Bench assistant route with Field Commander, safety refusals, job-context packets, feedback learning, shop rules, and audit logging
 - Vehicle reference workspace
 - VIN lookup with NHTSA decode, local vPIC catalog matching, key reference guidance, and worked-job learning
 - Part History, Proof Vault, and programmer coverage proof from saved jobs
@@ -100,5 +110,5 @@ The vPIC catalog identifies vehicle applications. Locksmith-specific data such a
 Upgrade the local backend into a production-ready service:
 
 - SQLite/Postgres data model
-- Auth and shop verification
 - OpenAI-backed AI endpoint with audit logging
+- Shop/team tenancy and verified locksmith onboarding

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -28,6 +28,8 @@ const publicReferenceSourcesPath = path.join(mutableDataDir, "public-reference-s
 const proofAttachmentsPath = path.join(mutableDataDir, "proof-attachments.json");
 const proofAttachmentFileDir = path.join(mutableDataDir, "proof-attachments");
 const localSecretPath = path.join(mutableDataDir, ".lockforge-secret");
+const authCookieName = "timlock_session";
+const authMaxAgeSeconds = Number(process.env.TIMLOCK_AUTH_TTL_SECONDS || 60 * 60 * 24 * 14);
 const attachmentUploadMaxBytes = Number(process.env.TIMLOCK_ATTACHMENT_MAX_BYTES || 5_000_000);
 const bootedAt = new Date().toISOString();
 const staticJsonCache = new Map();
@@ -240,6 +242,122 @@ async function localVaultKey() {
     }
   }
   return createHash("sha256").update(secret).digest();
+}
+
+async function authSigningKey() {
+  const configured = cleanString(process.env.TIMLOCK_AUTH_SECRET || process.env.LOCKFORGE_SECRET);
+  if (configured) return createHash("sha256").update(configured).digest();
+  return localVaultKey();
+}
+
+function authPasswordForRole(role) {
+  if (role === "subscriber") {
+    return cleanString(process.env.TIMLOCK_SUBSCRIBER_PASSWORD || process.env.TIMLOCK_SUBSCRIBER_PIN);
+  }
+  return cleanString(process.env.TIMLOCK_OWNER_PASSWORD || process.env.TIMLOCK_OWNER_PIN);
+}
+
+function authEnabled() {
+  return Boolean(authPasswordForRole("owner") || authPasswordForRole("subscriber"));
+}
+
+function safeTextEquals(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
+}
+
+function base64UrlJson(payload) {
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function parseCookies(request) {
+  const header = request.headers.cookie || "";
+  const cookies = {};
+  for (const part of header.split(";")) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+    if (!rawName) continue;
+    cookies[rawName] = decodeURIComponent(rawValue.join("=") || "");
+  }
+  return cookies;
+}
+
+async function signAuthSession(role) {
+  const now = Math.floor(Date.now() / 1000);
+  const body = base64UrlJson({
+    role: role === "subscriber" ? "subscriber" : "owner",
+    iat: now,
+    exp: now + authMaxAgeSeconds,
+    sid: randomUUID(),
+  });
+  const signature = createHmac("sha256", await authSigningKey()).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+async function verifyAuthSession(token) {
+  const [body, signature] = cleanString(token).split(".");
+  if (!body || !signature) return null;
+  const expected = createHmac("sha256", await authSigningKey()).update(body).digest("base64url");
+  if (!safeTextEquals(signature, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (!["owner", "subscriber"].includes(payload.role)) return null;
+    if (Number(payload.exp || 0) < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function requestAuth(request) {
+  const enabled = authEnabled();
+  if (!enabled) {
+    return {
+      enabled: false,
+      authenticated: true,
+      role: "owner",
+      mode: "open-dev",
+      warning: "Set TIMLOCK_OWNER_PASSWORD before sharing this app with subscribers.",
+    };
+  }
+  const session = await verifyAuthSession(parseCookies(request)[authCookieName]);
+  if (session?.role) {
+    return {
+      enabled: true,
+      authenticated: true,
+      role: session.role,
+      mode: "session",
+      expiresAt: new Date(Number(session.exp) * 1000).toISOString(),
+    };
+  }
+  return {
+    enabled: true,
+    authenticated: false,
+    role: "guest",
+    mode: "locked",
+  };
+}
+
+function authCookie(value, request, maxAge = authMaxAgeSeconds) {
+  const secure =
+    request.headers["x-forwarded-proto"] === "https" ||
+    /^https:/i.test(cleanString(request.headers.origin || request.headers.referer));
+  return `${authCookieName}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+}
+
+function authPublicStatus(auth) {
+  return {
+    enabled: Boolean(auth.enabled),
+    authenticated: Boolean(auth.authenticated),
+    role: auth.role,
+    mode: auth.mode,
+    expiresAt: auth.expiresAt || "",
+    warning: auth.warning || "",
+    roles: {
+      owner: Boolean(authPasswordForRole("owner")),
+      subscriber: Boolean(authPasswordForRole("subscriber")),
+    },
+  };
 }
 
 async function encryptSecret(value) {
@@ -1294,18 +1412,19 @@ async function readJsonBody(request) {
   return body ? JSON.parse(body) : {};
 }
 
-function sendJson(response, statusCode, payload) {
+function sendJson(response, statusCode, payload, headers = {}) {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Content-Type": "application/json; charset=utf-8",
+    ...headers,
   });
   response.end(JSON.stringify(payload));
 }
 
-function sendError(response, statusCode, message) {
-  sendJson(response, statusCode, { error: message });
+function sendError(response, statusCode, message, details = {}) {
+  sendJson(response, statusCode, { error: message, ...details });
 }
 
 async function jsonFileHealth(label, filePath, countKey = "", optional = false) {
@@ -1470,6 +1589,9 @@ async function buildStorageStatus() {
   if (attachmentMode !== "cloudflare-r2" && !dataDirExternal) {
     warnings.push("Server-local proof files will not follow users across devices unless persistent storage or R2 is configured.");
   }
+  if (!authEnabled()) {
+    warnings.push("Auth is not enforced. Set TIMLOCK_OWNER_PASSWORD before handing this app to subscribers.");
+  }
 
   const counts = {
     jobs: store.jobs.length,
@@ -1501,6 +1623,11 @@ async function buildStorageStatus() {
         String(process.env.TIMLOCK_PRIVATE_PROOF_FILES || "").toLowerCase() !== "true" &&
         String(process.env.R2_PUBLIC_PREVIEW || "").toLowerCase() !== "false",
       r2,
+      auth: {
+        enabled: authEnabled(),
+        ownerLoginConfigured: Boolean(authPasswordForRole("owner")),
+        subscriberLoginConfigured: Boolean(authPasswordForRole("subscriber")),
+      },
     },
     counts,
     warnings,
@@ -3525,6 +3652,107 @@ function buildAiAdvisor({ jobs = [], partsReference = {}, auditLog = [], proofAt
       needsOutcome: coverage.gaps?.needsOutcome?.length || 0,
       recentJobsWithoutFiles: recentJobsWithoutFiles.length,
     },
+  };
+}
+
+function buildAiFieldCommander({ context = {}, store = {}, jobs = [], partsReference = {}, proofAttachments = {} }) {
+  const prompt = "Run TimLock Field Commander for the current job context.";
+  const memory = aiMemorySummary(store, context, prompt);
+  const snapshot = aiContextSnapshot(context);
+  const checklist = aiChecklistForIntent("next", snapshot, memory);
+  const fieldPacket = aiFieldPacket("next", snapshot, checklist, memory);
+  const advisor = buildAiAdvisor({
+    jobs,
+    partsReference,
+    auditLog: store.auditLog,
+    feedback: store.aiFeedback,
+    shopRules: store.shopRules,
+    preferences: store.aiPreferences,
+    proofAttachments,
+  });
+  const subject = snapshot.vehicleTitle || snapshot.query || snapshot.workbenchTitle || "current job";
+  const routeActions = (fieldPacket.routePlan || []).map((route) =>
+    aiAdvisorAction({
+      id: `route-${route.target || route.label}`,
+      title: route.label || route.target || "Open tool",
+      detail: route.reason || "Use this tool to strengthen the active job packet.",
+      target: route.target || "workbench",
+      prompt: route.prompt || `Audit ${subject} in ${route.label || route.target || "this tool"}.`,
+      impact: route.status === "required" ? "high" : "medium",
+      priority: route.status === "required" ? 92 : 70,
+      source: "Field Commander route",
+    }),
+  );
+  const combinedActions = [
+    ...(fieldPacket.blockers || []).map((blocker, index) =>
+      aiAdvisorAction({
+        id: `blocker-${index}`,
+        title: blocker,
+        detail: "Resolve this before relying on the job packet.",
+        target: blocker.toLowerCase().includes("proof") || blocker.toLowerCase().includes("authorization") ? "proof-vault" : "workbench",
+        prompt: `Help me resolve this blocker: ${blocker}`,
+        impact: "high",
+        priority: 100 - index,
+        source: "Risk radar",
+      }),
+    ),
+    ...routeActions,
+    ...(advisor.actions || []).slice(0, 4),
+  ];
+  const actionStack = [];
+  const seenActions = new Set();
+  for (const action of combinedActions.sort((a, b) => (b.priority || 0) - (a.priority || 0))) {
+    const key = `${action.title}|${action.target}`;
+    if (seenActions.has(key)) continue;
+    seenActions.add(key);
+    actionStack.push(action);
+    if (actionStack.length >= 8) break;
+  }
+  const riskRadar = uniqueCleanValues([
+    ...(fieldPacket.blockers || []).map((item) => `Blocker: ${item}`),
+    ...(fieldPacket.warnings || []).map((item) => `Warning: ${item}`),
+    ...(fieldPacket.proofGaps || []).slice(0, 4).map((item) => `Proof: ${item}`),
+  ]).slice(0, 10);
+  const dataScorecards = [
+    { label: "Vehicle context", value: snapshot.vehicleTitle || snapshot.vin ? "active" : "missing", tone: snapshot.vehicleTitle || snapshot.vin ? "ready" : "danger" },
+    { label: "Search context", value: snapshot.query || snapshot.workbenchTitle ? "active" : "missing", tone: snapshot.query || snapshot.workbenchTitle ? "ready" : "warn" },
+    { label: "Proof vault", value: `${snapshot.proofVault?.matchingJobs ?? 0} jobs / ${snapshot.proofVault?.files ?? 0} files`, tone: snapshot.proofVault?.files ? "ready" : "warn" },
+    { label: "Part history", value: `${snapshot.partHistory?.matchedJobs ?? 0} jobs`, tone: snapshot.partHistory?.matchedJobs ? "ready" : "warn" },
+    { label: "AI memory", value: `${memory.feedback?.used || 0} used / ${memory.shopRules?.total || 0} rules`, tone: memory.shopRules?.total ? "ready" : "warn" },
+    { label: "Coverage proof", value: snapshot.coverage?.observedCoveragePercent !== undefined ? `${snapshot.coverage.observedCoveragePercent}%` : "not loaded", tone: Number(snapshot.coverage?.observedCoveragePercent || 0) >= 70 ? "ready" : "warn" },
+  ];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    title: "TimLock Field Commander",
+    headline:
+      fieldPacket.readinessScore >= 85
+        ? `${subject}: ready for normal field verification`
+        : fieldPacket.blockers?.length
+          ? `${subject}: fix blockers before dispatch`
+          : `${subject}: usable, but tighten proof before trusting it`,
+    mission: {
+      subject,
+      decision: fieldPacket.dispatchDecision,
+      nextBestAction: fieldPacket.nextBestAction,
+      customerSafeNote: fieldPacket.copyBlocks?.customerNote || "",
+      workOrderNote: fieldPacket.copyBlocks?.workOrderNote || "",
+    },
+    readinessScore: fieldPacket.readinessScore,
+    readinessLabel: fieldPacket.readinessLabel,
+    personality: memory.personality,
+    fieldPacket,
+    actionStack,
+    riskRadar,
+    dataScorecards,
+    learningLoop: {
+      signals: memory.learningSignals || [],
+      shopRules: memory.shopRules?.relevant || [],
+      corrections: memory.corrections || [],
+      saveBackChecklist: fieldPacket.saveBackChecklist || [],
+      trainingInstruction: "Every worked job, proof attachment, AI feedback mark, and saved shop rule changes future recommendations.",
+    },
+    advisor,
   };
 }
 
@@ -8289,11 +8517,96 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   };
 }
 
+function isOwnerOnlyApiRequest(request, pathname) {
+  const method = request.method || "GET";
+  const writeMethod = method !== "GET";
+  const ownerOnlyPrefixes = [
+    "/api/storage",
+    "/api/reference-lists",
+    "/api/reference-vault",
+    "/api/public-reference-sources",
+    "/api/supplier-accounts",
+    "/api/audit-log",
+  ];
+  if (ownerOnlyPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return true;
+  if (pathname === "/api/jobs" || pathname.startsWith("/api/jobs/")) return true;
+  if (pathname === "/api/jobs/sync" || pathname === "/api/part-outcomes" || pathname === "/api/worked-jobs/import") return true;
+  if (pathname.startsWith("/api/proof-vault/attachments") && writeMethod) return true;
+  if (pathname.startsWith("/api/ai/feedback") || pathname.startsWith("/api/ai/shop-rules")) return true;
+  if (pathname === "/api/key-intelligence" && writeMethod) return true;
+  return false;
+}
+
+async function enforceApiAuth(request, response, pathname) {
+  const auth = await requestAuth(request);
+  if (!auth.enabled) return auth;
+  if (!auth.authenticated) {
+    sendError(response, 401, "Sign in required.", { code: "AUTH_REQUIRED", auth: authPublicStatus(auth) });
+    return null;
+  }
+  if (auth.role !== "owner" && isOwnerOnlyApiRequest(request, pathname)) {
+    sendError(response, 403, "Owner access required for this tool.", { code: "OWNER_REQUIRED", auth: authPublicStatus(auth) });
+    return null;
+  }
+  return auth;
+}
+
+async function handleAuthApi(request, response, pathname) {
+  if (request.method === "GET" && pathname === "/api/auth/status") {
+    sendJson(response, 200, authPublicStatus(await requestAuth(request)));
+    return true;
+  }
+
+  if (request.method === "POST" && pathname === "/api/auth/login") {
+    const body = await readJsonBody(request);
+    const role = body.role === "subscriber" ? "subscriber" : "owner";
+    if (!authEnabled()) {
+      sendJson(response, 200, authPublicStatus(await requestAuth(request)));
+      return true;
+    }
+    const expected = authPasswordForRole(role);
+    if (!expected) {
+      sendError(response, 403, `${role === "owner" ? "Owner" : "Subscriber"} login is not configured.`, { code: "ROLE_NOT_CONFIGURED" });
+      return true;
+    }
+    if (!safeTextEquals(body.password || body.pin, expected)) {
+      sendError(response, 401, "Incorrect password.", { code: "BAD_LOGIN" });
+      return true;
+    }
+    const token = await signAuthSession(role);
+    const session = await verifyAuthSession(token);
+    sendJson(
+      response,
+      200,
+      authPublicStatus({ enabled: true, authenticated: true, role, mode: "session", expiresAt: new Date(Number(session.exp) * 1000).toISOString() }),
+      { "Set-Cookie": authCookie(token, request) },
+    );
+    return true;
+  }
+
+  if (request.method === "POST" && pathname === "/api/auth/logout") {
+    sendJson(
+      response,
+      200,
+      { ok: true, auth: authPublicStatus({ enabled: authEnabled(), authenticated: false, role: "guest", mode: "locked" }) },
+      { "Set-Cookie": authCookie("", request, 0) },
+    );
+    return true;
+  }
+
+  return false;
+}
+
 async function handleApi(request, response, pathname) {
+  if (await handleAuthApi(request, response, pathname)) return;
+
   if (request.method === "GET" && pathname === "/api/health") {
     sendJson(response, 200, await buildHealthStatus());
     return;
   }
+
+  const auth = await enforceApiAuth(request, response, pathname);
+  if (!auth) return;
 
   if (request.method === "GET" && pathname === "/api/storage/status") {
     sendJson(response, 200, await buildStorageStatus());
@@ -8547,6 +8860,25 @@ async function handleApi(request, response, pathname) {
         feedback: store.aiFeedback,
         shopRules: store.shopRules,
         preferences: store.aiPreferences,
+        proofAttachments: groupAttachmentsByJob(proofAttachmentVault.attachments),
+      }),
+    );
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/ai/commander") {
+    const body = await readJsonBody(request);
+    const partsReference = await readPartsCrossReference();
+    const proofAttachmentVault = await readProofAttachments();
+    const jobs = mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []);
+    sendJson(
+      response,
+      200,
+      buildAiFieldCommander({
+        context: body.context || {},
+        store,
+        jobs,
+        partsReference,
         proofAttachments: groupAttachmentsByJob(proofAttachmentVault.attachments),
       }),
     );
