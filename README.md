@@ -56,8 +56,12 @@ Attachments work locally without extra setup. For Render production, set Cloudfl
 - `R2_SECRET_ACCESS_KEY`
 - Optional: `R2_PUBLIC_BASE_URL`
 - Optional: `TIMLOCK_ATTACHMENT_MAX_BYTES`
+- Optional: `TIMLOCK_PRIVATE_PROOF_FILES=true` to force proof previews through the app server instead of a public R2 URL
+- Optional: `R2_PUBLIC_PREVIEW=false` to keep R2 private while still using R2 object storage
 
 Server backups include Proof Vault attachment metadata, but they do not embed raw photo/PDF bytes. Use Cloudflare R2 for durable cross-device proof files, or keep a Render persistent disk attached for server-local files.
+
+Use **Proof Vault -> Migrate Local Proof** or **Settings -> Backup & Sync -> Migrate Browser Proof** after switching to server/R2 storage. That moves browser-local photos/docs into the configured backend. Use **Run Storage Test** to verify a write/read/delete round-trip against the active storage path.
 
 ## Code Desk Imports
 

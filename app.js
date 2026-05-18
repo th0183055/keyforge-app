@@ -39,6 +39,7 @@ let latestAiResponse = null;
 let latestAiAdvisor = null;
 let latestAiMemory = null;
 let latestStorageStatus = null;
+let latestStorageDiagnostics = null;
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -134,6 +135,8 @@ const supplierSelect = document.querySelector("#supplierSelect");
 const storageStatusPanel = document.querySelector("#storageStatusPanel");
 const storageSettingsStatus = document.querySelector("#storageSettingsStatus");
 const refreshStorageStatusButton = document.querySelector("#refreshStorageStatus");
+const runStorageDiagnosticsButton = document.querySelector("#runStorageDiagnostics");
+const migrateStorageProofButton = document.querySelector("#migrateStorageProof");
 const exportServerBackupButton = document.querySelector("#exportServerBackup");
 const importServerBackupButton = document.querySelector("#importServerBackup");
 const serverBackupImportInput = document.querySelector("#serverBackupImportInput");
@@ -159,6 +162,7 @@ const proofVaultForm = document.querySelector("#proofVaultForm");
 const proofVaultStatus = document.querySelector("#proofVaultStatus");
 const proofVault = document.querySelector("#proofVault");
 const syncProofVaultButton = document.querySelector("#syncProofVault");
+const migrateProofVaultButton = document.querySelector("#migrateProofVault");
 const exportProofVaultButton = document.querySelector("#exportProofVault");
 const importProofVaultButton = document.querySelector("#importProofVault");
 const proofVaultImportInput = document.querySelector("#proofVaultImportInput");
@@ -3923,6 +3927,29 @@ function proofVaultAttachmentCount(attachments = proofVaultAttachments()) {
   return Object.values(attachments).reduce((count, items) => count + (Array.isArray(items) ? items.length : 0), 0);
 }
 
+function browserProofAttachmentEntries() {
+  return Object.entries(proofVaultLocalAttachments()).flatMap(([jobId, items]) =>
+    (Array.isArray(items) ? items : [])
+      .filter((attachment) => attachment?.id && attachment.dataUrl)
+      .map((attachment) => ({ ...attachment, jobId })),
+  );
+}
+
+function browserProofAttachmentCount() {
+  return browserProofAttachmentEntries().length;
+}
+
+function removeBrowserProofAttachments(sourceIds = []) {
+  const ids = new Set(sourceIds.filter(Boolean));
+  if (!ids.size) return;
+  const attachments = proofVaultLocalAttachments();
+  Object.keys(attachments).forEach((jobId) => {
+    attachments[jobId] = attachmentsForJob(jobId, attachments).filter((attachment) => !ids.has(attachment.id));
+    if (!attachments[jobId].length) delete attachments[jobId];
+  });
+  saveProofVaultAttachments(attachments);
+}
+
 function attachmentsForJob(jobId, attachments = proofVaultAttachments()) {
   return Array.isArray(attachments[jobId]) ? attachments[jobId] : [];
 }
@@ -4005,6 +4032,21 @@ function renderProofVaultRecord(record, attachments) {
   `;
 }
 
+function renderProofMigrationPanel() {
+  const localCount = browserProofAttachmentCount();
+  if (!localCount) return "";
+  return `
+    <section class="proof-migration-panel">
+      <div>
+        <p class="eyebrow">Browser-local proof</p>
+        <strong>${escapeHtml(`${localCount} attachment${localCount === 1 ? "" : "s"} on this device`)}</strong>
+        <p>Move these files into server/R2 storage so they can follow the job across PC and phone.</p>
+      </div>
+      <button class="secondary-action small" type="button" data-migrate-local-proof>Migrate Now</button>
+    </section>
+  `;
+}
+
 function renderProofVault(payload = {}) {
   if (!proofVault) return;
   latestProofVault = payload;
@@ -4040,6 +4082,7 @@ function renderProofVault(payload = {}) {
       </div>
       <button class="secondary-action small" type="button" data-copy-proof-vault-summary>Copy Packet Summary</button>
     </section>
+    ${renderProofMigrationPanel()}
     ${
       payload.partHistory?.programmerEvidence?.programmers?.length
         ? `<section class="history-section"><div class="panel-header tight"><div><p class="eyebrow">Programmer evidence</p><h3>${escapeHtml(payload.partHistory.primaryIdentifier || payload.query)}</h3></div></div>${renderPartHistoryCoverage(payload.partHistory.programmerEvidence)}</section>`
@@ -4164,6 +4207,61 @@ async function addProofAttachment(jobId, file) {
   if (proofVaultStatus) proofVaultStatus.textContent = `Attached browser-local proof to ${jobId}.`;
 }
 
+async function migrateBrowserProofAttachments() {
+  const entries = browserProofAttachmentEntries();
+  if (!entries.length) {
+    if (proofVaultStatus) proofVaultStatus.textContent = "No browser-local proof needs migration.";
+    if (storageSettingsStatus) storageSettingsStatus.textContent = "No browser-local proof needs migration.";
+    return;
+  }
+
+  await syncLocalJobsToServer();
+  let uploaded = 0;
+  let skipped = 0;
+  let failed = 0;
+  const migratedIds = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const progress = `Migrating proof ${index + 1} of ${entries.length}...`;
+    if (proofVaultStatus) proofVaultStatus.textContent = progress;
+    if (storageSettingsStatus) storageSettingsStatus.textContent = progress;
+    try {
+      const payload = await api("/api/proof-vault/attachments/migrate", {
+        method: "POST",
+        body: JSON.stringify({
+          attachments: [
+            {
+              ...entry,
+              sourceId: entry.id,
+              id: entry.id,
+              jobId: entry.jobId,
+            },
+          ],
+        }),
+        timeoutMs: 30000,
+      });
+      proofVaultStorageMode = payload.storage || proofVaultStorageMode;
+      proofVaultServerAttachments = payload.byJob || proofVaultServerAttachments;
+      const moved = [...(payload.uploaded || []), ...(payload.skipped || [])].map((item) => item.sourceId).filter(Boolean);
+      migratedIds.push(...moved);
+      uploaded += payload.summary?.uploaded || 0;
+      skipped += payload.summary?.skipped || 0;
+      failed += payload.summary?.failed || 0;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  removeBrowserProofAttachments(migratedIds);
+  await loadProofVaultAttachments();
+  if (latestProofVault) renderProofVault(latestProofVault);
+  await loadStorageStatus({ quiet: true });
+  const summary = `Migration complete: ${uploaded} uploaded, ${skipped} already present, ${failed} failed.`;
+  if (proofVaultStatus) proofVaultStatus.textContent = summary;
+  if (storageSettingsStatus) storageSettingsStatus.textContent = summary;
+}
+
 async function removeProofAttachment(jobId, attachmentId) {
   const serverFiles = attachmentsForJob(jobId, proofVaultServerAttachments);
   if (serverFiles.some((attachment) => attachment.id === attachmentId)) {
@@ -4233,6 +4331,7 @@ function renderStorageStatus(payload = latestStorageStatus) {
   const cards = [
     ["Jobs", counts.jobs || 0, "Server job memory"],
     ["Proof files", counts.proofAttachments || 0, storageModeLabel(storage.attachmentMode)],
+    ["Browser proof", browserProofAttachmentCount(), "This device only"],
     ["AI memory", (counts.aiFeedback || 0) + (counts.shopRules || 0), `${counts.shopRules || 0} shop rules`],
     ["Profiles", counts.vehicleProfiles || 0, `${counts.referenceVault || 0} owner notes`],
   ];
@@ -4262,12 +4361,12 @@ function renderStorageStatus(payload = latestStorageStatus) {
       <article>
         <span>Proof attachments</span>
         <strong>${escapeHtml(storageModeLabel(storage.attachmentMode))}</strong>
-        <p>${escapeHtml(`Upload limit ${formatStorageBytes(storage.maxAttachmentBytes)}. R2 ${r2.configured ? "configured" : "not configured"}.`)}</p>
+        <p>${escapeHtml(`Upload limit ${formatStorageBytes(storage.maxAttachmentBytes)}. R2 ${r2.configured ? "configured" : "not configured"}. Cloud ${counts.proofAttachmentsR2 || 0} / server ${counts.proofAttachmentsLocal || 0}.`)}</p>
       </article>
       <article>
         <span>Backup coverage</span>
         <strong>${escapeHtml(payload.backup?.serverBackupAvailable ? "Server backup ready" : "Backup unavailable")}</strong>
-        <p>${escapeHtml(payload.backup?.includesProofAttachmentFiles ? "Includes proof files" : "Includes proof metadata, not raw file bytes")}</p>
+        <p>${escapeHtml(payload.backup?.includesProofAttachmentFiles ? "Includes proof files" : `Includes proof metadata. File previews use ${storage.privateProofFiles ? "private server proxy" : storage.publicR2Preview ? "public R2 preview URL" : "server proxy"}.`)}</p>
       </article>
     </section>
     ${
@@ -4286,6 +4385,39 @@ function renderStorageStatus(payload = latestStorageStatus) {
           `,
         )
         .join("")}
+    </section>
+    ${renderStorageDiagnostics()}
+  `;
+}
+
+function renderStorageDiagnostics(payload = latestStorageDiagnostics) {
+  if (!payload) return "";
+  const tests = payload.tests || [];
+  return `
+    <section class="storage-diagnostics-panel">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Storage diagnostics</p>
+          <h3>${escapeHtml(payload.status === "passed" ? "Round-trip passed" : payload.status === "warning" ? "Round-trip passed with warnings" : "Storage test failed")}</h3>
+        </div>
+      </div>
+      <div class="storage-file-list">
+        ${tests
+          .map(
+            (test) => `
+              <article class="${test.ok ? "" : "warn"}">
+                <span>${escapeHtml(test.label)}</span>
+                <strong>${escapeHtml(test.ok ? "Passed" : "Failed")}</strong>
+                <p>${escapeHtml(test.ok ? `${test.ms} ms` : test.error || "Check storage setup")}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+      <article class="assistant-card">
+        <strong>${escapeHtml(`Sampled ${payload.sample?.checked || 0} proof file${payload.sample?.checked === 1 ? "" : "s"}`)}</strong>
+        <p>${escapeHtml(`${payload.sample?.readable || 0} readable, ${payload.sample?.missing || 0} missing. ${(payload.warnings || []).join(" ")}`.trim())}</p>
+      </article>
     </section>
   `;
 }
@@ -4307,6 +4439,39 @@ async function loadStorageStatus({ quiet = false } = {}) {
     if (storageSettingsStatus) storageSettingsStatus.textContent = `Storage check failed: ${error.message}`;
     renderStorageStatus(null);
     return null;
+  }
+}
+
+async function runStorageDiagnostics() {
+  if (storageSettingsStatus) storageSettingsStatus.textContent = "Running storage round-trip test...";
+  try {
+    const payload = await api("/api/storage/diagnostics", {
+      method: "POST",
+      body: JSON.stringify({}),
+      timeoutMs: 45000,
+      noStatus: true,
+    });
+    latestStorageDiagnostics = payload;
+    if (!latestStorageStatus) await loadStorageStatus({ quiet: true });
+    renderStorageStatus(latestStorageStatus);
+    if (storageSettingsStatus) {
+      storageSettingsStatus.textContent =
+        payload.status === "passed"
+          ? "Storage diagnostics passed."
+          : payload.status === "warning"
+            ? `Storage diagnostics passed with ${payload.warnings?.length || 0} warning${payload.warnings?.length === 1 ? "" : "s"}.`
+            : "Storage diagnostics failed. Check the warning cards below.";
+    }
+  } catch (error) {
+    latestStorageDiagnostics = {
+      status: "failed",
+      tests: [{ label: "Storage diagnostics", ok: false, error: error.message }],
+      sample: { checked: 0, readable: 0, missing: 0 },
+      warnings: [error.message],
+    };
+    if (!latestStorageStatus) await loadStorageStatus({ quiet: true });
+    renderStorageStatus(latestStorageStatus);
+    if (storageSettingsStatus) storageSettingsStatus.textContent = `Storage diagnostics failed: ${error.message}`;
   }
 }
 
@@ -8238,6 +8403,7 @@ syncProofVaultButton?.addEventListener("click", async () => {
   await syncLocalJobsToServer();
   await loadProofVault();
 });
+migrateProofVaultButton?.addEventListener("click", migrateBrowserProofAttachments);
 exportProofVaultButton?.addEventListener("click", exportProofVaultBackup);
 importProofVaultButton?.addEventListener("click", () => proofVaultImportInput?.click());
 proofVaultImportInput?.addEventListener("change", async () => {
@@ -8245,6 +8411,8 @@ proofVaultImportInput?.addEventListener("change", async () => {
   proofVaultImportInput.value = "";
 });
 refreshStorageStatusButton?.addEventListener("click", () => loadStorageStatus());
+runStorageDiagnosticsButton?.addEventListener("click", runStorageDiagnostics);
+migrateStorageProofButton?.addEventListener("click", migrateBrowserProofAttachments);
 exportServerBackupButton?.addEventListener("click", exportServerBackup);
 importServerBackupButton?.addEventListener("click", () => serverBackupImportInput?.click());
 serverBackupImportInput?.addEventListener("change", async () => {
@@ -8336,6 +8504,12 @@ document.addEventListener("click", (event) => {
   const aiFeedbackButton = event.target.closest("[data-ai-feedback]");
   if (aiFeedbackButton) {
     submitAiFeedback(aiFeedbackButton.dataset.aiFeedback, aiFeedbackButton.dataset.aiResponseId, aiFeedbackButton);
+    return;
+  }
+
+  const migrateLocalProofButton = event.target.closest("[data-migrate-local-proof]");
+  if (migrateLocalProofButton) {
+    migrateBrowserProofAttachments();
     return;
   }
 

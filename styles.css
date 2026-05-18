@@ -6087,6 +6087,11 @@ textarea:focus {
   gap: 12px;
 }
 
+.storage-diagnostics-panel {
+  display: grid;
+  gap: 12px;
+}
+
 .storage-status-details {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6121,7 +6126,8 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.storage-status-details p {
+.storage-status-details p,
+.storage-file-list p {
   margin-top: 6px;
   color: var(--muted);
   line-height: 1.45;
@@ -6154,6 +6160,28 @@ textarea:focus {
 .storage-file-list article.warn {
   border-color: #cf8f52;
   background: #fff6e8;
+}
+
+.proof-migration-panel {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #cfd5dc;
+  border-left: 4px solid #2f7d49;
+  border-radius: 6px;
+  padding: 12px;
+  background: #eef8f1;
+}
+
+.proof-migration-panel strong {
+  display: block;
+  color: var(--ink);
+}
+
+.proof-migration-panel p {
+  margin-top: 4px;
+  color: var(--muted);
 }
 
 .history-reference-panel,
@@ -6492,6 +6520,11 @@ textarea:focus {
   .proof-card-actions > *,
   .workbench-action-buttons > * {
     flex: 1 1 140px;
+  }
+
+  .proof-migration-panel {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .global-result-card {

@@ -1458,6 +1458,7 @@ async function buildStorageStatus() {
   const r2 = r2ConfigStatus();
   const dataDirExternal = Boolean(process.env.TIMLOCK_DATA_DIR);
   const attachmentMode = proofAttachmentStorageMode();
+  const proofStorageCounts = proofAttachmentStorageCounts(proofAttachments.attachments);
   const warnings = [];
 
   if (!dataDirExternal) {
@@ -1480,6 +1481,9 @@ async function buildStorageStatus() {
     referenceVault: Array.isArray(referenceVault.entries) ? referenceVault.entries.length : 0,
     publicSources: Array.isArray(publicSources.sources) ? publicSources.sources.length : 0,
     proofAttachments: proofAttachments.attachments.length,
+    proofAttachmentsR2: proofStorageCounts.r2,
+    proofAttachmentsLocal: proofStorageCounts.local,
+    proofAttachmentsUnknown: proofStorageCounts.unknown,
   };
 
   return {
@@ -1491,6 +1495,11 @@ async function buildStorageStatus() {
       storePath,
       attachmentMode,
       maxAttachmentBytes: attachmentUploadMaxBytes,
+      privateProofFiles: String(process.env.TIMLOCK_PRIVATE_PROOF_FILES || "").toLowerCase() === "true",
+      publicR2Preview:
+        Boolean(cleanString(process.env.R2_PUBLIC_BASE_URL)) &&
+        String(process.env.TIMLOCK_PRIVATE_PROOF_FILES || "").toLowerCase() !== "true" &&
+        String(process.env.R2_PUBLIC_PREVIEW || "").toLowerCase() !== "false",
       r2,
     },
     counts,
@@ -1672,15 +1681,22 @@ function sanitizeStorageSegment(value) {
 
 function attachmentPublicFields(attachment) {
   const publicBase = cleanString(process.env.R2_PUBLIC_BASE_URL).replace(/\/$/, "");
+  const allowPublicR2Preview =
+    publicBase &&
+    attachment.storage === "r2" &&
+    String(process.env.TIMLOCK_PRIVATE_PROOF_FILES || "").toLowerCase() !== "true" &&
+    String(process.env.R2_PUBLIC_PREVIEW || "").toLowerCase() !== "false";
   return {
     id: attachment.id,
+    sourceId: attachment.sourceId || "",
     jobId: attachment.jobId,
     name: attachment.name,
     type: attachment.type,
     size: attachment.size,
     createdAt: attachment.createdAt,
+    migratedAt: attachment.migratedAt || "",
     storage: attachment.storage,
-    previewUrl: publicBase && attachment.storage === "r2" ? `${publicBase}/${attachment.key.split("/").map(encodeURIComponent).join("/")}` : `/api/proof-vault/attachments/${attachment.id}/file`,
+    previewUrl: allowPublicR2Preview ? `${publicBase}/${attachment.key.split("/").map(encodeURIComponent).join("/")}` : `/api/proof-vault/attachments/${attachment.id}/file`,
   };
 }
 
@@ -1696,6 +1712,17 @@ function groupAttachmentsByJob(attachments = []) {
 function proofAttachmentStorageMode() {
   if (r2Config()) return "cloudflare-r2";
   return "local-file";
+}
+
+function proofAttachmentStorageCounts(attachments = []) {
+  return attachments.reduce(
+    (counts, attachment) => {
+      const storage = attachment.storage === "r2" ? "r2" : attachment.storage === "local" ? "local" : "unknown";
+      counts[storage] += 1;
+      return counts;
+    },
+    { r2: 0, local: 0, unknown: 0 },
+  );
 }
 
 async function readProofAttachments() {
@@ -1823,6 +1850,135 @@ async function deleteProofAttachmentFile(attachment) {
   } catch {
     // Missing file/object should not leave stale metadata behind.
   }
+}
+
+function cleanProofAttachmentId(value) {
+  const id = sanitizeStorageSegment(value);
+  return id && id.length >= 6 ? id : randomUUID();
+}
+
+async function saveProofAttachmentUpload(body = {}, vault = null) {
+  const jobId = cleanString(body.jobId);
+  if (!jobId) throw new Error("Attachment needs a saved job id.");
+  const parsed = dataUrlToBuffer(body.dataUrl);
+  if (!parsed.buffer.length) throw new Error("Attachment file is empty.");
+  if (parsed.buffer.length > attachmentUploadMaxBytes) {
+    throw new Error(`Attachment is over ${Math.round(attachmentUploadMaxBytes / 1_000_000)} MB.`);
+  }
+
+  const workingVault = vault || (await readProofAttachments());
+  const sourceId = cleanString(body.sourceId || body.id);
+  const existing = sourceId
+    ? workingVault.attachments.find((attachment) => attachment.id === sourceId || attachment.sourceId === sourceId)
+    : null;
+  if (existing) {
+    return { attachment: existing, sourceId, skipped: true };
+  }
+
+  let id = cleanProofAttachmentId(body.id);
+  if (workingVault.attachments.some((attachment) => attachment.id === id)) id = randomUUID();
+  const name = sanitizeStorageSegment(body.name) || `proof-${id}`;
+  const type = cleanString(body.type || parsed.type || "application/octet-stream");
+  const createdAt = cleanString(body.createdAt) || new Date().toISOString();
+  const attachment = await storeProofAttachmentFile(
+    {
+      id,
+      sourceId: sourceId && sourceId !== id ? sourceId : "",
+      jobId,
+      name,
+      type,
+      size: parsed.buffer.length,
+      key: `proof-vault/${sanitizeStorageSegment(jobId) || "unlinked"}/${id}-${name}`,
+      createdAt,
+      migratedAt: body.migrated ? new Date().toISOString() : "",
+    },
+    parsed.buffer,
+  );
+  workingVault.attachments.unshift(attachment);
+  if (!vault) await writeProofAttachments(workingVault);
+  return { attachment, sourceId: sourceId || id, skipped: false };
+}
+
+async function runStorageDiagnostics() {
+  const tests = [];
+  const startedAt = new Date().toISOString();
+  const id = randomUUID();
+  const testPayload = Buffer.from(`timlock-storage-test:${id}`);
+
+  async function capture(label, fn) {
+    const started = Date.now();
+    try {
+      const detail = await fn();
+      tests.push({ label, ok: true, ms: Date.now() - started, detail: detail || "" });
+    } catch (error) {
+      tests.push({ label, ok: false, ms: Date.now() - started, error: error.message });
+    }
+  }
+
+  await capture("Writable job data directory", async () => {
+    await mkdir(mutableDataDir, { recursive: true });
+    const filePath = path.join(mutableDataDir, `.storage-test-${id}.txt`);
+    await writeFile(filePath, testPayload);
+    const readBack = await readFile(filePath);
+    await unlink(filePath);
+    if (!readBack.equals(testPayload)) throw new Error("Read-back mismatch.");
+    return mutableDataDir;
+  });
+
+  if (r2Config()) {
+    await capture("Cloudflare R2 proof round-trip", async () => {
+      const key = `diagnostics/${id}.txt`;
+      await r2Request("PUT", key, testPayload, "text/plain");
+      const response = await r2Request("GET", key);
+      const readBack = Buffer.from(await response.arrayBuffer());
+      await r2Request("DELETE", key);
+      if (!readBack.equals(testPayload)) throw new Error("R2 read-back mismatch.");
+      return "PUT/GET/DELETE passed";
+    });
+  } else {
+    await capture("Server-local proof file round-trip", async () => {
+      const key = `diagnostics/${id}.txt`;
+      const filePath = path.join(proofAttachmentFileDir, key);
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, testPayload);
+      const readBack = await readFile(filePath);
+      await unlink(filePath);
+      if (!readBack.equals(testPayload)) throw new Error("Local proof read-back mismatch.");
+      return proofAttachmentFileDir;
+    });
+  }
+
+  const vault = await readProofAttachments();
+  const sample = vault.attachments.slice(0, 5);
+  let readable = 0;
+  let missing = 0;
+  for (const attachment of sample) {
+    try {
+      const file = await readProofAttachmentFile(attachment);
+      if (file.length >= 0) readable += 1;
+    } catch {
+      missing += 1;
+    }
+  }
+
+  const failed = tests.filter((test) => !test.ok);
+  const warnings = [];
+  if (missing) warnings.push(`${missing} sampled proof file${missing === 1 ? "" : "s"} could not be read.`);
+  if (!r2Config()) warnings.push("R2 is not configured; proof files are not cloud-backed yet.");
+
+  return {
+    status: failed.length ? "failed" : warnings.length ? "warning" : "passed",
+    startedAt,
+    checkedAt: new Date().toISOString(),
+    storage: proofAttachmentStorageMode(),
+    tests,
+    sample: {
+      checked: sample.length,
+      readable,
+      missing,
+    },
+    warnings,
+  };
 }
 
 function jobStatus(verification) {
@@ -8144,6 +8300,11 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/storage/diagnostics") {
+    sendJson(response, 200, await runStorageDiagnostics());
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/storage/export") {
     sendJson(response, 200, await buildStorageExport());
     return;
@@ -8237,41 +8398,58 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "POST" && pathname === "/api/proof-vault/attachments") {
     const body = await readJsonBody(request);
-    const jobId = cleanString(body.jobId);
-    if (!jobId) {
-      sendError(response, 400, "Attachment needs a saved job id.");
-      return;
-    }
-    const parsed = dataUrlToBuffer(body.dataUrl);
-    if (!parsed.buffer.length) {
-      sendError(response, 400, "Attachment file is empty.");
-      return;
-    }
-    if (parsed.buffer.length > attachmentUploadMaxBytes) {
-      sendError(response, 413, `Attachment is over ${Math.round(attachmentUploadMaxBytes / 1_000_000)} MB.`);
-      return;
-    }
-    const id = randomUUID();
-    const name = sanitizeStorageSegment(body.name) || `proof-${id}`;
-    const type = cleanString(body.type || parsed.type || "application/octet-stream");
-    const attachment = await storeProofAttachmentFile(
-      {
-        id,
-        jobId,
-        name,
-        type,
-        size: parsed.buffer.length,
-        key: `proof-vault/${sanitizeStorageSegment(jobId) || "unlinked"}/${id}-${name}`,
-        createdAt: new Date().toISOString(),
-      },
-      parsed.buffer,
-    );
-    const vault = await readProofAttachments();
-    vault.attachments.unshift(attachment);
-    await writeProofAttachments(vault);
+    const result = await saveProofAttachmentUpload(body);
     sendJson(response, 201, {
       storage: proofAttachmentStorageMode(),
-      attachment: attachmentPublicFields(attachment),
+      attachment: attachmentPublicFields(result.attachment),
+      skipped: result.skipped,
+      sourceId: result.sourceId,
+    });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/proof-vault/attachments/migrate") {
+    const body = await readJsonBody(request);
+    const attachments = Array.isArray(body.attachments)
+      ? body.attachments
+      : body.attachment && typeof body.attachment === "object"
+        ? [body.attachment]
+        : [];
+    if (!attachments.length) {
+      sendError(response, 400, "No browser-local proof attachments were provided.");
+      return;
+    }
+    if (attachments.length > 5) {
+      sendError(response, 413, "Migrate proof in batches of 5 files or fewer.");
+      return;
+    }
+    const vault = await readProofAttachments();
+    const uploaded = [];
+    const skipped = [];
+    const failed = [];
+    for (const item of attachments) {
+      try {
+        const result = await saveProofAttachmentUpload({ ...item, migrated: true }, vault);
+        const publicAttachment = attachmentPublicFields(result.attachment);
+        if (result.skipped) skipped.push({ sourceId: result.sourceId, attachment: publicAttachment });
+        else uploaded.push({ sourceId: result.sourceId, attachment: publicAttachment });
+      } catch (error) {
+        failed.push({ sourceId: cleanString(item?.sourceId || item?.id), name: cleanString(item?.name), error: error.message });
+      }
+    }
+    if (uploaded.length) await writeProofAttachments(vault);
+    sendJson(response, failed.length ? 207 : 200, {
+      storage: proofAttachmentStorageMode(),
+      uploaded,
+      skipped,
+      failed,
+      byJob: groupAttachmentsByJob(vault.attachments),
+      summary: {
+        uploaded: uploaded.length,
+        skipped: skipped.length,
+        failed: failed.length,
+        totalServerAttachments: vault.attachments.length,
+      },
     });
     return;
   }
