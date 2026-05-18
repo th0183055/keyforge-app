@@ -31,6 +31,8 @@ For Render production, `TIMLOCK_DATA_DIR` should point at the mounted persistent
 
 Before moving an existing live app to the persistent store, export a backup from the app. After the new service/disk is live, import that backup so the disk-backed `store.json` becomes the source of truth.
 
+Owners can check this inside **Settings -> Backup & Sync**. That panel shows the live job store mode, Proof Vault attachment mode, AI memory counts, and warnings when the app is still using repo-local or server-local storage. Use **Export Server Backup** before changing hosting storage, then **Import Server Backup** after the new storage is live.
+
 ## What Exists Now
 
 - Clickable dashboard
@@ -54,6 +56,8 @@ Attachments work locally without extra setup. For Render production, set Cloudfl
 - `R2_SECRET_ACCESS_KEY`
 - Optional: `R2_PUBLIC_BASE_URL`
 - Optional: `TIMLOCK_ATTACHMENT_MAX_BYTES`
+
+Server backups include Proof Vault attachment metadata, but they do not embed raw photo/PDF bytes. Use Cloudflare R2 for durable cross-device proof files, or keep a Render persistent disk attached for server-local files.
 
 ## Code Desk Imports
 

@@ -917,6 +917,28 @@
               </div>
             </section>
           </div>
+
+          <section class="panel wide storage-sync-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Server storage</p>
+                <h3>Backup & Sync</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="refreshStorageStatus">Refresh</button>
+                <button class="secondary-action small" type="button" id="exportServerBackup">Export Server Backup</button>
+                <button class="secondary-action small" type="button" id="importServerBackup">Import Server Backup</button>
+                <input id="serverBackupImportInput" type="file" accept="application/json" hidden />
+              </div>
+            </div>
+            <div class="form-status" id="storageSettingsStatus"></div>
+            <div class="storage-status-panel" id="storageStatusPanel">
+              <article class="assistant-card">
+                <strong>Storage status loading</strong>
+                <p>Checking job memory, Proof Vault metadata, attachment storage, and AI memory.</p>
+              </article>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="about">

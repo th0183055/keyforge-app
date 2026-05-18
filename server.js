@@ -1354,6 +1354,267 @@ async function buildHealthStatus() {
   };
 }
 
+function r2ConfigStatus() {
+  const required = [
+    ["R2_ACCOUNT_ID", process.env.R2_ACCOUNT_ID || process.env.CLOUDFLARE_R2_ACCOUNT_ID],
+    ["R2_BUCKET", process.env.R2_BUCKET || process.env.CLOUDFLARE_R2_BUCKET],
+    ["R2_ACCESS_KEY_ID", process.env.R2_ACCESS_KEY_ID || process.env.CLOUDFLARE_R2_ACCESS_KEY_ID],
+    ["R2_SECRET_ACCESS_KEY", process.env.R2_SECRET_ACCESS_KEY || process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY],
+  ];
+  const missing = required.filter(([, value]) => !cleanString(value)).map(([name]) => name);
+  return {
+    configured: missing.length === 0,
+    missing,
+    bucket: cleanString(process.env.R2_BUCKET || process.env.CLOUDFLARE_R2_BUCKET),
+    publicBaseConfigured: Boolean(cleanString(process.env.R2_PUBLIC_BASE_URL)),
+    customEndpointConfigured: Boolean(cleanString(process.env.R2_ENDPOINT)),
+  };
+}
+
+function storageRecordIdentity(record = {}, fields = [], prefix = "record") {
+  const id = cleanString(record.id);
+  if (id) return `${prefix}:id:${id}`;
+  const signature = fields.map((field) => cleanString(record[field])).filter(Boolean).join("|");
+  if (signature) return `${prefix}:sig:${signature}`;
+  return `${prefix}:hash:${sha256Hex(JSON.stringify(record).slice(0, 6000))}`;
+}
+
+function mergeStorageRecords(existing = [], incoming = [], fields = [], prefix = "record") {
+  const map = new Map();
+  (Array.isArray(existing) ? existing : []).forEach((record) => {
+    if (record && typeof record === "object") map.set(storageRecordIdentity(record, fields, prefix), record);
+  });
+  (Array.isArray(incoming) ? incoming : []).forEach((record) => {
+    if (!record || typeof record !== "object") return;
+    const key = storageRecordIdentity(record, fields, prefix);
+    map.set(key, { ...(map.get(key) || {}), ...record });
+  });
+  return Array.from(map.values());
+}
+
+function sortStorageJobs(jobs = []) {
+  return jobs.sort((a, b) => (Date.parse(b.createdAt || b.importedAt || b.schedule || "") || 0) - (Date.parse(a.createdAt || a.importedAt || a.schedule || "") || 0));
+}
+
+function mergeStorageStore(currentStore, incomingStore = {}, replace = false) {
+  const current = normalizeStore(currentStore);
+  const incoming = normalizeStore(incomingStore);
+  if (replace) return incoming;
+  return normalizeStore({
+    ...current,
+    jobs: sortStorageJobs(mergeStorageRecords(current.jobs, incoming.jobs, ["title", "vehicle", "vin", "createdAt", "schedule"], "job")),
+    vehicles: mergeStorageRecords(current.vehicles, incoming.vehicles, ["name", "make", "model", "year"], "vehicle"),
+    auditLog: mergeStorageRecords(current.auditLog, incoming.auditLog, ["createdAt", "prompt", "route"], "audit"),
+    aiFeedback: mergeStorageRecords(current.aiFeedback, incoming.aiFeedback, ["createdAt", "prompt", "value"], "ai-feedback"),
+    shopRules: mergeStorageRecords(current.shopRules, incoming.shopRules, ["title", "body", "createdAt"], "shop-rule"),
+    aiPreferences: {
+      ...current.aiPreferences,
+      ...(incoming.aiPreferences && typeof incoming.aiPreferences === "object" ? incoming.aiPreferences : {}),
+    },
+  });
+}
+
+function mergeStoragePayloadArray(current = {}, incoming = {}, key, fields = [], prefix = key, replace = false) {
+  const incomingPayload = incoming && typeof incoming === "object" ? incoming : {};
+  const currentPayload = current && typeof current === "object" ? current : {};
+  return {
+    ...currentPayload,
+    ...incomingPayload,
+    [key]: replace
+      ? Array.isArray(incomingPayload[key])
+        ? incomingPayload[key]
+        : []
+      : mergeStorageRecords(currentPayload[key], incomingPayload[key], fields, prefix),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function mergePublicReferenceSources(current = {}, incoming = {}, replace = false) {
+  if (replace) return { ...incoming, generatedAt: incoming.generatedAt || new Date().toISOString() };
+  return {
+    ...current,
+    ...incoming,
+    sources: mergeStorageRecords(current.sources, incoming.sources, ["id", "name", "url"], "public-source"),
+    communityEvidence: mergeStorageRecords(current.communityEvidence, incoming.communityEvidence, ["id", "source", "vehicle", "createdAt"], "community-evidence"),
+    autel: {
+      ...(current.autel || {}),
+      ...(incoming.autel || {}),
+      products: mergeStorageRecords(current.autel?.products, incoming.autel?.products, ["id", "name", "url"], "autel-product"),
+      coverage: mergeStorageRecords(current.autel?.coverage, incoming.autel?.coverage, ["id", "vehicle", "system", "year"], "autel-coverage"),
+    },
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function buildStorageStatus() {
+  const [health, store, vehicleProfiles, referenceVault, publicSources, proofAttachments] = await Promise.all([
+    buildHealthStatus(),
+    readStore(),
+    readVehicleProfiles(),
+    readReferenceVault(),
+    readPublicReferenceSources(),
+    readProofAttachments(),
+  ]);
+  const r2 = r2ConfigStatus();
+  const dataDirExternal = Boolean(process.env.TIMLOCK_DATA_DIR);
+  const attachmentMode = proofAttachmentStorageMode();
+  const warnings = [];
+
+  if (!dataDirExternal) {
+    warnings.push("TIMLOCK_DATA_DIR is not set, so live jobs are using the repo-local ignored data folder.");
+  }
+  if (attachmentMode !== "cloudflare-r2") {
+    warnings.push("Cloudflare R2 is not fully configured, so proof files are stored on the server filesystem.");
+  }
+  if (attachmentMode !== "cloudflare-r2" && !dataDirExternal) {
+    warnings.push("Server-local proof files will not follow users across devices unless persistent storage or R2 is configured.");
+  }
+
+  const counts = {
+    jobs: store.jobs.length,
+    vehicles: store.vehicles.length,
+    auditLog: store.auditLog.length,
+    aiFeedback: store.aiFeedback.length,
+    shopRules: store.shopRules.length,
+    vehicleProfiles: Array.isArray(vehicleProfiles.profiles) ? vehicleProfiles.profiles.length : 0,
+    referenceVault: Array.isArray(referenceVault.entries) ? referenceVault.entries.length : 0,
+    publicSources: Array.isArray(publicSources.sources) ? publicSources.sources.length : 0,
+    proofAttachments: proofAttachments.attachments.length,
+  };
+
+  return {
+    status: health.status === "ok" && warnings.length === 0 ? "durable" : warnings.length ? "needs-attention" : health.status,
+    checkedAt: new Date().toISOString(),
+    storage: {
+      dataDirMode: dataDirExternal ? "external-data-dir" : "repo-local",
+      mutableDataDir,
+      storePath,
+      attachmentMode,
+      maxAttachmentBytes: attachmentUploadMaxBytes,
+      r2,
+    },
+    counts,
+    warnings,
+    backup: {
+      serverBackupAvailable: true,
+      includesJobs: true,
+      includesAiMemory: true,
+      includesProofAttachmentMetadata: true,
+      includesProofAttachmentFiles: false,
+      excluded: ["supplier account passwords", "raw proof file bytes"],
+    },
+    healthFiles: health.files,
+  };
+}
+
+async function buildStorageExport() {
+  const [status, store, vehicleProfiles, referenceVault, publicReferenceSources, proofAttachments, supplierAccounts] = await Promise.all([
+    buildStorageStatus(),
+    readStore(),
+    readVehicleProfiles(),
+    readReferenceVault(),
+    readPublicReferenceSources(),
+    readProofAttachments(),
+    readSupplierAccounts(),
+  ]);
+  return {
+    schemaVersion: 1,
+    kind: "timlock-server-backup",
+    exportedAt: new Date().toISOString(),
+    status,
+    data: {
+      store,
+      vehicleProfiles,
+      referenceVault,
+      publicReferenceSources,
+      proofAttachments,
+      supplierAccounts: {
+        note: "Passwords are not exported.",
+        accounts: supplierAccounts.accounts.map(publicSupplierAccount),
+      },
+    },
+    notes: [
+      "Proof attachment metadata is included. Local/R2 file objects are not embedded in this JSON backup.",
+      "Use Cloudflare R2 for proof files that need to follow the account across devices.",
+    ],
+  };
+}
+
+async function importStorageBundle(body = {}) {
+  const bundle = body.bundle && typeof body.bundle === "object" ? body.bundle : body;
+  const data = bundle.data && typeof bundle.data === "object" ? bundle.data : bundle;
+  const replace = Boolean(body.replace || bundle.replace || body.mode === "replace" || bundle.mode === "replace");
+  const result = {};
+
+  if (data.store || data.jobs || data.aiFeedback || data.shopRules) {
+    const current = await readStore();
+    const incoming = data.store || {
+      jobs: data.jobs,
+      vehicles: data.vehicles,
+      auditLog: data.auditLog,
+      aiFeedback: data.aiFeedback,
+      shopRules: data.shopRules,
+      aiPreferences: data.aiPreferences,
+    };
+    const next = mergeStorageStore(current, incoming, replace);
+    await writeStore(next);
+    result.store = {
+      jobs: next.jobs.length,
+      auditLog: next.auditLog.length,
+      aiFeedback: next.aiFeedback.length,
+      shopRules: next.shopRules.length,
+    };
+  }
+
+  if (data.vehicleProfiles) {
+    const current = await readVehicleProfiles();
+    const next = mergeStoragePayloadArray(current, data.vehicleProfiles, "profiles", ["id", "vin", "year", "make", "model"], "vehicle-profile", replace);
+    await writeVehicleProfiles(next);
+    result.vehicleProfiles = next.profiles.length;
+  }
+
+  if (data.referenceVault) {
+    const current = await readReferenceVault();
+    const next = mergeStoragePayloadArray(current, data.referenceVault, "entries", ["id", "title", "vehicle", "keyway"], "reference-vault", replace);
+    await writeReferenceVault(next);
+    result.referenceVault = next.entries.length;
+  }
+
+  if (data.publicReferenceSources) {
+    const current = await readPublicReferenceSources();
+    const next = mergePublicReferenceSources(current, data.publicReferenceSources, replace);
+    await writePublicReferenceSources(next);
+    result.publicReferenceSources = {
+      sources: next.sources?.length || 0,
+      communityEvidence: next.communityEvidence?.length || 0,
+      autelProducts: next.autel?.products?.length || 0,
+      autelCoverage: next.autel?.coverage?.length || 0,
+    };
+  }
+
+  if (data.proofAttachments) {
+    const current = await readProofAttachments();
+    const incoming = {
+      ...data.proofAttachments,
+      attachments: (Array.isArray(data.proofAttachments.attachments) ? data.proofAttachments.attachments : []).filter((attachment) => attachment?.id && attachment?.key),
+    };
+    const next = mergeStoragePayloadArray(current, incoming, "attachments", ["id", "jobId", "key"], "proof-attachment", replace);
+    await writeProofAttachments(next);
+    result.proofAttachments = next.attachments.length;
+  }
+
+  if (!Object.keys(result).length) {
+    throw new Error("Backup did not contain recognized TimLock server data.");
+  }
+
+  return {
+    importedAt: new Date().toISOString(),
+    mode: replace ? "replace" : "merge",
+    result,
+    status: await buildStorageStatus(),
+  };
+}
+
 async function decodeVinWithTimeout(vin) {
   const decodeUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`;
   const payload = await fetchJson(decodeUrl, { signal: AbortSignal.timeout(8000) });
@@ -7875,6 +8136,21 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
 async function handleApi(request, response, pathname) {
   if (request.method === "GET" && pathname === "/api/health") {
     sendJson(response, 200, await buildHealthStatus());
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/storage/status") {
+    sendJson(response, 200, await buildStorageStatus());
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/storage/export") {
+    sendJson(response, 200, await buildStorageExport());
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/storage/import") {
+    sendJson(response, 200, await importStorageBundle(await readJsonBody(request)));
     return;
   }
 

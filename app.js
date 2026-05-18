@@ -38,6 +38,7 @@ let latestGlobalSearch = null;
 let latestAiResponse = null;
 let latestAiAdvisor = null;
 let latestAiMemory = null;
+let latestStorageStatus = null;
 let appMode = "owner";
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
@@ -130,6 +131,12 @@ const supplierSettingsForm = document.querySelector("#supplierSettingsForm");
 const supplierSettingsStatus = document.querySelector("#supplierSettingsStatus");
 const supplierAccountList = document.querySelector("#supplierAccountList");
 const supplierSelect = document.querySelector("#supplierSelect");
+const storageStatusPanel = document.querySelector("#storageStatusPanel");
+const storageSettingsStatus = document.querySelector("#storageSettingsStatus");
+const refreshStorageStatusButton = document.querySelector("#refreshStorageStatus");
+const exportServerBackupButton = document.querySelector("#exportServerBackup");
+const importServerBackupButton = document.querySelector("#importServerBackup");
+const serverBackupImportInput = document.querySelector("#serverBackupImportInput");
 const referenceVaultForm = document.querySelector("#referenceVaultForm");
 const referenceVaultStatus = document.querySelector("#referenceVaultStatus");
 const referenceVaultList = document.querySelector("#referenceVaultList");
@@ -310,6 +317,7 @@ function showView(id, options = {}) {
   }
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
+  if (id === "settings") loadStorageStatus({ quiet: true });
   updateAiContextUi();
 }
 
@@ -4189,6 +4197,163 @@ function downloadJson(filename, payload) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function formatStorageBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(bytes >= 10_000_000 ? 0 : 1)} MB`;
+  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)} KB`;
+  return `${Math.round(bytes)} B`;
+}
+
+function storageModeLabel(value) {
+  if (value === "cloudflare-r2") return "Cloudflare R2";
+  if (value === "local-file") return "Server files";
+  if (value === "external-data-dir") return "Persistent data dir";
+  if (value === "repo-local") return "Local dev folder";
+  return cleanInput(value) || "Unknown";
+}
+
+function renderStorageStatus(payload = latestStorageStatus) {
+  if (!storageStatusPanel) return;
+  if (!payload) {
+    storageStatusPanel.innerHTML = `
+      <article class="assistant-card">
+        <strong>Storage status unavailable</strong>
+        <p>Refresh storage status after the server is awake.</p>
+      </article>
+    `;
+    return;
+  }
+
+  const storage = payload.storage || {};
+  const counts = payload.counts || {};
+  const r2 = storage.r2 || {};
+  const cards = [
+    ["Jobs", counts.jobs || 0, "Server job memory"],
+    ["Proof files", counts.proofAttachments || 0, storageModeLabel(storage.attachmentMode)],
+    ["AI memory", (counts.aiFeedback || 0) + (counts.shopRules || 0), `${counts.shopRules || 0} shop rules`],
+    ["Profiles", counts.vehicleProfiles || 0, `${counts.referenceVault || 0} owner notes`],
+  ];
+  const warnings = payload.warnings || [];
+  const healthFiles = (payload.healthFiles || []).slice(0, 8);
+
+  storageStatusPanel.innerHTML = `
+    <section class="history-summary-grid storage-status-grid">
+      ${cards
+        .map(
+          ([label, value, caption]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(caption)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    <section class="storage-status-details">
+      <article>
+        <span>Job store</span>
+        <strong>${escapeHtml(storageModeLabel(storage.dataDirMode))}</strong>
+        <p>${escapeHtml(storage.mutableDataDir || "Path unavailable")}</p>
+      </article>
+      <article>
+        <span>Proof attachments</span>
+        <strong>${escapeHtml(storageModeLabel(storage.attachmentMode))}</strong>
+        <p>${escapeHtml(`Upload limit ${formatStorageBytes(storage.maxAttachmentBytes)}. R2 ${r2.configured ? "configured" : "not configured"}.`)}</p>
+      </article>
+      <article>
+        <span>Backup coverage</span>
+        <strong>${escapeHtml(payload.backup?.serverBackupAvailable ? "Server backup ready" : "Backup unavailable")}</strong>
+        <p>${escapeHtml(payload.backup?.includesProofAttachmentFiles ? "Includes proof files" : "Includes proof metadata, not raw file bytes")}</p>
+      </article>
+    </section>
+    ${
+      warnings.length
+        ? `<section class="storage-warning-list">${warnings.map((warning) => `<article>${escapeHtml(warning)}</article>`).join("")}</section>`
+        : `<article class="assistant-card storage-ok-card"><strong>Durable setup looks ready</strong><p>Job memory, AI memory, and Proof Vault metadata are readable.</p></article>`
+    }
+    <section class="storage-file-list">
+      ${healthFiles
+        .map(
+          (file) => `
+            <article class="${file.ok ? "" : "warn"}">
+              <span>${escapeHtml(file.label)}</span>
+              <strong>${escapeHtml(file.ok ? `${file.count ?? "OK"}` : "Needs attention")}</strong>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+async function loadStorageStatus({ quiet = false } = {}) {
+  if (!storageStatusPanel) return null;
+  try {
+    if (storageSettingsStatus && !quiet) storageSettingsStatus.textContent = "Checking server storage...";
+    const payload = await api("/api/storage/status", { timeoutMs: 10000, noStatus: true });
+    latestStorageStatus = payload;
+    renderStorageStatus(payload);
+    if (storageSettingsStatus && !quiet) {
+      storageSettingsStatus.textContent = payload.warnings?.length
+        ? `Storage checked with ${payload.warnings.length} warning${payload.warnings.length === 1 ? "" : "s"}.`
+        : "Storage checked. Server data is readable.";
+    }
+    return payload;
+  } catch (error) {
+    if (storageSettingsStatus) storageSettingsStatus.textContent = `Storage check failed: ${error.message}`;
+    renderStorageStatus(null);
+    return null;
+  }
+}
+
+async function exportServerBackup() {
+  if (storageSettingsStatus) storageSettingsStatus.textContent = "Building server backup...";
+  try {
+    const payload = await api("/api/storage/export", { timeoutMs: 30000, noStatus: true });
+    downloadJson(`timlock-server-backup-${new Date().toISOString().slice(0, 10)}.json`, payload);
+    latestStorageStatus = payload.status || latestStorageStatus;
+    renderStorageStatus(latestStorageStatus);
+    if (storageSettingsStatus) storageSettingsStatus.textContent = "Server backup exported.";
+  } catch (error) {
+    if (storageSettingsStatus) storageSettingsStatus.textContent = `Export failed: ${error.message}`;
+  }
+}
+
+async function importServerBackup(file) {
+  if (!file) return;
+  if (storageSettingsStatus) storageSettingsStatus.textContent = "Importing server backup...";
+  try {
+    const bundle = JSON.parse(await file.text());
+    const payload = await api("/api/storage/import", {
+      method: "POST",
+      body: JSON.stringify({ bundle }),
+      timeoutMs: 40000,
+      noStatus: true,
+    });
+    latestStorageStatus = payload.status || latestStorageStatus;
+    renderStorageStatus(latestStorageStatus);
+    await Promise.allSettled([
+      loadJobs(),
+      loadCoverageDashboard(),
+      loadAiMemory(),
+      loadAiAdvisor(),
+      loadReferenceVault(),
+      loadPublicReferenceSources(),
+      loadProofVaultAttachments().then(() => {
+        if (latestProofVault) renderProofVault(latestProofVault);
+      }),
+    ]);
+    if (storageSettingsStatus) {
+      const imported = payload.result || {};
+      storageSettingsStatus.textContent = `Backup imported. Jobs: ${imported.store?.jobs ?? latestStorageStatus?.counts?.jobs ?? 0}, proof files: ${imported.proofAttachments ?? latestStorageStatus?.counts?.proofAttachments ?? 0}.`;
+    }
+  } catch (error) {
+    if (storageSettingsStatus) storageSettingsStatus.textContent = `Import failed: ${error.message}`;
+  }
 }
 
 function exportProofVaultBackup() {
@@ -8079,6 +8244,13 @@ proofVaultImportInput?.addEventListener("change", async () => {
   await importProofVaultBackup(proofVaultImportInput.files?.[0]);
   proofVaultImportInput.value = "";
 });
+refreshStorageStatusButton?.addEventListener("click", () => loadStorageStatus());
+exportServerBackupButton?.addEventListener("click", exportServerBackup);
+importServerBackupButton?.addEventListener("click", () => serverBackupImportInput?.click());
+serverBackupImportInput?.addEventListener("change", async () => {
+  await importServerBackup(serverBackupImportInput.files?.[0]);
+  serverBackupImportInput.value = "";
+});
 codeDeskForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   runCodeDesk();
@@ -8974,6 +9146,7 @@ renderReferenceVault();
 renderPublicReferenceSources();
 renderPartHistoryRecents();
 renderCodeDesk();
+renderStorageStatus();
 renderAiAdvisorPanel();
 updateConnectionStatus();
 refreshApiHealth({ quiet: true });
@@ -8989,4 +9162,5 @@ bootTask("sources", loadSources);
 bootTask("supplier accounts", loadSupplierAccounts);
 bootTask("reference vault", loadReferenceVault);
 bootTask("public sources", loadPublicReferenceSources);
+bootTask("storage status", () => loadStorageStatus({ quiet: true }));
 updateInstallButton();

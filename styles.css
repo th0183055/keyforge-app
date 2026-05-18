@@ -6078,6 +6078,84 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.storage-sync-panel {
+  margin-top: 16px;
+}
+
+.storage-status-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.storage-status-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storage-status-details article,
+.storage-file-list article,
+.storage-warning-list article {
+  min-width: 0;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(246, 248, 250, 0.92);
+}
+
+.storage-status-details span,
+.storage-file-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.storage-status-details strong,
+.storage-file-list strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.storage-status-details p {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.storage-warning-list {
+  display: grid;
+  gap: 8px;
+}
+
+.storage-warning-list article {
+  border-left: 4px solid #b86b13;
+  background: #fff6e8;
+  color: #6d4214;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.storage-ok-card {
+  border-color: #2f7d49;
+}
+
+.storage-file-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.storage-file-list article.warn {
+  border-color: #cf8f52;
+  background: #fff6e8;
+}
+
 .history-reference-panel,
 .history-job-card,
 .proof-record-card,
@@ -6383,6 +6461,8 @@ textarea:focus {
   .workbench-grid,
   .history-summary-grid,
   .history-job-grid,
+  .storage-status-details,
+  .storage-file-list,
   .verified-code-grid,
   .coverage-summary-grid,
   .coverage-gap-grid {
