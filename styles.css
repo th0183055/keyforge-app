@@ -6760,3 +6760,236 @@ textarea:focus {
     font-size: 16px !important;
   }
 }
+
+/* Compact field pass: tighter touch UI without changing app flow */
+@media (min-width: 981px) {
+  main {
+    padding: 22px 22px calc(60px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    margin-bottom: 18px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 760px) {
+  .panel,
+  .global-command-panel,
+  .history-reference-panel,
+  .proof-migration-panel,
+  .ai-field-packet,
+  .ai-brief-panel {
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 10px 24px rgba(19, 25, 32, 0.12);
+  }
+
+  .panel-header,
+  .global-command-head,
+  .history-job-head,
+  .verified-code-head {
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .global-command-panel {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .global-command-head strong,
+  .panel-header h3,
+  .ai-commander-card h3,
+  .ai-brief-main h3 {
+    font-size: 0.98rem;
+    line-height: 1.16;
+  }
+
+  .global-command-panel .mode-toggle,
+  .auth-role-toggle {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .global-search-form,
+  .part-history-form,
+  .proof-vault-form,
+  .workbench-form,
+  .code-desk-form,
+  .code-desk-auto-form,
+  .lishi-lookup-form,
+  .reference-list-form {
+    gap: 8px;
+  }
+
+  .global-search-form input,
+  .part-history-form input,
+  .proof-vault-form input,
+  .workbench-form input,
+  .code-desk-form input,
+  .code-desk-auto-form input,
+  .lishi-lookup-form input,
+  .reference-list-form input,
+  input,
+  select,
+  textarea {
+    border-radius: 7px;
+    padding: 9px 10px;
+  }
+
+  .primary-action,
+  .secondary-action {
+    min-height: 40px;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 0.86rem;
+    line-height: 1.12;
+  }
+
+  .primary-action.small,
+  .secondary-action.small {
+    min-height: 34px;
+    padding: 7px 9px;
+    font-size: 0.78rem;
+  }
+
+  .ai-bench-actions,
+  .proof-vault-actions,
+  .proof-card-actions,
+  .workbench-action-buttons,
+  .ai-route-actions,
+  .ai-action-list,
+  .ai-message-actions,
+  .ai-copy-grid {
+    gap: 6px;
+  }
+
+  .ai-bench-actions > *,
+  .proof-vault-actions > *,
+  .proof-card-actions > *,
+  .workbench-action-buttons > *,
+  .ai-route-actions > *,
+  .ai-action-list > *,
+  .ai-message-actions > *,
+  .ai-copy-grid > * {
+    flex: 1 1 calc(50% - 6px);
+  }
+
+  .ai-command-tools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .ai-command-tools button {
+    width: 100%;
+    min-height: 34px;
+  }
+
+  .ai-commander-card,
+  .ai-advisor-overview,
+  .ai-opportunity-list article,
+  .ai-command-grid article,
+  .global-result-summary,
+  .global-result-group,
+  .global-result-card,
+  .history-job-card,
+  .proof-record-card,
+  .workbench-section,
+  .reference-row-card,
+  .code-source-panel {
+    border-radius: 7px;
+    padding: 9px;
+  }
+
+  .ai-command-grid,
+  .global-result-grid,
+  .history-summary-grid,
+  .history-job-grid,
+  .workbench-grid,
+  .code-desk-grid,
+  .lishi-result-grid,
+  .coverage-summary-grid,
+  .coverage-gap-grid {
+    gap: 8px;
+  }
+
+  .ai-command-scorecards,
+  .ai-memory-metrics,
+  .metric-grid {
+    gap: 7px;
+  }
+
+  .ai-command-scorecards article,
+  .ai-memory-metrics article,
+  .metric,
+  .storage-status-card {
+    padding: 8px;
+    border-radius: 7px;
+  }
+
+  .workflow-action-shell .workflow-actions {
+    gap: 6px;
+    margin-top: 10px;
+    padding: 6px;
+    border-radius: 10px;
+  }
+
+  .workflow-actions .primary-action,
+  .workflow-actions .secondary-action {
+    min-height: 44px;
+    border-radius: 8px;
+    font-size: 0.86rem;
+  }
+
+  .chat-log {
+    gap: 8px;
+  }
+
+  .message {
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .prompt-row {
+    gap: 7px;
+  }
+}
+
+@media (max-width: 420px) {
+  main {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .mobile-menu-toggle {
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+  }
+
+  .ai-memory-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-command-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-bench-actions > *,
+  .proof-vault-actions > *,
+  .proof-card-actions > *,
+  .workbench-action-buttons > *,
+  .ai-route-actions > *,
+  .ai-action-list > *,
+  .ai-message-actions > *,
+  .ai-copy-grid > * {
+    flex-basis: calc(50% - 6px);
+  }
+}
