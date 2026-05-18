@@ -1157,6 +1157,30 @@ textarea {
   line-height: 1.38;
 }
 
+.ai-command-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #cfd8e0;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.ai-command-tools button {
+  min-height: 38px;
+}
+
+.ai-commander-status {
+  border-left: 4px solid #ad8635;
+  padding: 8px 10px;
+  background: #fff8e8;
+  color: #3f4650;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .ai-command-scorecards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4882,6 +4906,7 @@ textarea {
   .ai-action-list > *,
   .ai-message-actions > *,
   .ai-bench-actions > *,
+  .ai-command-tools > *,
   .ai-copy-grid > * {
     flex: 1 1 140px;
   }

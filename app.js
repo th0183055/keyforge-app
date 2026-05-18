@@ -7928,6 +7928,272 @@ function renderAiAdvisorPanel(advisor = latestAiAdvisor) {
   `;
 }
 
+function compactAiPacketList(items, limit = 10) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      if (typeof item === "string") return cleanInput(item);
+      if (!item || typeof item !== "object") return "";
+      return cleanInput([item.title || item.label || item.status || item.target, item.detail || item.reason || item.prompt].filter(Boolean).join(": "));
+    })
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function aiCommanderPacketPayload(commander = latestAiCommander) {
+  const packet = commander?.fieldPacket || {};
+  const mission = commander?.mission || {};
+  const learning = commander?.learningLoop || {};
+  const copyBlocks = packet.copyBlocks || {};
+  const subject = cleanInput(mission.subject || commander?.headline || "Current job");
+  return {
+    schemaVersion: "timlock-field-command-packet/v1",
+    exportedAt: new Date().toISOString(),
+    generatedAt: commander?.generatedAt || "",
+    title: commander?.title || "TimLock Field Commander",
+    subject,
+    headline: commander?.headline || "",
+    readiness: {
+      score: Number(commander?.readinessScore ?? packet.readinessScore ?? 0),
+      label: commander?.readinessLabel || packet.readinessLabel || "Unknown",
+      priority: packet.priority || "",
+    },
+    mission: {
+      decision: mission.decision || packet.dispatchDecision || "Verify the job details before relying on this packet.",
+      nextBestAction: mission.nextBestAction || packet.nextBestAction || null,
+      customerSafeNote: mission.customerSafeNote || copyBlocks.customerNote || "",
+      workOrderNote: mission.workOrderNote || copyBlocks.workOrderNote || "",
+    },
+    scorecards: (commander?.dataScorecards || []).map((card) => ({
+      label: cleanInput(card.label),
+      value: cleanInput(card.value),
+      tone: cleanInput(card.tone),
+    })),
+    nextMoves: (commander?.actionStack || []).slice(0, 8).map((action, index) => ({
+      step: index + 1,
+      title: cleanInput(action.title || `Action ${index + 1}`),
+      detail: cleanInput(action.detail || ""),
+      tool: cleanInput(action.target || ""),
+      prompt: cleanInput(action.prompt || ""),
+      impact: cleanInput(action.impact || action.source || ""),
+    })),
+    routePlan: (packet.routePlan || []).slice(0, 8).map((route) => ({
+      label: cleanInput(route.label || route.target || "Tool"),
+      status: cleanInput(route.status || "next"),
+      reason: cleanInput(route.reason || ""),
+      target: cleanInput(route.target || ""),
+    })),
+    risks: compactAiPacketList(commander?.riskRadar || [], 10),
+    blockers: compactAiPacketList(packet.blockers || [], 8),
+    warnings: compactAiPacketList(packet.warnings || [], 8),
+    proofGaps: compactAiPacketList(packet.proofGaps || [], 8),
+    technicianPlan: compactAiPacketList(packet.technicianPlan || [], 10),
+    saveBackChecklist: compactAiPacketList(learning.saveBackChecklist || packet.saveBackChecklist || [], 10),
+    learningSignals: compactAiPacketList(learning.signals || [], 8),
+    copyBlocks: {
+      technicianChecklist: copyBlocks.technicianChecklist || "",
+      customerNote: mission.customerSafeNote || copyBlocks.customerNote || "",
+      workOrderNote: mission.workOrderNote || copyBlocks.workOrderNote || "",
+    },
+  };
+}
+
+function aiCommanderPacketText(commander = latestAiCommander) {
+  const payload = aiCommanderPacketPayload(commander);
+  const lines = [
+    "TIMLOCK FIELD COMMAND PACKET",
+    `Generated: ${new Date(payload.exportedAt).toLocaleString()}`,
+    `Subject: ${payload.subject}`,
+    `Readiness: ${payload.readiness.score}% - ${payload.readiness.label}`,
+    "",
+    "Decision:",
+    payload.mission.decision,
+  ];
+  const appendList = (title, items, formatter = (item) => item) => {
+    const cleanItems = (items || []).map(formatter).map(cleanInput).filter(Boolean);
+    if (!cleanItems.length) return;
+    lines.push("", `${title}:`);
+    cleanItems.forEach((item, index) => lines.push(`${index + 1}. ${item}`));
+  };
+  appendList("Next Moves", payload.nextMoves, (item) => [item.title, item.detail, item.tool ? `Tool: ${item.tool}` : ""].filter(Boolean).join(" | "));
+  appendList("Risk Radar", payload.risks);
+  appendList("Blockers", payload.blockers);
+  appendList("Warnings", payload.warnings);
+  appendList("Proof Gaps", payload.proofGaps);
+  appendList("Technician Plan", payload.technicianPlan);
+  appendList("Save Back After Job", payload.saveBackChecklist);
+  if (payload.copyBlocks.customerNote) lines.push("", "Customer Note:", payload.copyBlocks.customerNote);
+  if (payload.copyBlocks.workOrderNote) lines.push("", "Work Order Note:", payload.copyBlocks.workOrderNote);
+  if (payload.copyBlocks.technicianChecklist) lines.push("", "Tech Checklist:", payload.copyBlocks.technicianChecklist);
+  return `${lines.join("\n")}\n`;
+}
+
+function aiCommanderPacketFilename(payload) {
+  const slug = cleanInput(payload.subject || payload.title || "field-command")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 54) || "field-command";
+  return `timlock-${slug}-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
+function setAiCommanderStatus(message) {
+  const status = aiCommanderPanel?.querySelector("[data-ai-commander-status]");
+  if (!status) return;
+  status.hidden = false;
+  status.textContent = message;
+}
+
+async function copyTextToClipboard(text) {
+  const cleanText = cleanInput(text);
+  if (!cleanText) throw new Error("No packet text is available yet.");
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(cleanText);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = cleanText;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+async function copyAiCommanderPacket() {
+  await copyTextToClipboard(aiCommanderPacketText());
+  setAiCommanderStatus("Field command packet copied.");
+}
+
+async function copyAiCommanderBlock(key) {
+  const payload = aiCommanderPacketPayload();
+  const text = payload.copyBlocks?.[key] || "";
+  await copyTextToClipboard(text || aiCommanderPacketText());
+  setAiCommanderStatus(key === "customerNote" ? "Customer note copied." : key === "workOrderNote" ? "Work order note copied." : "Technician checklist copied.");
+}
+
+function exportAiCommanderPacket() {
+  const payload = aiCommanderPacketPayload();
+  downloadJson(aiCommanderPacketFilename(payload), payload);
+  setAiCommanderStatus("Field command packet exported.");
+}
+
+function packetListHtml(title, items) {
+  const cleanItems = (items || []).map(cleanInput).filter(Boolean);
+  if (!cleanItems.length) return "";
+  return `
+    <section>
+      <h2>${escapeHtml(title)}</h2>
+      <ul>${cleanItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
+function aiCommanderPrintHtml(payload) {
+  const scorecards = payload.scorecards?.length
+    ? `<div class="scorecards">${payload.scorecards.map((card) => `
+        <article>
+          <span>${escapeHtml(card.label)}</span>
+          <strong>${escapeHtml(card.value)}</strong>
+        </article>
+      `).join("")}</div>`
+    : "";
+  const nextMoves = (payload.nextMoves || []).map((item) => [item.title, item.detail, item.tool ? `Tool: ${item.tool}` : ""].filter(Boolean).join(" | "));
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(payload.subject)} - TimLock Field Packet</title>
+        <style>
+          body { margin: 28px; color: #171c22; font-family: Arial, Helvetica, sans-serif; line-height: 1.45; }
+          header { border-bottom: 2px solid #171c22; padding-bottom: 16px; margin-bottom: 18px; }
+          h1 { margin: 0; font-size: 28px; }
+          h2 { margin: 18px 0 8px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; }
+          p { margin: 5px 0; }
+          button { margin-bottom: 18px; padding: 10px 14px; border: 0; border-radius: 6px; background: #171c22; color: #fff; font-weight: 700; }
+          .meta { color: #5a6470; font-size: 13px; }
+          .decision { border: 1px solid #cbd3dc; border-radius: 7px; padding: 12px; background: #f6f8fa; }
+          .scorecards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+          .scorecards article { border: 1px solid #cbd3dc; border-radius: 6px; padding: 9px; }
+          .scorecards span { display: block; color: #5a6470; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+          .scorecards strong { display: block; margin-top: 4px; }
+          li { margin: 5px 0; }
+          @media print { button { display: none; } body { margin: 18mm; } }
+        </style>
+      </head>
+      <body>
+        <button type="button" onclick="window.print()">Print Packet</button>
+        <header>
+          <p class="meta">TimLock Field Command Packet</p>
+          <h1>${escapeHtml(payload.subject)}</h1>
+          <p>${escapeHtml(payload.headline || payload.title)}</p>
+          <p class="meta">Generated ${escapeHtml(new Date(payload.exportedAt).toLocaleString())} | Readiness ${escapeHtml(payload.readiness.score)}% - ${escapeHtml(payload.readiness.label)}</p>
+        </header>
+        <section class="decision">
+          <h2>Decision</h2>
+          <p>${escapeHtml(payload.mission.decision)}</p>
+        </section>
+        ${scorecards}
+        ${packetListHtml("Next Moves", nextMoves)}
+        ${packetListHtml("Risk Radar", payload.risks)}
+        ${packetListHtml("Blockers", payload.blockers)}
+        ${packetListHtml("Warnings", payload.warnings)}
+        ${packetListHtml("Proof Gaps", payload.proofGaps)}
+        ${packetListHtml("Technician Plan", payload.technicianPlan)}
+        ${packetListHtml("Save Back After Job", payload.saveBackChecklist)}
+        ${payload.copyBlocks.customerNote ? `<section><h2>Customer Note</h2><p>${escapeHtml(payload.copyBlocks.customerNote)}</p></section>` : ""}
+        ${payload.copyBlocks.workOrderNote ? `<section><h2>Work Order Note</h2><p>${escapeHtml(payload.copyBlocks.workOrderNote)}</p></section>` : ""}
+      </body>
+    </html>
+  `;
+}
+
+function printAiCommanderPacket() {
+  const payload = aiCommanderPacketPayload();
+  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  if (!printWindow) {
+    setAiCommanderStatus("Print was blocked by the browser. Use Copy Packet or Export JSON.");
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(aiCommanderPrintHtml(payload));
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => printWindow.print(), 250);
+  setAiCommanderStatus("Printable field packet opened.");
+}
+
+async function handleAiCommanderAction(action, button) {
+  const original = button?.textContent || "";
+  try {
+    if (button) button.disabled = true;
+    if (action === "copy") {
+      await copyAiCommanderPacket();
+      if (button) button.textContent = "Copied";
+    } else if (action === "print") {
+      printAiCommanderPacket();
+      if (button) button.textContent = "Opened";
+    } else if (action === "export") {
+      exportAiCommanderPacket();
+      if (button) button.textContent = "Exported";
+    } else if (action === "customerNote" || action === "workOrderNote" || action === "technicianChecklist") {
+      await copyAiCommanderBlock(action);
+      if (button) button.textContent = "Copied";
+    }
+  } catch (error) {
+    setAiCommanderStatus(error.message);
+  } finally {
+    if (button) {
+      window.setTimeout(() => {
+        button.textContent = original;
+        button.disabled = false;
+      }, 1200);
+    }
+  }
+}
+
 function renderAiCommanderPanel(commander = latestAiCommander) {
   if (!aiCommanderPanel) return;
   if (!commander) {
@@ -7948,6 +8214,10 @@ function renderAiCommanderPanel(commander = latestAiCommander) {
   const risks = commander.riskRadar || [];
   const cards = commander.dataScorecards || [];
   const learning = commander.learningLoop || {};
+  const copyBlocks = commander.fieldPacket?.copyBlocks || {};
+  const hasCustomerNote = Boolean(commander.mission?.customerSafeNote || copyBlocks.customerNote);
+  const hasWorkOrderNote = Boolean(commander.mission?.workOrderNote || copyBlocks.workOrderNote);
+  const hasTechChecklist = Boolean(copyBlocks.technicianChecklist);
   aiCommanderPanel.innerHTML = `
     <section class="ai-commander-card">
       <div class="ai-score mini ${scoreClass}">
@@ -7961,6 +8231,15 @@ function renderAiCommanderPanel(commander = latestAiCommander) {
       </div>
       <button class="secondary-action small" type="button" id="refreshAiCommanderInline">Refresh</button>
     </section>
+    <div class="ai-command-tools" aria-label="Field command packet actions">
+      <button class="primary-action small" type="button" data-ai-commander-action="copy">Copy Packet</button>
+      <button class="secondary-action small" type="button" data-ai-commander-action="print">Print Packet</button>
+      <button class="secondary-action small" type="button" data-ai-commander-action="export">Export JSON</button>
+      ${hasCustomerNote ? `<button class="secondary-action small" type="button" data-ai-commander-action="customerNote">Customer Note</button>` : ""}
+      ${hasWorkOrderNote ? `<button class="secondary-action small" type="button" data-ai-commander-action="workOrderNote">Work Order Note</button>` : ""}
+      ${hasTechChecklist ? `<button class="secondary-action small" type="button" data-ai-commander-action="technicianChecklist">Tech Checklist</button>` : ""}
+    </div>
+    <div class="ai-commander-status" data-ai-commander-status hidden></div>
     ${
       cards.length
         ? `<div class="ai-command-scorecards">${cards.map((card) => `
@@ -8730,6 +9009,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const aiCommanderButton = event.target.closest("[data-ai-commander-action]");
+  if (aiCommanderButton) {
+    handleAiCommanderAction(aiCommanderButton.dataset.aiCommanderAction, aiCommanderButton);
+    return;
+  }
+
   const aiFeedbackButton = event.target.closest("[data-ai-feedback]");
   if (aiFeedbackButton) {
     submitAiFeedback(aiFeedbackButton.dataset.aiFeedback, aiFeedbackButton.dataset.aiResponseId, aiFeedbackButton);
