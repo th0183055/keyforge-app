@@ -39,6 +39,7 @@ let latestAiResponse = null;
 let latestAiAdvisor = null;
 let latestAiMemory = null;
 let latestAiCommander = null;
+let latestMissionControl = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestAuthStatus = null;
@@ -129,6 +130,9 @@ const authRoleButtons = document.querySelectorAll("[data-auth-role]");
 const globalSearchForm = document.querySelector("#globalSearchForm");
 const globalSearchStatus = document.querySelector("#globalSearchStatus");
 const globalSearchResult = document.querySelector("#globalSearchResult");
+const missionControlResult = document.querySelector("#missionControlResult");
+const missionControlStatus = document.querySelector("#missionControlStatus");
+const refreshMissionControlButton = document.querySelector("#refreshMissionControl");
 const dashboardJobs = document.querySelector("#dashboardJobs");
 const jobBoard = document.querySelector("#jobBoard");
 const vehicleGrid = document.querySelector("#vehicleGrid");
@@ -226,6 +230,10 @@ const routeMeta = {
   command: {
     eyebrow: "Command center",
     title: "Search everything. Open the exact tool as a clean page.",
+  },
+  "mission-control": {
+    eyebrow: "Owner command",
+    title: "Run the platform from backend health to field readiness.",
   },
   vin: {
     eyebrow: "VIN to key",
@@ -326,6 +334,7 @@ function showView(id, options = {}) {
   }
   closeMobileMenu();
   if (scroll) mainElement?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  if (id === "mission-control" && !latestMissionControl) loadMissionControl();
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
@@ -3777,6 +3786,287 @@ function renderPartHistory(payload) {
 
 function coveragePercentLabel(value) {
   return Number.isFinite(Number(value)) ? `${Number(value)}%` : "N/A";
+}
+
+function missionToneClass(value) {
+  const text = cleanInput(value);
+  if (["ready", "warn", "danger"].includes(text)) return text;
+  const score = Number(value);
+  if (score >= 82) return "ready";
+  if (score >= 58) return "warn";
+  return "danger";
+}
+
+function missionControlBrief(payload = latestMissionControl) {
+  if (!payload) return "";
+  const cards = (payload.scorecards || []).map((card) => `${card.label}: ${card.value}${card.detail ? ` (${card.detail})` : ""}`);
+  const risks = payload.riskQueue || [];
+  const actions = payload.actionStack || [];
+  return [
+    "TIMLOCK MISSION CONTROL BRIEF",
+    `Generated: ${new Date(payload.generatedAt || Date.now()).toLocaleString()}`,
+    `Readiness: ${payload.readinessScore || 0}% - ${payload.readinessLabel || "Unknown"}`,
+    payload.headline || "",
+    "",
+    "Scorecards:",
+    ...cards.map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "Top Risks:",
+    ...(risks.length ? risks : ["No urgent risks reported."]).slice(0, 8).map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "Next Actions:",
+    ...actions.slice(0, 6).map((item, index) => `${index + 1}. ${item.label}: ${item.detail || item.target || ""}`),
+  ].filter((line) => line !== null && line !== undefined).join("\n");
+}
+
+function renderMissionScorecards(cards = []) {
+  return `
+    <section class="mission-score-grid">
+      ${cards
+        .map(
+          (card) => `
+            <article class="${escapeHtml(missionToneClass(card.tone))}">
+              <span>${escapeHtml(card.label)}</span>
+              <strong>${escapeHtml(card.value)}</strong>
+              <p>${escapeHtml(card.detail || "")}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderMissionPillars(pillars = []) {
+  return `
+    <section class="mission-pillar-grid">
+      ${pillars
+        .map(
+          (pillar) => `
+            <article class="${escapeHtml(missionToneClass(pillar.tone || pillar.score))}">
+              <div>
+                <span>${escapeHtml(pillar.title)}</span>
+                <strong>${escapeHtml(`${pillar.score || 0}%`)}</strong>
+              </div>
+              <div class="mission-meter"><i style="width: ${Math.max(0, Math.min(100, Number(pillar.score) || 0))}%"></i></div>
+              <ul>${(pillar.facts || []).slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderMissionDataMap(data = {}) {
+  const rows = [
+    ["Saved jobs", data.savedJobs],
+    ["Automotive jobs", data.automotiveJobs],
+    ["Proof attachments", data.proofAttachments],
+    ["Parts rows", data.partsRows],
+    ["Part tokens", data.partTokens],
+    ["Programming rows", data.programmingRows],
+    ["Auto baseline rows", data.codeBaselineRows],
+    ["Lishi tools", data.lishiTools],
+    ["Lishi applications", data.lishiApplications],
+    ["Master catalog", data.masterCatalogRows],
+    ["KI labels", data.keyInnovationLabels],
+    ["Reference Vault", data.referenceVault],
+    ["Vehicle profiles", data.vehicleProfiles],
+    ["Public sources", data.publicSources],
+    ["AI feedback", data.aiFeedback],
+    ["Shop rules", data.shopRules],
+  ];
+  return `
+    <section class="mission-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Data map</p>
+          <h3>What powers the app</h3>
+        </div>
+      </div>
+      <div class="mission-data-grid">
+        ${rows
+          .map(
+            ([label, value]) => `
+              <article>
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(value ?? 0)}</strong>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderMissionCoverage(snapshot = {}) {
+  const summary = snapshot.summary || {};
+  const programmers = snapshot.topProgrammers || [];
+  const makes = snapshot.topMakes || [];
+  return `
+    <section class="mission-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Proof engine</p>
+          <h3>Coverage readiness</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-mission-open="coverage">Open Coverage</button>
+      </div>
+      <div class="mission-proof-grid">
+        <article>
+          <span>Observed</span>
+          <strong>${escapeHtml(coveragePercentLabel(summary.observedCoveragePercent))}</strong>
+          <p>${escapeHtml(`${summary.provenJobs || 0} proven / ${summary.warningJobs || 0} warnings / ${summary.unknownJobs || 0} unknown`)}</p>
+        </article>
+        <article>
+          <span>Programmer proof</span>
+          <strong>${escapeHtml(coveragePercentLabel(summary.programmerProofPercent))}</strong>
+          <p>${escapeHtml(`${summary.jobsWithProgrammer || 0} jobs with programmer recorded`)}</p>
+        </article>
+        <article>
+          <span>Part proof</span>
+          <strong>${escapeHtml(coveragePercentLabel(summary.partProofPercent))}</strong>
+          <p>${escapeHtml(`${summary.jobsWithPartNumbers || 0} jobs with part identifiers`)}</p>
+        </article>
+      </div>
+      <div class="mission-mini-columns">
+        <article>
+          <strong>Top programmers</strong>
+          <div class="part-chip-row">${renderPartChips(programmers.map((item) => `${item.key} ${coveragePercentLabel(item.observedCoveragePercent)}`), "No programmer proof")}</div>
+        </article>
+        <article>
+          <strong>Top makes</strong>
+          <div class="part-chip-row">${renderPartChips(makes.map((item) => `${item.key} ${coveragePercentLabel(item.observedCoveragePercent)}`), "No make proof")}</div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+function renderMissionProof(snapshot = {}) {
+  return `
+    <section class="mission-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Proof Vault</p>
+          <h3>Recent field evidence</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-mission-open="proof-vault">Open Vault</button>
+      </div>
+      <div class="mission-proof-list">
+        ${
+          snapshot.recent?.length
+            ? snapshot.recent
+                .map(
+                  (record) => `
+                    <article>
+                      <div>
+                        <span>${escapeHtml(record.outcome || "Proof")}</span>
+                        <strong>${escapeHtml(record.vehicle || record.vin || "Saved job")}</strong>
+                        <p>${escapeHtml([record.programmer, (record.parts || []).join(", ")].filter(Boolean).join(" | ") || "No programmer/part proof recorded")}</p>
+                      </div>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<article><div><strong>No proof records yet</strong><p>Save worked jobs or import field history to build proof.</p></div></article>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderMissionRisks(risks = [], actions = []) {
+  return `
+    <section class="mission-section mission-action-section">
+      <div class="mission-risk-card">
+        <p class="eyebrow">Risk queue</p>
+        <h3>Fix these first</h3>
+        <ul>${(risks.length ? risks : ["No urgent platform risks reported."]).slice(0, 8).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>
+      <div class="mission-action-card">
+        <p class="eyebrow">Next actions</p>
+        <h3>Jump straight in</h3>
+        <div class="mission-action-list">
+          ${actions
+            .slice(0, 6)
+            .map(
+              (action) => `
+                <button class="secondary-action small" type="button" data-mission-open="${escapeHtml(action.target || "workbench")}">
+                  <strong>${escapeHtml(action.label || "Open")}</strong>
+                  <span>${escapeHtml(action.detail || "")}</span>
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMissionControl(payload = latestMissionControl) {
+  if (!missionControlResult) return;
+  latestMissionControl = payload;
+  if (!payload) {
+    missionControlResult.innerHTML = `<article class="assistant-card"><strong>Mission Control unavailable</strong><p>Refresh when the server is awake.</p></article>`;
+    return;
+  }
+  const tone = missionToneClass(payload.readinessScore);
+  missionControlResult.innerHTML = `
+    <section class="mission-hero ${escapeHtml(tone)}">
+      <div class="mission-score">
+        <strong>${escapeHtml(payload.readinessScore || 0)}</strong>
+        <span>${escapeHtml(payload.readinessLabel || "readiness")}</span>
+      </div>
+      <div>
+        <p class="eyebrow">${escapeHtml(payload.title || "Mission Control")}</p>
+        <h3>${escapeHtml(payload.headline || "Platform readiness loaded.")}</h3>
+        <p>${escapeHtml((payload.releaseBrief || [])[0] || "Backend, frontend, proof, storage, and AI are summarized here.")}</p>
+      </div>
+    </section>
+    ${renderMissionScorecards(payload.scorecards || [])}
+    ${renderMissionPillars(payload.pillars || [])}
+    ${renderMissionRisks(payload.riskQueue || [], payload.actionStack || [])}
+    ${renderMissionCoverage(payload.coverageSnapshot || {})}
+    ${renderMissionProof(payload.proofSnapshot || {})}
+    ${renderMissionDataMap(payload.dataMap || {})}
+    <article class="assistant-card mission-release-card">
+      <strong>Owner release brief</strong>
+      <ul>${(payload.releaseBrief || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </article>
+  `;
+  if (missionControlStatus) {
+    missionControlStatus.textContent = `Mission Control updated ${new Date(payload.generatedAt || Date.now()).toLocaleString()}.`;
+  }
+}
+
+async function loadMissionControl({ quiet = false } = {}) {
+  if (!missionControlResult) return null;
+  try {
+    if (!quiet && missionControlStatus) missionControlStatus.textContent = "Building backend, proof, storage, data, and AI readiness map...";
+    const payload = await api("/api/mission-control", {
+      method: "POST",
+      body: JSON.stringify({ jobs: localArchivedJobs() }),
+      timeoutMs: 18000,
+    });
+    renderMissionControl(payload);
+    return payload;
+  } catch (error) {
+    if (missionControlStatus) missionControlStatus.textContent = error.message;
+    missionControlResult.innerHTML = `<article class="assistant-card"><strong>Mission Control unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+async function copyMissionControlBrief() {
+  if (!latestMissionControl) await loadMissionControl({ quiet: true });
+  const text = missionControlBrief(latestMissionControl);
+  if (!text) return;
+  await copyTextToClipboard(text);
+  if (missionControlStatus) missionControlStatus.textContent = "Mission Control brief copied.";
 }
 
 function coverageProofSummary(payload = {}) {
@@ -8904,6 +9194,7 @@ globalSearchForm?.addEventListener("submit", (event) => {
   runGlobalSearch();
 });
 
+refreshMissionControlButton?.addEventListener("click", () => loadMissionControl());
 refreshCoverageDashboardButton?.addEventListener("click", () => loadCoverageDashboard());
 syncProofVaultButton?.addEventListener("click", async () => {
   if (proofVaultStatus) proofVaultStatus.textContent = "Syncing local proof...";
@@ -9009,6 +9300,20 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const missionOpenButton = event.target.closest("[data-mission-open]");
+  if (missionOpenButton) {
+    showView(missionOpenButton.dataset.missionOpen || "workbench");
+    return;
+  }
+
+  const missionCopyButton = event.target.closest("[data-copy-mission-control]");
+  if (missionCopyButton) {
+    copyMissionControlBrief().catch((error) => {
+      if (missionControlStatus) missionControlStatus.textContent = error.message;
+    });
+    return;
+  }
+
   const aiCommanderButton = event.target.closest("[data-ai-commander-action]");
   if (aiCommanderButton) {
     handleAiCommanderAction(aiCommanderButton.dataset.aiCommanderAction, aiCommanderButton);
@@ -9843,6 +10148,7 @@ refreshApiHealth({ quiet: true });
 window.setInterval(() => refreshApiHealth({ quiet: true }), 60000);
 bootTask("auth status", loadAuthStatus);
 bootTask("jobs", loadJobs);
+bootTask("mission control", () => loadMissionControl({ quiet: true }));
 bootTask("coverage dashboard", loadCoverageDashboard);
 bootTask("ai advisor", loadAiAdvisor);
 bootTask("ai memory", loadAiMemory);

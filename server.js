@@ -1643,6 +1643,267 @@ async function buildStorageStatus() {
   };
 }
 
+function missionToneFromScore(score) {
+  const value = Number(score) || 0;
+  if (value >= 82) return "ready";
+  if (value >= 58) return "warn";
+  return "danger";
+}
+
+function missionPercent(numerator, denominator) {
+  const top = Number(numerator) || 0;
+  const bottom = Number(denominator) || 0;
+  return bottom ? Math.round((top / bottom) * 100) : 0;
+}
+
+function missionScorecard(label, value, detail = "", tone = "") {
+  return {
+    label: cleanString(label),
+    value: cleanString(value),
+    detail: cleanString(detail),
+    tone: cleanString(tone) || "ready",
+  };
+}
+
+async function buildMissionControl(body = {}, store = { jobs: [] }) {
+  const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const [
+    health,
+    storage,
+    partsReference,
+    lishiReference,
+    proofAttachments,
+    referenceVault,
+    vehicleProfiles,
+    publicSources,
+    programmingReference,
+    masterCatalog,
+    keyInnovations,
+  ] = await Promise.all([
+    buildHealthStatus(),
+    buildStorageStatus(),
+    readPartsCrossReference(),
+    readLishiMasterReference(),
+    readProofAttachments(),
+    readReferenceVault(),
+    readVehicleProfiles(),
+    readPublicReferenceSources(),
+    readJsonCached(programmingReferencePath, { rows: [] }),
+    readMasterCatalog().catch(() => ({ rows: [] })),
+    readKeyInnovationsLabels().catch(() => ({ entries: [] })),
+  ]);
+  const coverage = buildCoverageDashboard(jobs, partsReference);
+  const proofVault = buildProofVault("", jobs, partsReference);
+  const advisor = buildAiAdvisor({
+    jobs,
+    partsReference,
+    auditLog: store.auditLog,
+    feedback: store.aiFeedback,
+    shopRules: store.shopRules,
+    preferences: store.aiPreferences,
+    proofAttachments,
+  });
+  const codeBaseline = await buildAutoCodeBaseline({ limit: 24 }).catch(() => ({ totalRows: 0, returnedRows: 0, rows: [] }));
+  const storageWarnings = storage.warnings || [];
+  const healthIssues = (health.files || []).filter((file) => !file.ok && !file.optional);
+  const coverageSummary = coverage.summary || {};
+  const dataCounts = {
+    savedJobs: jobs.length,
+    automotiveJobs: coverageSummary.automotiveJobs || 0,
+    proofAttachments: proofAttachments.attachments?.length || 0,
+    partsRows: partsReference.totalRows || partsReference.rows?.length || 0,
+    partTokens: partsReference.totalTokens || Object.keys(partsReference.tokenIndex || {}).length,
+    lishiTools: lishiReference.tools?.length || 0,
+    lishiApplications: lishiReference.applications?.length || 0,
+    programmingRows: programmingReference.rows?.length || 0,
+    codeBaselineRows: codeBaseline.totalRows || codeBaseline.rows?.length || 0,
+    masterCatalogRows: masterCatalog.rows?.length || 0,
+    keyInnovationLabels: keyInnovations.entries?.length || 0,
+    referenceVault: referenceVault.entries?.length || 0,
+    vehicleProfiles: vehicleProfiles.profiles?.length || 0,
+    publicSources: publicSources.sources?.length || 0,
+    aiFeedback: store.aiFeedback?.length || 0,
+    shopRules: store.shopRules?.length || 0,
+  };
+  const storageScore =
+    storage.status === "durable"
+      ? 100
+      : storage.storage?.attachmentMode === "cloudflare-r2" || storage.storage?.dataDirMode === "external-data-dir"
+        ? 78
+        : 48;
+  const healthScore = health.status === "ok" ? 100 : 45;
+  const authScore = storage.storage?.auth?.enabled ? 100 : 42;
+  const coverageScore = Math.round(
+    ((coverageSummary.observedCoveragePercent || 0) +
+      (coverageSummary.programmerProofPercent || 0) +
+      (coverageSummary.partProofPercent || 0) +
+      (coverageSummary.crossReferencePercent || 0)) /
+      4,
+  );
+  const dataScore = Math.min(
+    100,
+    Math.round(
+      (dataCounts.partsRows ? 18 : 0) +
+        (dataCounts.programmingRows ? 18 : 0) +
+        (dataCounts.lishiTools ? 14 : 0) +
+        (dataCounts.masterCatalogRows ? 14 : 0) +
+        (dataCounts.keyInnovationLabels ? 10 : 0) +
+        (dataCounts.referenceVault ? 8 : 0) +
+        (dataCounts.vehicleProfiles ? 8 : 0) +
+        (dataCounts.publicSources ? 10 : 0),
+    ),
+  );
+  const aiScore = Math.min(100, Math.round((advisor.readinessScore || 0) * 0.8 + Math.min(20, dataCounts.aiFeedback + dataCounts.shopRules)));
+  const readinessScore = Math.round(healthScore * 0.18 + storageScore * 0.16 + authScore * 0.12 + coverageScore * 0.2 + dataScore * 0.2 + aiScore * 0.14);
+  const riskQueue = uniqueCleanValues([
+    ...storageWarnings,
+    ...healthIssues.map((file) => `${file.label} needs attention: ${file.error || "not readable"}`),
+    ...(coverage.gaps?.missingProgrammer || []).slice(0, 3).map((job) => `Add programmer proof: ${job.vehicle || job.title || job.id}`),
+    ...(coverage.gaps?.missingPart || []).slice(0, 3).map((job) => `Add part proof: ${job.vehicle || job.title || job.id}`),
+    ...(coverage.gaps?.needsOutcome || []).slice(0, 3).map((job) => `Score job outcome: ${job.vehicle || job.title || job.id}`),
+    ...(dataCounts.proofAttachments ? [] : ["Proof Vault has no server-backed attachment metadata yet."]),
+  ]).slice(0, 12);
+  const actionStack = [
+    {
+      label: "Build AI Field Packet",
+      target: "ai",
+      detail: "Open the AI Bench and create a printable technician command packet.",
+      priority: 95,
+    },
+    {
+      label: "Open Workbench",
+      target: "workbench",
+      detail: "Pull parts, proof, Lishi, Code Desk, and coverage into one job packet.",
+      priority: 92,
+    },
+    {
+      label: "Search Proof Vault",
+      target: "proof-vault",
+      detail: "Find saved job proof and attach missing authorization/photos.",
+      priority: 88,
+    },
+    {
+      label: "Review Coverage",
+      target: "coverage",
+      detail: "See programmer, part, and make-level proof percentages.",
+      priority: 84,
+    },
+    {
+      label: "Reference Lists",
+      target: "reference-lists",
+      detail: "Inspect the raw data powering parts, Lishi, programming, and catalogs.",
+      priority: 76,
+    },
+    {
+      label: "Storage Settings",
+      target: "settings",
+      detail: "Check auth, backups, R2/persistent storage, and attachment durability.",
+      priority: storageWarnings.length ? 98 : 68,
+    },
+  ].sort((a, b) => b.priority - a.priority);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    title: "TimLock Mission Control",
+    headline:
+      readinessScore >= 82
+        ? "Platform is field-ready and scaling cleanly."
+        : readinessScore >= 58
+          ? "Platform is strong, with a few proof/storage gaps to tighten."
+          : "Platform needs backend/proof cleanup before subscriber-grade use.",
+    readinessScore,
+    readinessLabel: aiReadinessLabel(readinessScore),
+    scorecards: [
+      missionScorecard("Backend", `${healthScore}%`, health.summary || "Health checked", missionToneFromScore(healthScore)),
+      missionScorecard("Storage", `${storageScore}%`, storage.storage?.attachmentMode || "storage checked", missionToneFromScore(storageScore)),
+      missionScorecard("Auth", `${authScore}%`, storage.storage?.auth?.enabled ? "Protection active" : "Protection not enforced", missionToneFromScore(authScore)),
+      missionScorecard("Proof", `${coverageScore}%`, `${coverageSummary.automotiveJobs || 0} automotive jobs`, missionToneFromScore(coverageScore)),
+      missionScorecard("Data", `${dataScore}%`, `${dataCounts.partsRows} parts rows / ${dataCounts.programmingRows} programming rows`, missionToneFromScore(dataScore)),
+      missionScorecard("AI", `${aiScore}%`, advisor.headline || "AI advisor ready", missionToneFromScore(aiScore)),
+    ],
+    pillars: [
+      {
+        id: "backend",
+        title: "Backend Core",
+        score: healthScore,
+        tone: missionToneFromScore(healthScore),
+        facts: [
+          `${(health.files || []).filter((file) => file.ok).length}/${(health.files || []).length} data files readable`,
+          `Booted ${bootedAt}`,
+          `${healthIssues.length} health issue${healthIssues.length === 1 ? "" : "s"}`,
+        ],
+      },
+      {
+        id: "storage",
+        title: "Storage + Security",
+        score: storageScore,
+        tone: missionToneFromScore(storageScore),
+        facts: [
+          `Data: ${storage.storage?.dataDirMode || "unknown"}`,
+          `Proof files: ${storage.storage?.attachmentMode || "unknown"}`,
+          storage.storage?.auth?.enabled ? "Auth enabled" : "Auth disabled",
+        ],
+      },
+      {
+        id: "proof",
+        title: "Proof Engine",
+        score: coverageScore,
+        tone: missionToneFromScore(coverageScore),
+        facts: [
+          `${coverageSummary.observedCoveragePercent || 0}% observed success proof`,
+          `${coverageSummary.programmerProofPercent || 0}% programmer proof`,
+          `${coverageSummary.partProofPercent || 0}% part proof`,
+        ],
+      },
+      {
+        id: "ai",
+        title: "AI Learning",
+        score: aiScore,
+        tone: missionToneFromScore(aiScore),
+        facts: [
+          `${dataCounts.aiFeedback} AI feedback marks`,
+          `${dataCounts.shopRules} shop rules`,
+          advisor.topAction?.title || "No urgent AI action",
+        ],
+      },
+    ],
+    dataMap: dataCounts,
+    coverageSnapshot: {
+      summary: coverageSummary,
+      topProgrammers: (coverage.programmers || []).slice(0, 5),
+      topMakes: (coverage.makes || []).slice(0, 5),
+      proofNote: coverage.proofNote,
+    },
+    proofSnapshot: {
+      totalJobs: proofVault.summary?.totalJobs || 0,
+      shownJobs: proofVault.summary?.shownJobs || 0,
+      proofAttachments: dataCounts.proofAttachments,
+      recent: (proofVault.records || []).slice(0, 5).map((record) => ({
+        id: record.id,
+        vehicle: record.vehicle,
+        vin: record.vin,
+        programmer: record.programmer,
+        outcome: record.outcome?.label || record.outcome?.key || "",
+        parts: (record.partNumbers || []).slice(0, 4),
+      })),
+    },
+    riskQueue,
+    actionStack,
+    aiSnapshot: {
+      readinessScore: advisor.readinessScore,
+      headline: advisor.headline,
+      topAction: advisor.topAction,
+      summary: advisor.summary || [],
+      memory: advisor.memory || {},
+    },
+    releaseBrief: [
+      "Mission Control now gives the owner one operational dashboard for backend health, proof readiness, data coverage, storage, auth, and AI learning.",
+      "Use the risk queue as the nightly cleanup list and the action stack as the fastest path back into the exact app tools.",
+      "Readiness percentages are shop-operational signals, not locksmith code/license guarantees.",
+    ],
+  };
+}
+
 async function buildStorageExport() {
   const [status, store, vehicleProfiles, referenceVault, publicReferenceSources, proofAttachments, supplierAccounts] = await Promise.all([
     buildStorageStatus(),
@@ -8529,6 +8790,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/audit-log",
   ];
   if (ownerOnlyPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return true;
+  if (pathname === "/api/mission-control") return true;
   if (pathname === "/api/jobs" || pathname.startsWith("/api/jobs/")) return true;
   if (pathname === "/api/jobs/sync" || pathname === "/api/part-outcomes" || pathname === "/api/worked-jobs/import") return true;
   if (pathname.startsWith("/api/proof-vault/attachments") && writeMethod) return true;
@@ -8629,6 +8891,12 @@ async function handleApi(request, response, pathname) {
   }
 
   const store = await readStore();
+
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/mission-control") {
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
+    sendJson(response, 200, await buildMissionControl(body, store));
+    return;
+  }
 
   if (request.method === "GET" && pathname === "/api/jobs") {
     sendJson(response, 200, { jobs: store.jobs });

@@ -6688,6 +6688,259 @@ textarea:focus {
   margin-bottom: 0;
 }
 
+.mission-control-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.mission-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.mission-control-result {
+  display: grid;
+  gap: 12px;
+}
+
+.mission-hero,
+.mission-score-grid article,
+.mission-pillar-grid article,
+.mission-section,
+.mission-risk-card,
+.mission-action-card,
+.mission-proof-grid article,
+.mission-data-grid article,
+.mission-proof-list article {
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  background: rgba(246, 248, 250, 0.9);
+}
+
+.mission-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+}
+
+.mission-hero.ready {
+  border-color: #a8d2b5;
+  background: linear-gradient(135deg, #f4fbf6, rgba(246, 248, 250, 0.92));
+}
+
+.mission-hero.warn {
+  border-color: #d7aa58;
+  background: linear-gradient(135deg, #fff8e8, rgba(246, 248, 250, 0.92));
+}
+
+.mission-hero.danger {
+  border-color: #ce8c8c;
+  background: linear-gradient(135deg, #fff0f0, rgba(246, 248, 250, 0.92));
+}
+
+.mission-score {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2a2f36, #050608);
+  color: white;
+}
+
+.mission-score strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.mission-score span {
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mission-hero h3,
+.mission-hero p,
+.mission-section h3,
+.mission-risk-card h3,
+.mission-action-card h3 {
+  margin: 0;
+}
+
+.mission-hero p:not(.eyebrow) {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.mission-score-grid,
+.mission-pillar-grid,
+.mission-proof-grid,
+.mission-data-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.mission-score-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.mission-pillar-grid,
+.mission-proof-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mission-data-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mission-score-grid article,
+.mission-pillar-grid article,
+.mission-proof-grid article,
+.mission-data-grid article {
+  min-width: 0;
+  padding: 10px;
+}
+
+.mission-score-grid article.ready,
+.mission-pillar-grid article.ready {
+  border-color: #a8d2b5;
+}
+
+.mission-score-grid article.warn,
+.mission-pillar-grid article.warn {
+  border-color: #d7aa58;
+}
+
+.mission-score-grid article.danger,
+.mission-pillar-grid article.danger {
+  border-color: #ce8c8c;
+}
+
+.mission-score-grid span,
+.mission-pillar-grid span,
+.mission-proof-grid span,
+.mission-data-grid span,
+.mission-proof-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mission-score-grid strong,
+.mission-pillar-grid strong,
+.mission-proof-grid strong,
+.mission-data-grid strong,
+.mission-proof-list strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.mission-score-grid p,
+.mission-proof-grid p,
+.mission-proof-list p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.mission-meter {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  margin: 9px 0;
+  background: #dce2e8;
+}
+
+.mission-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #66717d, #050608);
+}
+
+.mission-pillar-grid ul,
+.mission-risk-card ul,
+.mission-release-card ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.42;
+}
+
+.mission-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.mission-action-section {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.mission-risk-card,
+.mission-action-card {
+  padding: 12px;
+}
+
+.mission-action-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mission-action-list button {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  text-align: left;
+}
+
+.mission-action-list button span {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.mission-mini-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mission-mini-columns article {
+  border: 1px solid #dce2e8;
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.mission-proof-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mission-proof-list article {
+  padding: 9px;
+}
+
+.mission-release-card ul {
+  margin-top: 8px;
+}
+
 @media (max-width: 760px) {
   .part-history-form,
   .code-desk-form,
@@ -6710,7 +6963,14 @@ textarea:focus {
   .storage-file-list,
   .verified-code-grid,
   .coverage-summary-grid,
-  .coverage-gap-grid {
+  .coverage-gap-grid,
+  .mission-score-grid,
+  .mission-pillar-grid,
+  .mission-proof-grid,
+  .mission-data-grid,
+  .mission-action-section,
+  .mission-mini-columns,
+  .mission-action-list {
     grid-template-columns: 1fr;
   }
 
@@ -6729,13 +6989,15 @@ textarea:focus {
 
   .proof-vault-actions,
   .proof-card-actions,
-  .workbench-action-buttons {
+  .workbench-action-buttons,
+  .mission-control-actions {
     justify-content: stretch;
   }
 
   .proof-vault-actions > *,
   .proof-card-actions > *,
-  .workbench-action-buttons > * {
+  .workbench-action-buttons > *,
+  .mission-control-actions > * {
     flex: 1 1 140px;
   }
 
@@ -6750,6 +7012,16 @@ textarea:focus {
 
   .proof-attachment {
     grid-template-columns: 46px minmax(0, 1fr) auto;
+  }
+
+  .mission-hero {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .mission-score {
+    width: 72px;
   }
 }
 
@@ -6862,6 +7134,7 @@ textarea:focus {
   .proof-vault-actions,
   .proof-card-actions,
   .workbench-action-buttons,
+  .mission-control-actions,
   .ai-route-actions,
   .ai-action-list,
   .ai-message-actions,
@@ -6873,6 +7146,7 @@ textarea:focus {
   .proof-vault-actions > *,
   .proof-card-actions > *,
   .workbench-action-buttons > *,
+  .mission-control-actions > *,
   .ai-route-actions > *,
   .ai-action-list > *,
   .ai-message-actions > *,
@@ -6902,6 +7176,7 @@ textarea:focus {
   .history-job-card,
   .proof-record-card,
   .workbench-section,
+  .mission-section,
   .reference-row-card,
   .code-source-panel {
     border-radius: 7px;
@@ -6986,6 +7261,7 @@ textarea:focus {
   .proof-vault-actions > *,
   .proof-card-actions > *,
   .workbench-action-buttons > *,
+  .mission-control-actions > *,
   .ai-route-actions > *,
   .ai-action-list > *,
   .ai-message-actions > *,

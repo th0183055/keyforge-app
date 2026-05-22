@@ -53,6 +53,7 @@
 
         <nav class="nav-list" aria-label="Main navigation">
           <button class="nav-item active" data-view="command">Command Center</button>
+          <button class="nav-item" data-view="mission-control" data-owner-only>Mission Control</button>
           <button class="nav-item" data-view="vin">VIN Lookup</button>
           <button class="nav-item" data-view="workbench">Job Workbench</button>
           <button class="nav-item" data-view="ai">AI Bench</button>
@@ -126,6 +127,23 @@
           </form>
           <div class="form-status" id="globalSearchStatus"></div>
           <div class="global-search-result" id="globalSearchResult" hidden></div>
+        </section>
+
+        <section class="view" id="mission-control">
+          <section class="panel wide mission-control-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Owner command</p>
+                <h3>Mission Control</h3>
+              </div>
+              <div class="mission-control-actions">
+                <button class="secondary-action small" type="button" id="refreshMissionControl">Refresh</button>
+                <button class="secondary-action small" type="button" data-copy-mission-control>Copy Brief</button>
+              </div>
+            </div>
+            <div class="form-status" id="missionControlStatus">Backend, storage, proof, references, and AI readiness load here.</div>
+            <div class="mission-control-result" id="missionControlResult"></div>
+          </section>
         </section>
 
         <section class="view" id="vin">
