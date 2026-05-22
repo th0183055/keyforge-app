@@ -6129,9 +6129,12 @@ async function loadLishiLookup(params = lishiLookupParamsFromForm()) {
   }
 }
 
-function currentWorkbenchProfile() {
+function currentWorkbenchProfile(query = workbenchQueryFromForm()) {
   const profile = latestVinProfile || readLocalObject(currentJobContextKey, null);
   if (!profile?.vehicle) return null;
+  const requestedVin = normalizeVinInput(query);
+  const profileVin = normalizeVinInput(profile.vin);
+  if (requestedVin.length === 17 && profileVin && requestedVin !== profileVin) return null;
   const snapshot = latestVinProfile ? selectedPartSnapshot(latestVinProfile) : null;
   const best = snapshot?.best || {};
   return {
@@ -6179,9 +6182,11 @@ function workbenchQueryFromForm() {
 }
 
 function workbenchPayload(query = workbenchQueryFromForm()) {
+  const requestedVin = normalizeVinInput(query);
   return {
     q: query,
-    profile: currentWorkbenchProfile(),
+    vin: requestedVin.length === 17 ? requestedVin : "",
+    profile: currentWorkbenchProfile(query),
     jobs: localArchivedJobs(),
   };
 }
@@ -6417,7 +6422,15 @@ async function loadJobWorkbench(query = workbenchQueryFromForm()) {
       timeoutMs: 18000,
     });
     renderJobWorkbench(payload);
-    if (workbenchStatus) workbenchStatus.textContent = `Workbench ready: ${payload.overview?.matchedJobs || 0} matched proof job${payload.overview?.matchedJobs === 1 ? "" : "s"}.`;
+    if (workbenchStatus) {
+      const overview = payload.overview || {};
+      const exactProof = Number(overview.exactProofMatches || 0);
+      const relatedProof = Number(overview.relatedProfileMatches || 0);
+      workbenchStatus.textContent =
+        exactProof || relatedProof
+          ? `Workbench ready: ${exactProof} exact proof match${exactProof === 1 ? "" : "es"}, ${relatedProof} related vehicle clue${relatedProof === 1 ? "" : "s"}.`
+          : "Workbench ready: no exact proof matched yet.";
+    }
   } catch (error) {
     if (workbenchStatus) workbenchStatus.textContent = error.message;
     workbenchResult.innerHTML = `<article class="assistant-card"><strong>Workbench unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;

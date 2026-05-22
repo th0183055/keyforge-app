@@ -6313,11 +6313,47 @@ function workbenchVehicleLabel(profile = {}, fallback = "") {
   return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].map(cleanString).filter(Boolean).join(" ") || cleanString(fallback || profile.vin || "Current job");
 }
 
+function explicitWorkbenchVin(body = {}) {
+  return normalizeVinCandidate(body.vin) || normalizeVinCandidate(body.q) || normalizeVinCandidate(body.query) || normalizeVinCandidate(body.proofQuery);
+}
+
+async function decodeWorkbenchVin(vin, store) {
+  let decode;
+  try {
+    decode = await decodeVinWithTimeout(vin);
+  } catch (error) {
+    decode = await localVinDecodeFallback(vin, error);
+  }
+  return buildLocksmithProfile(vin, decode, store);
+}
+
+async function resolveWorkbenchProfile(body = {}, store = { jobs: [] }) {
+  const incomingProfile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  const requestedVin = explicitWorkbenchVin(body);
+  const profileVin = normalizeVinCandidate(incomingProfile.vin);
+  const profileMatchesVin = requestedVin && profileVin === requestedVin;
+  if (!requestedVin) return incomingProfile;
+  if (profileMatchesVin && incomingProfile.vehicle?.year && incomingProfile.vehicle?.make && incomingProfile.vehicle?.model) return incomingProfile;
+  return decodeWorkbenchVin(requestedVin, store);
+}
+
+function usefulWorkbenchPartValue(value) {
+  const text = cleanString(value);
+  const compact = compactToken(text);
+  if (!compact || compact.length < 4) return false;
+  if (normalizeVinCandidate(text)) return false;
+  if (!/\d/.test(compact)) return false;
+  if (/^(?:OEMPART|PARTOUTCOME|OUTCOMEWORKED|WORKED|SAVEDJOB|SHOPPROOF|PROGRAMMINGPATH|VALIDATEDAFTERMARKETPROGRAMMER|ADVANCEDAFTERMARKETPROGRAMMER)$/.test(compact)) {
+    return false;
+  }
+  return true;
+}
+
 function workbenchPrimaryPartQuery(profile = {}, body = {}) {
   const values = uniqueCleanValues([
     body.partQuery,
-    body.q,
-    body.query,
+    normalizeVinCandidate(body.q) ? "" : body.q,
+    normalizeVinCandidate(body.query) ? "" : body.query,
     profile.partQuery,
     profile.selectedPart?.sku,
     profile.selectedPart?.oem,
@@ -6331,8 +6367,7 @@ function workbenchPrimaryPartQuery(profile = {}, body = {}) {
       item.fccId,
       item.oemPartNumbers,
     ]),
-    profile.matchedJobs?.flatMap((job) => [job.sequence, job.partNumber, job.programmer]),
-  ]);
+  ]).filter(usefulWorkbenchPartValue);
   return (
     values.find((value) => /\b(?:ULK|FRD|HON|TOY|LEX|GM|CHRY|NIS|INF|HYU|KIA|MAZ|MIT|SUB|FORD|BMW|CAD|TIK|OEM)[A-Z0-9#\- ]{2,}\b/i.test(value)) ||
     values.find((value) => compactToken(value).length >= 4) ||
@@ -6422,7 +6457,8 @@ function compactAutoBaseline(payload = {}) {
 }
 
 async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
-  const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  const requestedVin = explicitWorkbenchVin(body);
+  const profile = await resolveWorkbenchProfile(body, store);
   const vehicle = profile.vehicle || body.vehicle || {};
   const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
@@ -6433,7 +6469,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const partQuery = workbenchPrimaryPartQuery(profile, body);
   const lishiQuery = workbenchLishiQuery(profile, body);
   const autoQuery = workbenchAutoQuery(profile, body);
-  const proofQuery = cleanString(body.proofQuery || partQuery || body.q || profile.vin || workbenchVehicleLabel(profile));
+  const proofQuery = cleanString(body.proofQuery || requestedVin || partQuery || body.q || profile.vin || workbenchVehicleLabel(profile));
   const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
     partQuery ? Promise.resolve(buildPartHistory(partQuery, cleanJobs, partsReference)) : Promise.resolve(null),
     Promise.resolve(buildProofVault(proofQuery, cleanJobs, partsReference)),
@@ -6458,6 +6494,8 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     proofVault?.records?.map((record) => record.id),
     profile.matchedJobs?.map((job) => job.id),
   ]);
+  const directProofJobs = uniqueCleanValues([partHistory?.jobs?.map((job) => job.id), proofVault?.records?.map((record) => record.id)]);
+  const relatedProfileJobs = uniqueCleanValues(profile.matchedJobs?.map((job) => job.id));
   const warnings = uniqueCleanValues([
     ...(profile.vehicleReference?.warnings || []),
     profile.confidence && /verify|partial|inconclusive/i.test(profile.confidence) ? profile.confidence : "",
@@ -6491,6 +6529,8 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     overview: {
       savedJobs: cleanJobs.length,
       matchedJobs: matchedJobs.length,
+      exactProofMatches: directProofJobs.length,
+      relatedProfileMatches: relatedProfileJobs.filter((id) => !directProofJobs.includes(id)).length,
       partReferenceRows: partsReference.totalRows || partsReference.rows?.length || 0,
       lishiTools: lishiReference.stats?.tools || lishiReference.tools?.length || 0,
       lishiApplications: lishiReference.stats?.applications || lishiReference.applications?.length || 0,
@@ -6559,7 +6599,9 @@ function globalGroup(id, label, target, results = [], note = "") {
 }
 
 function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, warnings = [] }) {
-  const matchedProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0), Number(profile.matchedJobs?.length || 0));
+  const directProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0));
+  const relatedProof = Number(profile.matchedJobs?.length || 0);
+  const matchedProof = Math.max(directProof, relatedProof);
   const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
   const lishiTools = Number(lishiLookup?.tools?.length || 0);
   const autoRows = Number(autoBaseline?.rows?.length || 0);
@@ -6573,7 +6615,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
       42 +
         (hasVin ? 10 : 0) +
         (hasVehicle ? 8 : 0) +
-        Math.min(matchedProof * 8, 28) +
+        Math.min(directProof * 8 + relatedProof * 4, 28) +
         Math.min(partRows * 5, 12) +
         (lishiTools ? 6 : 0) +
         (autoRows ? 4 : 0) +
@@ -6581,15 +6623,18 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
     ),
   );
   const title = workbenchVehicleLabel(profile, body.q) || cleanString(body.q || "current job");
-  const decision = matchedProof
+  const decision = directProof
     ? `Start from saved proof for ${title}.`
+    : relatedProof
+      ? `Use related saved proof for ${title}, then verify exact VIN/key package.`
     : partRows
       ? `Use the part cross-reference as the starting point for ${title}.`
       : hasVehicle
         ? `Use vehicle identity first, then verify keyway/FCC before ordering.`
         : `Start with a VIN, YMM, LR#, MW#, TI#, OE#, FCC, or keyway search.`;
   const evidence = uniqueCleanValues([
-    matchedProof ? `${matchedProof} saved proof record${matchedProof === 1 ? "" : "s"} matched this packet.` : "",
+    directProof ? `${directProof} direct proof record${directProof === 1 ? "" : "s"} matched this packet.` : "",
+    !directProof && relatedProof ? `${relatedProof} related saved job${relatedProof === 1 ? "" : "s"} matched the decoded vehicle/profile; verify before trusting it.` : "",
     partRows ? `${partRows} part cross-reference row${partRows === 1 ? "" : "s"} matched ${partQuery || body.q || "the search"}.` : "",
     lishiTools ? `${lishiTools} Lishi tool match${lishiTools === 1 ? "" : "es"} are available from the imported master reference.` : "",
     autoRows ? `${autoRows} automotive code/programming baseline row${autoRows === 1 ? "" : "s"} matched.` : "",
@@ -6807,8 +6852,8 @@ async function readLishiMasterReference() {
 const catalogBrandPrefixes = {
   ACURA: ["ACURA", "AC"],
   HONDA: ["HON", "HONDA", "HO"],
-  FORD: ["FORD", "FO"],
-  LINCOLN: ["FORD", "LINCOLN", "FO"],
+  FORD: ["FORD", "FRD", "FD"],
+  LINCOLN: ["FORD", "LINCOLN", "FRD", "FD", "LIN"],
   TOYOTA: ["TOY", "TOYOTA", "TO"],
   LEXUS: ["LEX", "LEXUS"],
   CHEVROLET: ["GM", "CHEV", "CHEVY"],
