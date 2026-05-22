@@ -6415,11 +6415,12 @@ function renderJobWorkbench(payload = {}) {
 async function loadJobWorkbench(query = workbenchQueryFromForm()) {
   if (!workbenchResult) return;
   try {
-    if (workbenchStatus) workbenchStatus.textContent = "Building unified job workbench...";
+    if (workbenchStatus) workbenchStatus.textContent = "Building unified job workbench. If Render is waking up, this can take a moment...";
     const payload = await api("/api/job-workbench", {
       method: "POST",
       body: JSON.stringify(workbenchPayload(query)),
-      timeoutMs: 18000,
+      timeoutMs: 45000,
+      retryOnTimeout: true,
     });
     renderJobWorkbench(payload);
     if (workbenchStatus) {
@@ -8912,56 +8913,73 @@ async function fetchWithTimeout(url, options, timeoutMs) {
 async function api(path, options = {}) {
   let lastError = null;
   const urls = apiUrls(path);
-  const { timeoutMs, noStatus, noFallback = false, headers = {}, ...fetchOptions } = options;
-  const defaultTimeout = path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup") ? 15000 : 12000;
+  const { timeoutMs, retryOnTimeout = false, noStatus, noFallback = false, headers = {}, ...fetchOptions } = options;
+  const defaultTimeout =
+    path.startsWith("/api/job-workbench")
+      ? 45000
+      : path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup")
+        ? 22000
+        : path.startsWith("/api/proof-vault") || path.startsWith("/api/part-history") || path.startsWith("/api/global-search")
+          ? 25000
+          : 12000;
   const requestTimeout = Number(timeoutMs) || defaultTimeout;
 
   for (const [index, url] of urls.entries()) {
-    try {
-      const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http");
-      const response = await fetchWithTimeout(url, {
-        headers: { "Content-Type": "application/json", ...headers },
-        ...fetchOptions,
-      }, shouldFastFail ? Math.min(2500, requestTimeout) : requestTimeout);
-
-      let payload = null;
+    const attempts = retryOnTimeout && url.startsWith("http") ? 2 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        payload = await response.json();
-      } catch {
-        throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
+        const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http");
+        const attemptTimeout = attempt ? Math.max(requestTimeout, 65000) : requestTimeout;
+        const response = await fetchWithTimeout(url, {
+          headers: { "Content-Type": "application/json", ...headers },
+          ...fetchOptions,
+        }, shouldFastFail ? Math.min(2500, attemptTimeout) : attemptTimeout);
+
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch {
+          throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
+        }
+        if (!response.ok) {
+          const requestError = new Error(payload.error || `Request failed with ${response.status}`);
+          requestError.code = payload.code || "";
+          requestError.auth = payload.auth || null;
+          requestError.status = response.status;
+          throw requestError;
+        }
+        if (!noStatus && path !== "/api/health" && navigator.onLine !== false) {
+          if (latestApiHealth?.status === "degraded") latestApiHealth = null;
+          updateConnectionStatus();
+        }
+        return payload;
+      } catch (error) {
+        if (error?.auth) {
+          latestAuthStatus = error.auth;
+          renderAuthStatus();
+        }
+        if (["AUTH_REQUIRED", "OWNER_REQUIRED", "BAD_LOGIN", "ROLE_NOT_CONFIGURED"].includes(error?.code)) {
+          throw error;
+        }
+        const message =
+          error?.name === "AbortError"
+            ? `The app server took longer than ${Math.round((attempt ? Math.max(requestTimeout, 65000) : requestTimeout) / 1000)} seconds for ${path}.`
+            : error.message;
+        lastError = new Error(message);
+        if (error?.code) lastError.code = error.code;
+        if (error?.name === "AbortError" && attempt + 1 < attempts) {
+          if (!noStatus && path !== "/api/health") {
+            setAppStatus("Server waking", "busy", "Render is waking the app server. Retrying this request automatically.");
+          }
+          continue;
+        }
+        if (!noStatus && path !== "/api/health") {
+          setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
+        }
+        if (noFallback) throw lastError;
+        if (!url.startsWith("http")) continue;
+        throw lastError;
       }
-      if (!response.ok) {
-        const requestError = new Error(payload.error || `Request failed with ${response.status}`);
-        requestError.code = payload.code || "";
-        requestError.auth = payload.auth || null;
-        requestError.status = response.status;
-        throw requestError;
-      }
-      if (!noStatus && path !== "/api/health" && navigator.onLine !== false) {
-        if (latestApiHealth?.status === "degraded") latestApiHealth = null;
-        updateConnectionStatus();
-      }
-      return payload;
-    } catch (error) {
-      if (error?.auth) {
-        latestAuthStatus = error.auth;
-        renderAuthStatus();
-      }
-      if (["AUTH_REQUIRED", "OWNER_REQUIRED", "BAD_LOGIN", "ROLE_NOT_CONFIGURED"].includes(error?.code)) {
-        throw error;
-      }
-      const message =
-        error?.name === "AbortError"
-          ? `The app server took longer than ${Math.round(requestTimeout / 1000)} seconds for ${path}.`
-          : error.message;
-      lastError = new Error(message);
-      if (error?.code) lastError.code = error.code;
-      if (!noStatus && path !== "/api/health") {
-        setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
-      }
-      if (noFallback) throw lastError;
-      if (!url.startsWith("http")) continue;
-      throw lastError;
     }
   }
 
