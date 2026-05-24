@@ -111,6 +111,7 @@ function applyAppMode(mode = loadAppMode()) {
 }
 
 const navItems = document.querySelectorAll(".nav-item");
+const navGroups = document.querySelectorAll("[data-nav-group]");
 const views = document.querySelectorAll(".view");
 const mainElement = document.querySelector("main");
 const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
@@ -324,6 +325,11 @@ function showView(id, options = {}) {
   const previousViewId = activeViewId;
   views.forEach((view) => view.classList.toggle("active", view.id === id));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.view === id));
+  navGroups.forEach((group) => {
+    const hasActiveRoute = Boolean(group.querySelector(`.nav-item[data-view="${id}"]`));
+    group.classList.toggle("active", hasActiveRoute);
+    if (hasActiveRoute) group.open = true;
+  });
   activeViewId = id;
   updateRouteChrome(id);
   if (push && previousViewId && previousViewId !== id) {

@@ -52,20 +52,93 @@
         </div>
 
         <nav class="nav-list" aria-label="Main navigation">
-          <button class="nav-item active" data-view="command">Command Center</button>
-          <button class="nav-item" data-view="mission-control" data-owner-only>Mission Control</button>
-          <button class="nav-item" data-view="vin">VIN Lookup</button>
-          <button class="nav-item" data-view="workbench">Job Workbench</button>
-          <button class="nav-item" data-view="ai">AI Bench</button>
-          <button class="nav-item" data-view="part-history">Part History</button>
-          <button class="nav-item" data-view="proof-vault">Proof Vault</button>
-          <button class="nav-item" data-view="code-desk">Code Desk</button>
-          <button class="nav-item" data-view="lishi">Lishi Lookup</button>
-          <button class="nav-item" data-view="reference-lists" data-owner-only>Reference Lists</button>
-          <button class="nav-item" data-view="coverage">Coverage</button>
-          <button class="nav-item" data-view="learn">Worked Job</button>
-          <button class="nav-item" data-view="settings" data-owner-only>Settings</button>
-          <button class="nav-item" data-view="about">About</button>
+          <div class="nav-section-label">
+            <span>Field Work</span>
+            <small>Daily job flow</small>
+          </div>
+          <button class="nav-item active" data-view="command">
+            <span>Command Center</span>
+            <small>Search everything</small>
+          </button>
+          <button class="nav-item" data-view="vin">
+            <span>VIN Walkthrough</span>
+            <small>Decode to final path</small>
+          </button>
+          <button class="nav-item" data-view="workbench">
+            <span>Job Workbench</span>
+            <small>Parts, proof, tools</small>
+          </button>
+          <button class="nav-item" data-view="ai">
+            <span>AI Bench</span>
+            <small>Copilot and audit</small>
+          </button>
+
+          <details class="nav-group" data-nav-group>
+            <summary>
+              <span>Proof</span>
+              <small>History and records</small>
+            </summary>
+            <div class="nav-group-items">
+              <button class="nav-item" data-view="part-history">
+                <span>Part History</span>
+                <small>Used parts and jobs</small>
+              </button>
+              <button class="nav-item" data-view="proof-vault">
+                <span>Proof Vault</span>
+                <small>Evidence locker</small>
+              </button>
+              <button class="nav-item" data-view="learn">
+                <span>Worked Job</span>
+                <small>Add shop truth</small>
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group>
+            <summary>
+              <span>References</span>
+              <small>Code, Lishi, coverage</small>
+            </summary>
+            <div class="nav-group-items">
+              <button class="nav-item" data-view="code-desk">
+                <span>Code Desk</span>
+                <small>Cuts and code cards</small>
+              </button>
+              <button class="nav-item" data-view="lishi">
+                <span>Lishi Lookup</span>
+                <small>Tool and keyway</small>
+              </button>
+              <button class="nav-item" data-view="coverage">
+                <span>Coverage</span>
+                <small>Programmer proof</small>
+              </button>
+              <button class="nav-item" data-view="reference-lists" data-owner-only>
+                <span>Reference Lists</span>
+                <small>Raw data browser</small>
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group>
+            <summary>
+              <span>System</span>
+              <small>Owner tools</small>
+            </summary>
+            <div class="nav-group-items">
+              <button class="nav-item" data-view="mission-control" data-owner-only>
+                <span>Mission Control</span>
+                <small>Health and gaps</small>
+              </button>
+              <button class="nav-item" data-view="settings" data-owner-only>
+                <span>Settings</span>
+                <small>Sources and storage</small>
+              </button>
+              <button class="nav-item" data-view="about">
+                <span>About</span>
+                <small>App notes</small>
+              </button>
+            </div>
+          </details>
         </nav>
 
         <section class="mode-panel" aria-label="App mode">
