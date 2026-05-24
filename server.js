@@ -4731,6 +4731,226 @@ function jobOutcome(job) {
   return "";
 }
 
+function proofPatternFromVin(vin) {
+  const normalized = normalizeVinCandidate(vin);
+  if (!normalized) return null;
+  return {
+    vin: normalized,
+    wmi: normalized.slice(0, 3),
+    vds: normalized.slice(3, 8),
+    yearCode: normalized[9],
+    plantCode: normalized[10],
+    key: `${normalized.slice(0, 8)}*${normalized[9]}`,
+    label: `${normalized.slice(0, 8)}-${normalized[9]} VIN pattern`,
+  };
+}
+
+function proofVehiclePatternKey(vehicle = {}) {
+  return [vehicle.year, vehicle.make, vehicle.model]
+    .map((item) => normalizeVehicleText(item).replace(/\s+/g, "-"))
+    .filter(Boolean)
+    .join(":");
+}
+
+function proofIgnitionFamilyFromText(value) {
+  const text = normalizeVehicleText(value);
+  if (!text) return { key: "unknown", label: "Unknown" };
+  const compact = text.replace(/[^A-Z0-9]/g, "");
+  if (/\b(?:REMOTE HEAD|REMOTEHEAD|FLIP|SWITCHBLADE|RHK)\b/.test(text) || /(?:N5F|IYZ|OUC|OHT|KOB|GQ4|M3N5WY|M3NA2C)/.test(compact)) {
+    return { key: "remote-head", label: "Remote head / flip" };
+  }
+  if (/\b(?:PROX|PROXIMITY|SMART|PUSH|PEPS|PKE|FOBIK|FOB|KEYLESS)\b/.test(text) || /(?:HYQ|KR5|CWTWB|NBG|TQ8|SY5|WAZSKE|CQOFN|M3N)/.test(compact)) {
+    return { key: "proximity", label: "Prox / smart key" };
+  }
+  if (/\b(?:TRANSPONDER|CHIP|KEYED|H92|H94|H75|Y164|Y160|B111|B119|B120|PT|ILCO|HU101|TOY44|HO03|NI04|MIT17|HY18|KK12)\b/.test(text)) {
+    return { key: "keyed", label: "Keyed / transponder" };
+  }
+  if (/\b(?:UNLOCK|LOCKOUT|LKP|LOCK REPAIR|REKEY)\b/.test(text)) return { key: "service-only", label: "Service-only job" };
+  return { key: "unknown", label: "Unknown" };
+}
+
+function proofPatternFamilyForExpected(familyKey) {
+  if (familyKey === "proximity") return "proximity";
+  if (familyKey === "remote-head") return "remote-head";
+  if (familyKey === "keyed") return "transponder";
+  return "";
+}
+
+function countProofValue(map, value, record) {
+  const clean = cleanString(value);
+  if (!clean) return;
+  const key = clean.toUpperCase();
+  const current = map.get(key) || { value: clean, count: 0, jobIds: new Set(), vehicles: new Set() };
+  current.count += 1;
+  if (record?.id) current.jobIds.add(record.id);
+  if (record?.vehicle?.label) current.vehicles.add(record.vehicle.label);
+  map.set(key, current);
+}
+
+function proofPatternJobRecord(job, partsReference = {}) {
+  const vehicle = coverageVehicleForJob(job);
+  if (!vehicle.automotive) return null;
+  const vins = jobVins(job);
+  const patterns = vins.map(proofPatternFromVin).filter(Boolean);
+  const tokens = extractPartHistoryJobTokens(job);
+  const referenceRows = lookupPartsCrossReferenceRows(partsReference, tokens);
+  const references = referenceRows.map(crossReferenceSummary).slice(0, 5);
+  const referenceTokens = uniqueCleanValues(
+    references.flatMap((reference) => [
+      reference.primary,
+      reference.primaryLabel,
+      reference.identifiers || [],
+      reference.oemPartNumbers || [],
+      reference.aliases || [],
+      (reference.labeledIdentifiers || []).map((item) => item.value),
+    ]),
+  );
+  const partTokens = uniqueCleanValues([
+    tokens,
+    referenceTokens,
+  ]).filter((token) => !normalizeVinCandidate(token));
+  const family = proofIgnitionFamilyFromText(
+    [job.title, job.vehicle, job.service, job.programmer, job.sequence, job.tags || [], job.notes || [], partTokens, referenceTokens].flat(Infinity).join(" "),
+  );
+  const outcome = partHistoryOutcome(job);
+  return {
+    id: job.id,
+    title: job.title || job.vehicle || "Saved proof",
+    vehicle,
+    vins,
+    patterns,
+    vehicleKey: proofVehiclePatternKey(vehicle),
+    partTokens,
+    references,
+    ignitionFamily: family,
+    programmer: programmerDisplayName(job.programmer) || cleanString(job.programmer),
+    outcome,
+    schedule: job.schedule || job.createdAt || "",
+  };
+}
+
+function summarizeProofPatternGroup(kind, label, records = [], partsReference = {}) {
+  const partCounts = new Map();
+  const familyCounts = new Map();
+  const programmerCounts = new Map();
+  const vehicleCounts = new Map();
+  const vins = new Set();
+  let successes = 0;
+  let warnings = 0;
+  let unknown = 0;
+
+  for (const record of records) {
+    (record.partTokens || []).forEach((token) => countProofValue(partCounts, token, record));
+    countProofValue(familyCounts, record.ignitionFamily?.label || "Unknown", record);
+    countProofValue(programmerCounts, record.programmer || "Programmer not recorded", record);
+    countProofValue(vehicleCounts, record.vehicle?.label || "Unknown vehicle", record);
+    (record.vins || []).forEach((vin) => vins.add(vin));
+    if (record.outcome?.key === "success") successes += 1;
+    else if (record.outcome?.key === "warning") warnings += 1;
+    else unknown += 1;
+  }
+
+  const sortedValues = (map) =>
+    Array.from(map.values())
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+      .map((item) => ({
+        value: item.value,
+        count: item.count,
+        jobIds: Array.from(item.jobIds).slice(0, 8),
+        vehicles: Array.from(item.vehicles).slice(0, 5),
+      }));
+  const topParts = sortedValues(partCounts).slice(0, 8).map((item) => {
+    const crossRows = lookupPartsCrossReferenceRows(partsReference, [item.value]);
+    const crossReferences = crossRows.map(crossReferenceSummary).slice(0, 3);
+    return {
+      ...item,
+      crossReferences,
+      oemSources: uniqueCleanValues(crossReferences.flatMap((reference) => reference.oemPartNumbers || [])).slice(0, 6),
+    };
+  });
+  const topFamilies = sortedValues(familyCounts);
+  const topFamilyLabel = topFamilies[0]?.value || "Unknown";
+  const familyKey = proofIgnitionFamilyFromText(topFamilyLabel).key;
+  const outcomeCoveragePercent = coveragePercent(successes, warnings);
+  const base = kind === "exact-vin" ? 72 : kind === "vin-pattern" ? 58 : 44;
+  const confidencePercent = records.length
+    ? Math.min(98, base + Math.min(records.length * 8, 24) + (topParts.length ? 6 : 0) + (outcomeCoveragePercent !== null ? Math.min(Math.round(outcomeCoveragePercent / 8), 10) : 0))
+    : 0;
+
+  return {
+    kind,
+    label,
+    records: records.length,
+    successes,
+    warnings,
+    unknown,
+    outcomeCoveragePercent,
+    confidencePercent,
+    ignitionFamily: {
+      key: familyKey,
+      label: topFamilyLabel,
+      expectedFamily: proofPatternFamilyForExpected(familyKey),
+      count: topFamilies[0]?.count || 0,
+    },
+    topParts,
+    programmers: sortedValues(programmerCounts).slice(0, 6),
+    vehicles: sortedValues(vehicleCounts).slice(0, 6),
+    vins: Array.from(vins).slice(0, 8),
+    jobs: records.slice(0, 8).map((record) => ({
+      id: record.id,
+      title: record.title,
+      vehicle: record.vehicle?.label || "",
+      programmer: record.programmer || "",
+      ignitionFamily: record.ignitionFamily?.label || "Unknown",
+      partTokens: (record.partTokens || []).slice(0, 8),
+      outcome: record.outcome,
+      schedule: record.schedule,
+    })),
+  };
+}
+
+function buildProofPatternBaseline(jobs = [], partsReference = {}, options = {}) {
+  const targetVin = normalizeVinCandidate(options.vin);
+  const targetPattern = proofPatternFromVin(targetVin);
+  const targetVehicle = options.vehicle || {};
+  const targetVehicleKey = proofVehiclePatternKey(targetVehicle);
+  const records = (jobs || []).map((job) => proofPatternJobRecord(job, partsReference)).filter(Boolean);
+  const exactVinRecords = targetVin ? records.filter((record) => record.vins.includes(targetVin)) : [];
+  const exactIds = new Set(exactVinRecords.map((record) => record.id));
+  const vinPatternRecords = targetPattern
+    ? records.filter((record) => !exactIds.has(record.id) && record.patterns.some((pattern) => pattern.key === targetPattern.key))
+    : [];
+  const patternIds = new Set([...exactIds, ...vinPatternRecords.map((record) => record.id)]);
+  const vehicleRecords = targetVehicleKey
+    ? records.filter((record) => !patternIds.has(record.id) && record.vehicleKey === targetVehicleKey)
+    : [];
+  const groups = [
+    summarizeProofPatternGroup("exact-vin", targetVin ? `Exact VIN ${targetVin}` : "Exact VIN", exactVinRecords, partsReference),
+    summarizeProofPatternGroup("vin-pattern", targetPattern?.label || "VIN structure pattern", vinPatternRecords, partsReference),
+    summarizeProofPatternGroup("vehicle", workbenchVehicleLabel({ vehicle: targetVehicle }, "Decoded vehicle"), vehicleRecords, partsReference),
+  ];
+  const best = groups.find((group) => group.records) || groups[0];
+  return {
+    generatedAt: new Date().toISOString(),
+    totalProofJobs: records.length,
+    target: {
+      vin: targetVin,
+      pattern: targetPattern,
+      vehicle: {
+        year: cleanString(targetVehicle.year),
+        make: cleanString(targetVehicle.make),
+        model: cleanString(targetVehicle.model),
+        trim: cleanString(targetVehicle.trim),
+        key: targetVehicleKey,
+      },
+    },
+    best,
+    groups,
+    proofNote:
+      "Proof Pattern learns from imported/saved Proof Vault jobs. It ranks exact VIN first, then VIN structure pattern, then same year/make/model. Always verify FCC, keyway, trim, and authorization before ordering or programming.",
+  };
+}
+
 function buildShopEvidence(vehicle, vin, jobs) {
   const lookupVin = normalizeVinCandidate(vin);
   const exactVinJobs = jobs.filter((job) => lookupVin && jobVins(job).includes(lookupVin));
@@ -5541,6 +5761,8 @@ function productFamily(product) {
 }
 
 function familyFromShopEvidence(shopEvidence) {
+  const patternFamily = shopEvidence?.proofPatterns?.best?.ignitionFamily?.expectedFamily || "";
+  if (patternFamily) return patternFamily;
   const tokens = (shopEvidence?.tokens || []).join(" ").toUpperCase();
   const jobText = (shopEvidence?.jobs || [])
     .flatMap((job) => [job.title, job.vehicle, job.programmer, job.keyCode, ...(job.notes || [])])
@@ -5554,9 +5776,29 @@ function familyFromShopEvidence(shopEvidence) {
   return "";
 }
 
+function familyFromProofPatternBaseline(proofPatterns) {
+  const best = proofPatterns?.best || {};
+  const expectedFamily = best.ignitionFamily?.expectedFamily || "";
+  if (!expectedFamily || best.ignitionFamily?.key === "unknown") return "";
+  const records = Number(best.records || 0);
+  const confidence = Number(best.confidencePercent || 0);
+  if (best.kind === "exact-vin" && records >= 1) return expectedFamily;
+  if (best.kind === "vin-pattern" && records >= 1 && confidence >= 60) return expectedFamily;
+  if (best.kind === "vehicle" && records >= 3 && confidence >= 70) return expectedFamily;
+  return "";
+}
+
+function expectedFamilySource(programmingReference, shopEvidence) {
+  if (shopEvidence?.exactVinCount && familyFromShopEvidence(shopEvidence)) return "exact shop proof";
+  if (familyFromProofPatternBaseline(shopEvidence?.proofPatterns)) return "proof pattern baseline";
+  return programmingReference ? "programming reference" : "vehicle pattern";
+}
+
 function expectedFamily(vehicle, programmingReference, shopEvidence) {
   const shopFamily = shopEvidence?.exactVinCount ? familyFromShopEvidence(shopEvidence) : "";
   if (shopFamily) return shopFamily;
+  const proofPatternFamily = familyFromProofPatternBaseline(shopEvidence?.proofPatterns);
+  if (proofPatternFamily) return proofPatternFamily;
   const ignition = String(programmingReference?.ignitionType || "").toLowerCase();
   if (ignition === "smart") return "proximity";
   if (ignition === "keyed") return "transponder";
@@ -5660,7 +5902,7 @@ function evaluatePartSelection(product, vehicle, shopEvidence, programmingRefere
   const text = productText(product);
   const family = productFamily(product);
   const expected = expectedFamily(vehicle, programmingReference, shopEvidence);
-  const expectedSource = shopEvidence?.exactVinCount && familyFromShopEvidence(shopEvidence) ? "shop history" : programmingReference ? "programming reference" : "vehicle pattern";
+  const expectedSource = expectedFamilySource(programmingReference, shopEvidence);
   let score = 0;
 
   if (product.fitmentLines?.some((line) => lineCoversYear(line, vehicle.year))) {
@@ -5709,7 +5951,7 @@ function evaluatePartSelection(product, vehicle, shopEvidence, programmingRefere
 
   if (expected !== "unknown") {
     if (family === expected || (expected === "transponder" && ["remote-head", "transponder"].includes(family))) {
-      score += expectedSource === "shop history" ? 22 : 14;
+      score += /shop proof|proof pattern/i.test(expectedSource) ? 22 : 14;
       reasons.push(`${expected} family match from ${expectedSource}`);
     } else if (["insert", "tool"].includes(family)) {
       score -= 28;
@@ -6456,6 +6698,36 @@ function compactAutoBaseline(payload = {}) {
   };
 }
 
+function compactProofPatternGroup(group = {}) {
+  return {
+    kind: group.kind || "",
+    label: group.label || "",
+    records: group.records || 0,
+    successes: group.successes || 0,
+    warnings: group.warnings || 0,
+    unknown: group.unknown || 0,
+    outcomeCoveragePercent: group.outcomeCoveragePercent,
+    confidencePercent: group.confidencePercent || 0,
+    ignitionFamily: group.ignitionFamily || {},
+    topParts: (group.topParts || []).slice(0, 8),
+    programmers: (group.programmers || []).slice(0, 6),
+    vehicles: (group.vehicles || []).slice(0, 6),
+    vins: (group.vins || []).slice(0, 8),
+    jobs: (group.jobs || []).slice(0, 8),
+  };
+}
+
+function compactProofPatterns(payload = {}) {
+  return {
+    generatedAt: payload.generatedAt,
+    totalProofJobs: payload.totalProofJobs || 0,
+    target: payload.target || {},
+    best: compactProofPatternGroup(payload.best || {}),
+    groups: (payload.groups || []).map(compactProofPatternGroup),
+    proofNote: payload.proofNote || "",
+  };
+}
+
 async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const requestedVin = explicitWorkbenchVin(body);
   const profile = await resolveWorkbenchProfile(body, store);
@@ -6466,6 +6738,14 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const referenceVault = await readReferenceVault();
   const keyIntelligence = await readKeyIntelligence().catch(() => ({ records: [] }));
   const keyIntelligenceRecords = Array.isArray(keyIntelligence) ? keyIntelligence : keyIntelligence.records || [];
+  const proofPatterns =
+    profile.proofPatterns ||
+    buildProofPatternBaseline(cleanJobs, partsReference, {
+      vin: profile.vin || requestedVin,
+      vehicle,
+    });
+  profile.proofPatterns = proofPatterns;
+  if (profile.shopEvidence) profile.shopEvidence.proofPatterns = proofPatterns;
   const partQuery = workbenchPrimaryPartQuery(profile, body);
   const lishiQuery = workbenchLishiQuery(profile, body);
   const autoQuery = workbenchAutoQuery(profile, body);
@@ -6512,6 +6792,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     lishiLookup,
     autoBaseline,
     coverage,
+    proofPatterns,
     warnings,
   });
   return {
@@ -6550,6 +6831,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     warnings,
     partHistory: partHistory ? compactPartHistory(partHistory) : null,
     proofVault: compactProofVault(proofVault),
+    proofPatterns: compactProofPatterns(proofPatterns),
     lishi: compactLishiLookup(lishiLookup),
     autoBaseline: compactAutoBaseline(autoBaseline),
     coverage: {
@@ -6598,10 +6880,13 @@ function globalGroup(id, label, target, results = [], note = "") {
   };
 }
 
-function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, warnings = [] }) {
+function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, proofPatterns, warnings = [] }) {
   const directProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0));
   const relatedProof = Number(profile.matchedJobs?.length || 0);
   const matchedProof = Math.max(directProof, relatedProof);
+  const bestPattern = proofPatterns?.best || {};
+  const patternProof = Number(bestPattern.records || 0);
+  const patternConfidence = Number(bestPattern.confidencePercent || 0);
   const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
   const lishiTools = Number(lishiLookup?.tools?.length || 0);
   const autoRows = Number(autoBaseline?.rows?.length || 0);
@@ -6616,6 +6901,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
         (hasVin ? 10 : 0) +
         (hasVehicle ? 8 : 0) +
         Math.min(directProof * 8 + relatedProof * 4, 28) +
+        Math.min(Math.round(patternConfidence / 8), 12) +
         Math.min(partRows * 5, 12) +
         (lishiTools ? 6 : 0) +
         (autoRows ? 4 : 0) +
@@ -6627,6 +6913,8 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
     ? `Start from saved proof for ${title}.`
     : relatedProof
       ? `Use related saved proof for ${title}, then verify exact VIN/key package.`
+      : patternProof
+        ? `Use the Proof Pattern baseline for ${title}, then verify the exact key package.`
     : partRows
       ? `Use the part cross-reference as the starting point for ${title}.`
       : hasVehicle
@@ -6635,6 +6923,12 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   const evidence = uniqueCleanValues([
     directProof ? `${directProof} direct proof record${directProof === 1 ? "" : "s"} matched this packet.` : "",
     !directProof && relatedProof ? `${relatedProof} related saved job${relatedProof === 1 ? "" : "s"} matched the decoded vehicle/profile; verify before trusting it.` : "",
+    !directProof && !relatedProof && patternProof
+      ? `${patternProof} Proof Pattern record${patternProof === 1 ? "" : "s"} matched ${bestPattern.label || "this baseline"}; observed family: ${bestPattern.ignitionFamily?.label || "unknown"}.`
+      : "",
+    bestPattern.topParts?.[0]
+      ? `Most observed part clue: ${bestPattern.topParts[0].value} (${bestPattern.topParts[0].count} proof record${bestPattern.topParts[0].count === 1 ? "" : "s"}).`
+      : "",
     partRows ? `${partRows} part cross-reference row${partRows === 1 ? "" : "s"} matched ${partQuery || body.q || "the search"}.` : "",
     lishiTools ? `${lishiTools} Lishi tool match${lishiTools === 1 ? "" : "es"} are available from the imported master reference.` : "",
     autoRows ? `${autoRows} automotive code/programming baseline row${autoRows === 1 ? "" : "s"} matched.` : "",
@@ -6642,6 +6936,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   ]).slice(0, 5);
   const gaps = uniqueCleanValues([
     !matchedProof ? "No saved worked-job proof matched yet." : "",
+    !patternProof ? "No proof-pattern baseline matched this VIN/vehicle yet." : "",
     !partRows && partQuery ? "No cross-reference row matched the part query." : "",
     !lishiTools ? "No Lishi/keyway match is confirmed from the current query." : "",
     !hasVin ? "VIN-level identity is not attached to this packet yet." : "",
@@ -8757,7 +9052,10 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const verifiedProfile = await findVerifiedVehicleProfile(vehicle);
   const intelligence = await readKeyIntelligence();
   const record = findIntelligenceRecord(vehicle, intelligence);
+  const partsReference = await readPartsCrossReference();
   const shopEvidence = buildShopEvidence(vehicle, options.vin || "", store.jobs);
+  const proofPatterns = buildProofPatternBaseline(store.jobs, partsReference, { vin: options.vin || "", vehicle });
+  shopEvidence.proofPatterns = proofPatterns;
   const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const referenceVaultEntries = await findReferenceVaultEntries(vehicle);
@@ -8805,6 +9103,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     supplierCandidates: supplierCandidates || [],
     verifiedProfile,
     shopEvidence,
+    proofPatterns,
     liveSupplierLookup,
     referenceVault: referenceVaultEntries.map((entry) => ({
       id: entry.id,

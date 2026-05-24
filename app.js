@@ -6151,6 +6151,7 @@ function currentWorkbenchProfile(query = workbenchQueryFromForm()) {
     supplierCandidates: profile.supplierCandidates || [],
     verifiedProfile: profile.verifiedProfile || null,
     shopEvidence: profile.shopEvidence || null,
+    proofPatterns: profile.proofPatterns || null,
     referenceVault: profile.referenceVault || [],
     vehicleReference: profile.vehicleReference || null,
     keyRequirements: profile.keyRequirements || null,
@@ -6293,6 +6294,58 @@ function renderWorkbenchProof(payload = {}) {
   `;
 }
 
+function renderWorkbenchProofPatterns(payload = {}) {
+  const patterns = payload.proofPatterns || {};
+  const best = patterns.best || {};
+  const groups = patterns.groups || [];
+  const topParts = best.topParts || [];
+  const family = best.ignitionFamily || {};
+  return `
+    <section class="workbench-section proof-pattern-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Proof Pattern</p>
+          <h3>${escapeHtml(best.records ? family.label || "Shop baseline" : "Learning baseline")}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-workbench-open="proof-vault">Open Proof</button>
+      </div>
+      <div class="history-reference-panel">
+        <div>
+          <p class="eyebrow">Best match</p>
+          <strong>${escapeHtml(best.records ? best.label : "No pattern yet")}</strong>
+          <p>${escapeHtml(best.records ? `${best.records} proof record${best.records === 1 ? "" : "s"} | ${best.confidencePercent || 0}% confidence` : "Save exact VIN/part outcomes and this gets smarter.")}</p>
+        </div>
+        <div>
+          <p class="eyebrow">Observed parts</p>
+          <div class="part-chip-row">
+            ${
+              topParts.length
+                ? topParts.slice(0, 6).map((part) => `<span>${escapeHtml(part.value)} (${escapeHtml(part.count)})</span>`).join("")
+                : `<span>No part pattern yet</span>`
+            }
+          </div>
+        </div>
+      </div>
+      <div class="workbench-card-list compact">
+        ${
+          groups.length
+            ? groups
+                .map(
+                  (group) => `
+                    <article class="assistant-card">
+                      <strong>${escapeHtml(group.label || group.kind || "Pattern")}</strong>
+                      <p>${escapeHtml(`${group.records || 0} records | ${group.ignitionFamily?.label || "Unknown family"} | ${group.confidencePercent || 0}%`)}</p>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<article class="assistant-card"><strong>No proof patterns yet</strong><p>Imported Proof Vault records with VINs and exact parts will build this baseline.</p></article>`
+        }
+      </div>
+    </section>
+  `;
+}
+
 function renderWorkbenchSources(payload = {}) {
   const sources = payload.sourceMap || {};
   return `
@@ -6406,6 +6459,7 @@ function renderJobWorkbench(payload = {}) {
       ${renderWorkbenchLishi(payload)}
       ${renderWorkbenchAuto(payload)}
       ${renderWorkbenchProof(payload)}
+      ${renderWorkbenchProofPatterns(payload)}
     </section>
     ${renderWorkbenchSources(payload)}
   `;
