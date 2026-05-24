@@ -1214,6 +1214,36 @@ function keyFamilyLabel(family) {
   return "Flip / transponder keys";
 }
 
+function keyFamilyShortLabel(family) {
+  if (family === "proximity") return "Proximity";
+  if (family === "supporting") return "Support";
+  return "Flip / transponder";
+}
+
+function clampPercent(value, fallback = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function confidencePercentFromText(value, fallback = 55) {
+  const text = String(value || "").toLowerCase();
+  const numeric = Number(text.match(/\d{2,3}/)?.[0]);
+  if (Number.isFinite(numeric)) return clampPercent(numeric, fallback);
+  if (/exact|proven|worked|shop-confirmed|shop proof|verified|high/.test(text)) return 90;
+  if (/medium-high|strong/.test(text)) return 78;
+  if (/medium|possible|public|coverage clue|candidate/.test(text)) return 64;
+  if (/low|verify|unknown|partial|fallback/.test(text)) return 48;
+  return fallback;
+}
+
+function confidenceTone(percent) {
+  if (percent >= 88) return "high";
+  if (percent >= 72) return "good";
+  if (percent >= 58) return "medium";
+  return "verify";
+}
+
 function productsForFamily(products, family) {
   return products.filter((product) => productKeyFamily(product) === family && (family === "supporting" || isDisplayKeyProduct(product)));
 }
@@ -2014,6 +2044,41 @@ function visualPartChoiceGroups(offers) {
     });
 }
 
+function partGroupConfidencePercent(group, profile = {}) {
+  if (!group?.bestOffer) return 0;
+  const best = group.bestOffer;
+  let score = Number.isFinite(Number(best.selectionScore)) ? Number(best.selectionScore) : compareScore(best, 0);
+  score = Math.max(score, group.agreementScore || 0);
+  if (best.profileMatch || best.shopMatch) score = Math.max(score, 94);
+  if (profile?.proofPatterns?.best?.records && group.offers.some((offer) => {
+    const text = [offer.partName, offer.sku, offer.oem, offer.fcc].filter(Boolean).join(" ").toUpperCase();
+    return (profile.proofPatterns.best.topParts || []).some((part) => text.includes(String(part.value || "").toUpperCase()));
+  })) {
+    score = Math.max(score, profile.proofPatterns.best.confidencePercent || 86);
+  }
+  if (group.supplierCount >= 2) score += 4;
+  if (group.inStockCount) score += 3;
+  if (group.fccs?.length) score += 4;
+  if (group.buttons?.length) score += 3;
+  if (best.selectionRank === "Reference only") score -= 20;
+  if (best.profileWarning || best.shopWarning) score -= 22;
+  return clampPercent(score, 55);
+}
+
+function visualPartGroupsForProfile(profile, includeFiltered = true) {
+  const products = profile?.liveSupplierLookup?.products || [];
+  let selectedProducts = productsForFamily(products, selectedKeyFamily);
+  if (!selectedProducts.length && products.length) {
+    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting" && isDisplayKeyProduct(product));
+  }
+  const sourceProducts = includeFiltered ? selectedProducts.filter(productPassesLiveFilters) : selectedProducts;
+  return visualPartChoiceGroups(sortSupplierOffers(sourceProducts));
+}
+
+function bestVisualPartGroup(profile) {
+  return visualPartGroupsForProfile(profile, true)[0] || visualPartGroupsForProfile(profile, false)[0] || null;
+}
+
 function conditionTextForOffer(offer) {
   return [offer.condition, offer.partName, offer.rawProduct?.keyInfo?.condition, offer.rawProduct?.condition].filter(Boolean).join(" ").toLowerCase();
 }
@@ -2464,6 +2529,7 @@ function renderPartChoiceCard(group) {
   const chosen = selectedPartChoiceKey === group.key;
   const buttonLabel = group.buttonLayouts?.[0] || (group.buttons[0] ? `${group.buttons[0]} button` : buttonLayoutBucket(offer.rawProduct));
   const typeLabel = partTypeBucket(offer.rawProduct);
+  const confidence = partGroupConfidencePercent(group, latestVinProfile || {});
   return `
     <button class="part-choice-card ${chosen ? "active" : ""}" type="button" data-select-part-choice="${escapeHtml(group.key)}">
       <div class="part-choice-image">
@@ -2478,7 +2544,7 @@ function renderPartChoiceCard(group) {
         <strong>${escapeHtml(buttonLabel || "Button layout verify")}</strong>
       </div>
       <div class="part-choice-footer">
-        <span>${escapeHtml(typeLabel)}</span>
+        <span>${escapeHtml(`${confidence}%`)}</span>
       </div>
     </button>
   `;
@@ -2511,20 +2577,12 @@ function renderPartChoiceBoard(lookup, products) {
 }
 
 function selectedVisualPartGroup(profile) {
-  const products = profile.liveSupplierLookup?.products || [];
-  let selectedProducts = productsForFamily(products, selectedKeyFamily);
-  if (!selectedProducts.length && products.length) {
-    selectedProducts = products.filter((product) => productKeyFamily(product) !== "supporting" && isDisplayKeyProduct(product));
-  }
-  const offers = sortSupplierOffers(selectedProducts.filter(productPassesLiveFilters));
-  const baselineOffers = sortSupplierOffers(selectedProducts);
-  const selectedGroup = visualPartChoiceGroups(offers).find((group) => group.key === selectedPartChoiceKey);
-  const selectedBaselineGroup = visualPartChoiceGroups(baselineOffers).find((group) => group.key === selectedPartChoiceKey);
+  const selectedGroup = visualPartGroupsForProfile(profile, true).find((group) => group.key === selectedPartChoiceKey);
+  const selectedBaselineGroup = visualPartGroupsForProfile(profile, false).find((group) => group.key === selectedPartChoiceKey);
   return selectedGroup || selectedBaselineGroup || null;
 }
 
-function selectedPartSnapshot(profile) {
-  const group = selectedVisualPartGroup(profile);
+function partSnapshotFromGroup(group) {
   if (!group) return null;
   const best = group.bestOffer;
   const imageOffer = group.imageOffer || group.offers.find((offer) => offer.image) || best;
@@ -2539,6 +2597,14 @@ function selectedPartSnapshot(profile) {
     title: buttonLabel || typeLabel || "Selected key",
     identifier: group.label || best.fcc || best.oem || best.sku || "Visual match selected",
   };
+}
+
+function selectedPartSnapshot(profile) {
+  return partSnapshotFromGroup(selectedVisualPartGroup(profile));
+}
+
+function decisionPartSnapshot(profile) {
+  return selectedPartSnapshot(profile) || partSnapshotFromGroup(bestVisualPartGroup(profile));
 }
 
 function extractKeywayTokens(value) {
@@ -2919,8 +2985,7 @@ function renderProgrammerCompactOption(item) {
       <div>
         <span>${escapeHtml(programmerBadge(item))}</span>
         <strong>${escapeHtml(item.name || "Programmer coverage")}</strong>
-        <p>${escapeHtml(programmerSummaryText(item))}</p>
-        ${programmerEvidenceText(item) ? `<small>${escapeHtml(programmerEvidenceText(item))}</small>` : ""}
+        <small>${escapeHtml(decisionLines([programmerEvidenceText(item), item.models?.[0], programmerSummaryText(item)])[0] || "Verify exact coverage")}</small>
       </div>
       <em>${percent}%</em>
     </button>
@@ -2945,6 +3010,193 @@ function renderSelectedKeyMini(snapshot) {
   `;
 }
 
+function firstCleanValue(values) {
+  return (values || []).map((value) => cleanInput(value)).find(Boolean) || "";
+}
+
+function conciseDecisionText(value, maxLength = 72) {
+  let text = cleanInput(value)
+    .replace(/\s+(before|after|when|where|if)\b.*$/i, "")
+    .replace(/\s+-\s+.*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length > maxLength) text = `${text.slice(0, maxLength - 3).trim()}...`;
+  return text;
+}
+
+function decisionLines(values) {
+  return [...new Set((values || []).map((value) => conciseDecisionText(value, 72)).filter(Boolean))].slice(0, 2);
+}
+
+function decisionValues(values, limit = 4) {
+  return [...new Set((values || []).map((value) => conciseDecisionText(value, 42)).filter(Boolean))].slice(0, limit);
+}
+
+function proofPatternBest(profile) {
+  const best = profile?.proofPatterns?.best || {};
+  return Number(best.records || 0) ? best : null;
+}
+
+function vehicleDecision(profile) {
+  const vehicle = profile?.vehicle || {};
+  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle";
+  const proof = proofPatternBest(profile);
+  const vinScore = profile?.vin ? (profile.vinDetails?.checkDigitValid === false ? 76 : 94) : 62;
+  const score = Math.max(vinScore, proof?.kind === "exact-vin" ? Number(proof.confidencePercent || 0) : 0);
+  return {
+    id: "vehicle",
+    label: "Vehicle",
+    value: title,
+    confidence: clampPercent(score, 62),
+    lines: decisionLines([profile?.vin || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), vehicle.bodyClass]),
+  };
+}
+
+function keyTypeDecision(profile, snapshot) {
+  const proof = proofPatternBest(profile);
+  const proofFamily = proof?.ignitionFamily?.expectedFamily || "";
+  const family = proofFamily === "remote-head" || proofFamily === "transponder"
+    ? "keyed"
+    : proofFamily === "proximity"
+      ? "proximity"
+      : selectedKeyFamily || (snapshot?.best ? productKeyFamily(snapshot.best.rawProduct) : selectedPackageOption()?.family || "keyed");
+  const partScore = snapshot?.group ? partGroupConfidencePercent(snapshot.group, profile) : 0;
+  const proofScore = proof?.ignitionFamily?.expectedFamily ? Number(proof.confidencePercent || 0) : 0;
+  return {
+    id: "key-type",
+    label: "Key Type",
+    value: keyFamilyShortLabel(family),
+    confidence: clampPercent(Math.max(proofScore, partScore - 6, selectedPackageOption() ? 72 : 58), 58),
+    lines: decisionLines([selectedPackageOption()?.title, proof?.ignitionFamily?.label]),
+  };
+}
+
+function partDecision(profile, snapshot) {
+  if (!snapshot?.group) {
+    return {
+      id: "part",
+      label: "Part",
+      value: "Select key",
+      confidence: 0,
+      lines: [],
+    };
+  }
+  const group = snapshot.group;
+  const best = snapshot.best;
+  const value = firstCleanValue([group.fccs?.[0], group.label, best.oem, best.sku, snapshot.title]) || "Verify part";
+  return {
+    id: "part",
+    label: "Part",
+    value,
+    confidence: partGroupConfidencePercent(group, profile),
+    lines: decisionLines([snapshot.title, group.buttonLayouts?.[0], best.chip, group.frequencies?.[0]]),
+  };
+}
+
+function decodeDecision(profile, snapshot) {
+  const reference = profile?.vehicleReference || {};
+  const lishi = lishiReferenceForProfile(profile, snapshot);
+  const importedTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
+  const keyway = lishi.keyways?.[0] || reference.keyway?.primary || "";
+  const value = firstCleanValue([importedTools[0], keyway, lishi.primary]) || "Verify keyway";
+  const referenceScore = confidencePercentFromText(reference.keyway?.confidence || reference.lishi?.confidence, 52);
+  const score = importedTools.length ? 90 : lishi.keyways?.length ? 78 : referenceScore;
+  return {
+    id: "decode",
+    label: "Decode",
+    value,
+    confidence: clampPercent(score, 52),
+    lines: decisionLines([keyway && importedTools[0] ? `Keyway ${keyway}` : "", lishi.candidates?.[0]?.sources?.[0]]),
+    lishi,
+    importedTools,
+  };
+}
+
+function programmerDecision(profile) {
+  const programmer = selectedProgrammerOption(profile);
+  if (!programmer) {
+    return {
+      id: "programmer",
+      label: "Programmer",
+      value: "Verify coverage",
+      confidence: 0,
+      lines: [],
+      programmer: null,
+    };
+  }
+  return {
+    id: "programmer",
+    label: "Programmer",
+    value: programmer.name || "Programmer",
+    confidence: programmerPercent(programmer),
+    lines: decisionLines([programmerBadge(programmer), programmer.models?.[0]]),
+    programmer,
+  };
+}
+
+function proofDecision(profile) {
+  const proof = proofPatternBest(profile);
+  if (!proof) {
+    return {
+      id: "proof",
+      label: "Proof",
+      value: "No proof",
+      confidence: 35,
+      lines: [],
+    };
+  }
+  const label = proof.kind === "exact-vin" ? "Exact VIN proof" : proof.kind === "vin-pattern" ? "VIN pattern proof" : "Vehicle proof";
+  return {
+    id: "proof",
+    label: "Proof",
+    value: label,
+    confidence: clampPercent(proof.confidencePercent || 0, 60),
+    lines: decisionLines([`${proof.records} record${proof.records === 1 ? "" : "s"}`, proof.topParts?.[0]?.value]),
+  };
+}
+
+function fieldDecisionPacket(profile) {
+  const snapshot = decisionPartSnapshot(profile);
+  const vehicle = vehicleDecision(profile);
+  const keyType = keyTypeDecision(profile, snapshot);
+  const part = partDecision(profile, snapshot);
+  const decode = decodeDecision(profile, snapshot);
+  const programmer = programmerDecision(profile);
+  const proof = proofDecision(profile);
+  const choices = [vehicle, keyType, part, decode, programmer, proof];
+  const scored = choices.filter((choice) => choice.confidence > 0);
+  const overall = scored.length
+    ? clampPercent(scored.reduce((sum, choice) => sum + choice.confidence, 0) / scored.length, 0)
+    : 0;
+  const kit = decisionValues([
+    decode.value,
+    programmer.value,
+    firstCleanValue(profile?.vehicleReference?.fieldTools || []),
+    firstCleanValue(profile?.jobKit?.tools?.map((item) => item.name || item.detail) || []),
+  ], 4);
+  const verify = decisionValues([
+    "Authorization",
+    snapshot?.group?.fccs?.length ? "FCC" : "FCC",
+    snapshot?.group?.buttons?.length || snapshot?.group?.buttonLayouts?.length ? "Buttons" : "Buttons",
+    decode.value && decode.value !== "Verify keyway" ? "Keyway" : "Keyway",
+  ], 4);
+  return { snapshot, choices, overall, kit, verify, decode, programmer: programmer.programmer };
+}
+
+function renderConfidenceChoiceCard(choice) {
+  const tone = confidenceTone(choice.confidence);
+  return `
+    <article class="confidence-choice-card ${escapeHtml(tone)}">
+      <div>
+        <span>${escapeHtml(choice.label)}</span>
+        <strong>${escapeHtml(choice.value)}</strong>
+        ${choice.lines.map((line) => `<small>${escapeHtml(line)}</small>`).join("")}
+      </div>
+      <em>${escapeHtml(`${choice.confidence}%`)}</em>
+    </article>
+  `;
+}
+
 function renderProgrammerCoverageScreen(profile) {
   const snapshot = selectedPartSnapshot(profile);
   if (!snapshot) {
@@ -2960,30 +3212,25 @@ function renderProgrammerCoverageScreen(profile) {
     `;
   }
   const options = programmerCoverageOptions(profile);
-  const primaryOptions = options.slice(0, 6);
-  const extraOptions = options.slice(6);
+  const primaryOptions = options.slice(0, 1);
+  const extraOptions = appMode === "owner" ? options.slice(1) : [];
   return `
     <section class="program-screen programmer-step">
       <div class="programmer-command-head">
         <div>
           <p class="eyebrow">Screen 6</p>
-          <h3>Choose programmer path</h3>
-          <p>Tap the programmer you would actually use. That moves you to the final job overview where you can save the worked-job proof.</p>
+          <h3>Programmer path</h3>
         </div>
       </div>
       ${renderSelectedKeyMini(snapshot)}
-      <div class="job-entry-callout">
-        <strong>Next step</strong>
-        <p>Choose a programmer card below to continue. Save worked-job proof only after reviewing the final summary.</p>
-      </div>
       ${
         options.length
           ? `
             <div class="programmer-lanes">
               <section>
                 <div class="programmer-lane-head">
-                  <span>Recommended path</span>
-                  <strong>Ranked programmer options</strong>
+                  <span>Best path</span>
+                  <strong>Highest confidence</strong>
                 </div>
                 ${primaryOptions.map(renderProgrammerCompactOption).join("")}
               </section>
@@ -3099,8 +3346,8 @@ function renderLishiDecodeScreen(profile) {
 }
 
 function renderFinalJobSummaryScreen(profile) {
-  const snapshot = selectedPartSnapshot(profile);
-  const programmer = selectedProgrammerOption(profile);
+  const packet = fieldDecisionPacket(profile);
+  const snapshot = packet.snapshot;
   if (!snapshot) {
     return `
       <section class="program-screen final-rundown-step">
@@ -3113,68 +3360,50 @@ function renderFinalJobSummaryScreen(profile) {
       </section>
     `;
   }
-  const vehicle = profile.vehicle || {};
-  const reference = profile.vehicleReference || {};
-  const best = snapshot.best;
-  const lishi = lishiReferenceForProfile(profile, snapshot);
-  const importedLishiTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
-  const percent = programmer ? programmerPercent(programmer) : 0;
-  const rows = [
-    ["Vehicle", [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ")],
-    ["Key choice", [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ")],
-    ["Part clue", snapshot.identifier],
-    ["FCC / buttons", [snapshot.group.fccs.join(" / "), snapshot.group.buttonLayouts?.join(" / ") || (snapshot.group.buttons.length ? `${snapshot.group.buttons.join(" / ")} button` : "")].filter(Boolean).join(" | ")],
-    ["Chip / frequency", [best.chip, snapshot.group.frequencies.join(" / ")].filter(Boolean).join(" | ")],
-    ["Programmer", programmer ? `${programmer.name} (${percent}% confidence)` : "Verify coverage"],
-    ["Programmer models", programmer?.models?.length ? programmer.models.join(" / ") : ""],
-    ["Pass-through / VCI", programmer?.passThru || ""],
-    ["OEM key note", programmer && Number(programmer.oemKeyLikelihood) >= 90 ? `Plan OEM key about ${programmer.oemKeyLikelihood}% of the time when this path is required.` : ""],
-    ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify by lock/emergency insert"],
-    ["Lishi / decode", lishi.primary || "Verify keyway before choosing tool"],
-    ["Imported Lishi match", importedLishiTools.slice(0, 5).join(" / ")],
-    ["Cut / originate", (reference.cutting || reference.decodePlan || []).slice(0, 2).join(" | ")],
-  ].filter(([, value]) => value);
-  const verify = [
-    ...(profile.jobKit?.verify || []),
-    ...(reference.partVerification || []),
-    "Confirm ownership/authorization",
-    "Confirm FCC, buttons, chip, and emergency insert before cutting/programming",
-  ];
-  const tools = [
-    ...(profile.jobKit?.tools || []).map((item) => item.name || item.detail),
-    ...importedLishiTools.map((tool) => `${tool} Lishi`),
-    ...(reference.fieldTools || []),
-  ].filter(Boolean);
+  const ownerDetails = appMode === "owner"
+    ? `
+      <details class="decision-owner-detail">
+        <summary>Owner audit</summary>
+        <section class="job-rundown-grid compact">
+          ${packet.choices
+            .map(
+              (choice) => `
+                <article>
+                  <span>${escapeHtml(choice.label)}</span>
+                  <strong>${escapeHtml(choice.value)}</strong>
+                  <small>${escapeHtml(`${choice.confidence}% confidence`)}</small>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      </details>
+    `
+    : "";
   return `
-    <section class="program-screen final-rundown-step">
-      <div class="workflow-heading">
-        <p class="eyebrow">Final rundown</p>
-        <h3>What to bring and verify</h3>
-          <p>Basic field summary for this job. No parts pricing, no shop-history giveaway, just the working reference.</p>
+    <section class="program-screen final-rundown-step confidence-final-screen">
+      <div class="confidence-final-head">
+        <div>
+          <p class="eyebrow">Final decision</p>
+          <h3>Highest-confidence path</h3>
+        </div>
+        <strong>${escapeHtml(`${packet.overall}%`)}</strong>
       </div>
       ${renderSelectedKeyMini(snapshot)}
-      <section class="job-rundown-grid">
-        ${rows
-          .map(
-            ([label, value]) => `
-              <article>
-                <span>${escapeHtml(label)}</span>
-                <strong>${escapeHtml(value)}</strong>
-              </article>
-            `,
-          )
-          .join("")}
+      <section class="confidence-choice-grid">
+        ${packet.choices.map(renderConfidenceChoiceCard).join("")}
       </section>
-      <section class="job-rundown-lists">
+      <section class="field-final-strip">
         <article>
-          <span>Tools</span>
-          <ul>${[...new Set(tools)].slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+          <span>Bring</span>
+          <strong>${escapeHtml(packet.kit.length ? packet.kit.join(" | ") : "Standard kit")}</strong>
         </article>
         <article>
           <span>Verify</span>
-          <ul>${[...new Set(verify)].slice(0, 7).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+          <strong>${escapeHtml(packet.verify.join(" | "))}</strong>
         </article>
       </section>
+      ${ownerDetails}
       ${renderWorkflowActions([
         `<button class="secondary-action" type="button" data-vin-back="programmers">Back to programmer</button>`,
         `<button class="primary-action" type="button" data-save-selected-job>Save worked-job proof</button>`,
@@ -7320,6 +7549,15 @@ function renderKeyFamilyScreen(profile) {
 }
 
 function renderKeyPackageScreen(profile) {
+  const proof = proofPatternBest(profile);
+  const proofFamily = proof?.ignitionFamily?.expectedFamily || "";
+  const packageConfidence = (option) => {
+    const proofMatches =
+      (option.family === "proximity" && proofFamily === "proximity") ||
+      (option.family === "keyed" && ["remote-head", "transponder"].includes(proofFamily));
+    const familyProducts = productsForFamily(profile.liveSupplierLookup?.products || [], option.family);
+    return clampPercent(Math.max(proofMatches ? Number(proof.confidencePercent || 0) : 0, familyProducts.length ? 68 : 45), 45);
+  };
   return `
     <section class="program-screen key-package-step">
       <div class="workflow-heading">
@@ -7332,6 +7570,7 @@ function renderKeyPackageScreen(profile) {
             (option) => `
               <button class="key-package-option ${selectedKeyPackage === option.id ? "active" : ""}" type="button" data-key-package="${escapeHtml(option.id)}">
                 <span>${escapeHtml(option.title)}</span>
+                <em>${escapeHtml(`${packageConfidence(option)}%`)}</em>
               </button>
             `,
           )
@@ -7523,9 +7762,13 @@ function renderVinProfile(profile) {
     vinWorkflowStep = "vehicle";
     screenMarkup = renderVehicleApprovalScreen(profile, context);
   }
-  vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}<section class="vin-result-dispatch">${renderDispatchPack(profile)}</section>${screenMarkup}`;
+  const dispatchMarkup = vinWorkflowStep === "summary" ? "" : `<section class="vin-result-dispatch">${renderDispatchPack(profile)}</section>`;
+  vinResult.innerHTML = `${renderMobileContextHeader(profile, vinWorkflowStep)}${dispatchMarkup}${screenMarkup}`;
 
-  vinRecommendation.innerHTML = renderDispatchPack(profile);
+  vinRecommendation.innerHTML =
+    vinWorkflowStep === "summary"
+      ? `<strong>Final decision ready</strong>`
+      : renderDispatchPack(profile);
   startLishiReferenceLookup(profile);
   updateAiContextUi();
   return;
@@ -7698,7 +7941,7 @@ function openJobSaveModal(offer) {
   const modal = ensureJobSaveModal();
   const form = modal.querySelector("form");
   const vehicleTitle = latestVinProfile?.vehicle ? [latestVinProfile.vehicle.year, latestVinProfile.vehicle.make, latestVinProfile.vehicle.model].filter(Boolean).join(" ") : "Vehicle";
-  const snapshot = selectedPartSnapshot(latestVinProfile);
+  const snapshot = decisionPartSnapshot(latestVinProfile);
   const lishi = latestVinProfile ? lishiReferenceForProfile(latestVinProfile, snapshot) : null;
   const programmer = selectedProgrammerOption(latestVinProfile);
   pendingJobOfferId = offerIdentityKey(offer);
@@ -8953,6 +9196,13 @@ function apiUrls(path) {
   return urls;
 }
 
+function shouldFastFailRelativeApi(path) {
+  const host = window.location.hostname.toLowerCase();
+  if (["localhost", "127.0.0.1", "::1"].includes(host)) return false;
+  if (path.startsWith("/api/supplier-lookup") || path.startsWith("/api/job-workbench")) return false;
+  return true;
+}
+
 async function fetchWithTimeout(url, options, timeoutMs) {
   if (!timeoutMs) return fetch(url, options);
   const controller = new AbortController();
@@ -8973,7 +9223,7 @@ async function api(path, options = {}) {
       ? 45000
       : path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup")
         ? 22000
-        : path.startsWith("/api/proof-vault") || path.startsWith("/api/part-history") || path.startsWith("/api/global-search")
+        : path.startsWith("/api/proof-vault") || path.startsWith("/api/part-history") || path.startsWith("/api/global-search") || path.startsWith("/api/supplier-lookup")
           ? 25000
           : 12000;
   const requestTimeout = Number(timeoutMs) || defaultTimeout;
@@ -8982,7 +9232,7 @@ async function api(path, options = {}) {
     const attempts = retryOnTimeout && url.startsWith("http") ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http");
+        const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http") && shouldFastFailRelativeApi(path);
         const attemptTimeout = attempt ? Math.max(requestTimeout, 65000) : requestTimeout;
         const response = await fetchWithTimeout(url, {
           headers: { "Content-Type": "application/json", ...headers },
@@ -9693,7 +9943,7 @@ document.addEventListener("click", (event) => {
 
   const saveSelectedJobButton = event.target.closest("[data-save-selected-job]");
   if (saveSelectedJobButton && latestVinProfile) {
-    const snapshot = selectedPartSnapshot(latestVinProfile);
+    const snapshot = decisionPartSnapshot(latestVinProfile);
     if (snapshot?.best) openJobSaveModal(snapshot.best);
     return;
   }

@@ -1905,6 +1905,19 @@ textarea {
   padding: 14px;
 }
 
+.key-package-option em {
+  display: inline-grid;
+  place-items: center;
+  min-width: 56px;
+  min-height: 34px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: white;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .key-package-option small {
   display: block;
   margin-top: 10px;
@@ -3365,6 +3378,139 @@ textarea {
   padding-left: 18px;
   color: var(--muted);
   line-height: 1.38;
+}
+
+.confidence-final-screen {
+  background: #f7faf9;
+}
+
+.confidence-final-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.confidence-final-head h3 {
+  margin: 0;
+  font-size: clamp(1.55rem, 4vw, 2.35rem);
+}
+
+.confidence-final-head > strong {
+  display: grid;
+  place-items: center;
+  min-width: 82px;
+  min-height: 64px;
+  border-radius: 12px;
+  background: var(--charcoal);
+  color: white;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.confidence-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.confidence-choice-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d4dde2;
+  border-left: 6px solid var(--accent);
+  border-radius: 10px;
+  background: white;
+}
+
+.confidence-choice-card.high {
+  border-left-color: #1f7a4d;
+}
+
+.confidence-choice-card.good {
+  border-left-color: #497caa;
+}
+
+.confidence-choice-card.medium {
+  border-left-color: #b47a2a;
+}
+
+.confidence-choice-card.verify {
+  border-left-color: #9b3a31;
+}
+
+.confidence-choice-card span,
+.field-final-strip span,
+.decision-owner-detail summary {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.confidence-choice-card strong,
+.field-final-strip strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  line-height: 1.14;
+  overflow-wrap: anywhere;
+}
+
+.confidence-choice-card small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.confidence-choice-card em {
+  display: grid;
+  place-items: center;
+  min-width: 54px;
+  min-height: 44px;
+  border-radius: 10px;
+  background: #17202a;
+  color: white;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.field-final-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-final-strip article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #d4dde2;
+  border-radius: 10px;
+  background: white;
+}
+
+.decision-owner-detail {
+  border: 1px solid #d4dde2;
+  border-radius: 10px;
+  background: white;
+}
+
+.decision-owner-detail summary {
+  padding: 12px;
+  cursor: pointer;
+}
+
+.decision-owner-detail .job-rundown-grid {
+  margin: 0 12px 12px;
 }
 
 .lishi-reference-grid {
@@ -5092,9 +5238,21 @@ textarea {
   .vital-vehicle-grid,
   .programmer-option,
   .lishi-reference-grid,
+  .confidence-choice-grid,
+  .field-final-strip,
   .job-rundown-grid,
   .job-rundown-lists {
     grid-template-columns: 1fr;
+  }
+
+  .confidence-final-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .confidence-final-head > strong {
+    width: 100%;
+    min-height: 48px;
   }
 
   .programmer-confidence {
