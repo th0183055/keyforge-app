@@ -354,6 +354,14 @@ function showView(id, options = {}) {
   updateAiContextUi();
 }
 
+function resetMainScrollSoon() {
+  const reset = () => mainElement?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  reset();
+  window.requestAnimationFrame(reset);
+  window.setTimeout(reset, 250);
+  window.setTimeout(reset, 900);
+}
+
 function goBackInApp() {
   const previous = appRouteStack.pop();
   if (previous && routeExists(previous)) {
@@ -9528,7 +9536,8 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
 
 const initialRoute = routeFromLocation() || activeViewId || "command";
 replaceRouteHash(initialRoute);
-showView(initialRoute, { push: false, scroll: false });
+showView(initialRoute, { push: false, scroll: true });
+resetMainScrollSoon();
 
 globalSearchForm?.addEventListener("submit", (event) => {
   event.preventDefault();
