@@ -6287,6 +6287,151 @@ textarea:focus {
   box-shadow: 0 14px 30px rgba(22, 29, 37, 0.12);
 }
 
+.workbench-decision-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid #bfc7d1;
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(236, 241, 246, 0.94));
+  box-shadow: 0 16px 32px rgba(22, 29, 37, 0.12);
+}
+
+.workbench-decision-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.workbench-decision-head h3 {
+  margin: 3px 0 0;
+  font-size: clamp(1.18rem, 2vw, 1.55rem);
+  line-height: 1.1;
+}
+
+.workbench-decision-score {
+  display: grid;
+  min-width: 104px;
+  justify-items: end;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #151a20;
+  color: #f8fafc;
+}
+
+.workbench-decision-score span {
+  font-size: 0.66rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.workbench-decision-score strong {
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.workbench-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workbench-decision-grid article {
+  position: relative;
+  min-width: 0;
+  border: 1px solid #d2d9e1;
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.workbench-decision-grid span,
+.decision-evidence-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.workbench-decision-grid strong,
+.decision-evidence-grid strong {
+  display: block;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.workbench-decision-grid em {
+  display: inline-flex;
+  margin-top: 8px;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #151a20;
+  color: white;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.workbench-step-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.workbench-step-strip span {
+  border: 1px solid #cdd5de;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: white;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.decision-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.decision-evidence-grid article {
+  min-width: 0;
+  border: 1px solid #d6dde5;
+  border-radius: 7px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.decision-evidence-grid small,
+.decision-evidence-grid p {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+.workbench-owner-brief {
+  box-shadow: none;
+}
+
+.workbench-owner-brief summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
 .ai-brief-main h3 {
   margin: 3px 0 7px;
   font-size: clamp(1.15rem, 2vw, 1.55rem);
@@ -7527,6 +7672,18 @@ textarea:focus {
 
 /* Responsive parity pass: mobile keeps the same app chrome as desktop, only denser. */
 @media (max-width: 980px) {
+  .workbench-decision-head {
+    align-items: stretch;
+  }
+
+  .workbench-decision-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workbench-decision-score {
+    min-width: 92px;
+  }
+
   main {
     padding-top: calc(58px + env(safe-area-inset-top));
   }
@@ -7620,6 +7777,40 @@ textarea:focus {
 }
 
 @media (max-width: 620px) {
+  .workbench-decision-panel {
+    padding: 12px;
+  }
+
+  .workbench-decision-head {
+    display: grid;
+  }
+
+  .workbench-decision-score {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .workbench-decision-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .workbench-decision-grid article {
+    padding: 9px;
+  }
+
+  .workbench-step-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .workbench-step-strip span {
+    flex: 0 0 auto;
+  }
+
   .topbar {
     display: flex;
     align-items: stretch;

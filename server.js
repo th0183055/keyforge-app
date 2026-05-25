@@ -34,6 +34,7 @@ const attachmentUploadMaxBytes = Number(process.env.TIMLOCK_ATTACHMENT_MAX_BYTES
 const bootedAt = new Date().toISOString();
 const staticJsonCache = new Map();
 const partsReferenceRowsByIdCache = new WeakMap();
+const jobEvidenceIndexMarker = Symbol("timlock-job-evidence-index");
 
 const supplierRegistry = [
   {
@@ -4914,15 +4915,18 @@ function buildProofPatternBaseline(jobs = [], partsReference = {}, options = {})
   const targetPattern = proofPatternFromVin(targetVin);
   const targetVehicle = options.vehicle || {};
   const targetVehicleKey = proofVehiclePatternKey(targetVehicle);
-  const records = (jobs || []).map((job) => proofPatternJobRecord(job, partsReference)).filter(Boolean);
-  const exactVinRecords = targetVin ? records.filter((record) => record.vins.includes(targetVin)) : [];
+  const index = jobEvidenceIndex(jobs, partsReference);
+  const records = index.records.map((record) => record.proofPatternRecord).filter(Boolean);
+  const exactVinRecords = targetVin
+    ? (index.byVin.get(targetVin) || []).map((record) => record.proofPatternRecord).filter(Boolean)
+    : [];
   const exactIds = new Set(exactVinRecords.map((record) => record.id));
   const vinPatternRecords = targetPattern
-    ? records.filter((record) => !exactIds.has(record.id) && record.patterns.some((pattern) => pattern.key === targetPattern.key))
+    ? (index.byPattern.get(targetPattern.key) || []).map((record) => record.proofPatternRecord).filter((record) => record && !exactIds.has(record.id))
     : [];
   const patternIds = new Set([...exactIds, ...vinPatternRecords.map((record) => record.id)]);
   const vehicleRecords = targetVehicleKey
-    ? records.filter((record) => !patternIds.has(record.id) && record.vehicleKey === targetVehicleKey)
+    ? (index.byVehicle.get(targetVehicleKey.toUpperCase()) || []).map((record) => record.proofPatternRecord).filter((record) => record && !patternIds.has(record.id))
     : [];
   const groups = [
     summarizeProofPatternGroup("exact-vin", targetVin ? `Exact VIN ${targetVin}` : "Exact VIN", exactVinRecords, partsReference),
@@ -5161,6 +5165,12 @@ function partHistoryMatchedTokens(job, searchTokens) {
   return searchTokens.filter((token) => compactText.includes(token) || (token.length >= 6 && compactText.includes(token.replace(/^OEM/, ""))));
 }
 
+function evidenceMatchedTokens(record, searchTokens = []) {
+  const compactText = record?.compactText || "";
+  if (!compactText) return [];
+  return searchTokens.filter((token) => compactText.includes(token) || (token.length >= 6 && compactText.includes(token.replace(/^OEM/, ""))));
+}
+
 function extractPartHistoryJobTokens(job) {
   const tokens = new Set(jobReferenceTokens(job));
   const text = partHistoryJobText(job).toUpperCase();
@@ -5235,14 +5245,96 @@ function buildProgrammerHistoryEvidence(historyJobs) {
   };
 }
 
+function buildJobEvidenceRecord(job = {}, partsReference = {}) {
+  const text = partHistoryJobText(job);
+  const compactText = compactToken(text);
+  const tokens = extractPartHistoryJobTokens(job);
+  const vehicle = coverageVehicleForJob(job);
+  const vins = jobVins(job);
+  const patterns = vins.map(proofPatternFromVin).filter(Boolean);
+  const proofPatternRecord = proofPatternJobRecord(job, partsReference);
+  return {
+    job,
+    id: cleanString(job.id),
+    title: job.title || job.vehicle || "Saved job",
+    text,
+    compactText,
+    tokens,
+    vehicle,
+    vins,
+    patterns,
+    patternKeys: patterns.map((pattern) => pattern.key),
+    vehicleKey: proofVehiclePatternKey(vehicle),
+    outcome: partHistoryOutcome(job),
+    programmer: programmerDisplayName(job.programmer) || cleanString(job.programmer),
+    sortTime: Date.parse(job.createdAt || job.importedAt || job.schedule || "") || 0,
+    proofPatternRecord,
+  };
+}
+
+function buildJobEvidenceIndex(jobs = [], partsReference = {}) {
+  const records = (jobs || []).map((job) => buildJobEvidenceRecord(job, partsReference));
+  const byVin = new Map();
+  const byPattern = new Map();
+  const byVehicle = new Map();
+  const byToken = new Map();
+  const add = (map, key, record) => {
+    if (!key) return;
+    const normalized = String(key).toUpperCase();
+    if (!map.has(normalized)) map.set(normalized, []);
+    map.get(normalized).push(record);
+  };
+  for (const record of records) {
+    (record.vins || []).forEach((vin) => add(byVin, vin, record));
+    (record.patternKeys || []).forEach((key) => add(byPattern, key, record));
+    add(byVehicle, record.vehicleKey, record);
+    (record.tokens || []).forEach((token) => add(byToken, compactToken(token), record));
+  }
+  const sortedRecords = records.sort((a, b) => b.sortTime - a.sortTime);
+  return {
+    [jobEvidenceIndexMarker]: true,
+    jobs,
+    records: sortedRecords,
+    byVin,
+    byPattern,
+    byVehicle,
+    byToken,
+  };
+}
+
+function jobEvidenceIndex(jobsOrIndex = [], partsReference = {}) {
+  if (jobsOrIndex?.[jobEvidenceIndexMarker]) return jobsOrIndex;
+  return buildJobEvidenceIndex(Array.isArray(jobsOrIndex) ? jobsOrIndex : [], partsReference);
+}
+
+function uniqueById(items = [], keyFn = (item) => item?.id) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    const key = cleanString(keyFn(item));
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function buildPartHistory(query, jobs, partsReference) {
   const cleanQuery = cleanString(query);
   const referenceRows = findPartHistoryReferenceRows(partsReference, cleanQuery);
   const searchTokens = partHistorySearchTokens(cleanQuery, referenceRows);
   const crossSummaries = referenceRows.map(crossReferenceSummary);
-  const historyJobs = (jobs || [])
-    .map((job) => {
-      const matchedTokens = partHistoryMatchedTokens(job, searchTokens);
+  const index = jobEvidenceIndex(jobs, partsReference);
+  const strictVin = normalizeVinCandidate(cleanQuery);
+  const candidateRecords = strictVin
+    ? index.byVin.get(strictVin) || []
+    : searchTokens.length
+      ? uniqueById(searchTokens.flatMap((token) => index.byToken.get(compactToken(token)) || []), (record) => record.id || record.title).length
+        ? uniqueById(searchTokens.flatMap((token) => index.byToken.get(compactToken(token)) || []), (record) => record.id || record.title)
+        : index.records
+      : index.records;
+  const historyJobs = candidateRecords
+    .map((record) => {
+      const job = record.job;
+      const matchedTokens = strictVin ? [strictVin] : evidenceMatchedTokens(record, searchTokens);
       if (!matchedTokens.length) return null;
       const matchedReferenceRows = referenceRows.filter((row) =>
         (row.tokens || []).some((token) => matchedTokens.includes(token.normalized || compactToken(token.value))),
@@ -5250,7 +5342,7 @@ function buildPartHistory(query, jobs, partsReference) {
       const matchedReferences = (matchedReferenceRows.length ? matchedReferenceRows : referenceRows).map(crossReferenceSummary).slice(0, 5);
       const oemSources = uniqueCleanValues(matchedReferences.flatMap((item) => item.oemPartNumbers || []));
       const partNumbers = uniqueCleanValues([
-        extractPartHistoryJobTokens(job),
+        record.tokens,
         matchedReferences.flatMap((item) => item.labeledIdentifiers?.map((entry) => `${entry.label} ${entry.value}`) || []),
       ]).slice(0, 18);
       return {
@@ -5288,7 +5380,7 @@ function buildPartHistory(query, jobs, partsReference) {
     referenceStats: {
       totalReferenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
       matchedReferenceRows: referenceRows.length,
-      searchableJobCount: jobs?.length || 0,
+      searchableJobCount: index.records.length,
     },
   };
 }
@@ -5605,6 +5697,45 @@ function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRo
   };
 }
 
+function proofVaultEvidenceRecord(record, partsReference, searchTokens = [], referenceRows = [], options = {}) {
+  const job = record.job || {};
+  const includeReferences = options.includeReferences !== false;
+  const matchedTokens = searchTokens.length ? evidenceMatchedTokens(record, searchTokens) : [];
+  const directRows = includeReferences ? lookupPartsCrossReferenceRows(partsReference, record.tokens || []) : [];
+  const matchedReferenceRows = matchedTokens.length
+    ? referenceRows.filter((row) => (row.tokens || []).some((token) => matchedTokens.includes(token.normalized || compactToken(token.value))))
+    : [];
+  const rowsById = new Map([...matchedReferenceRows, ...directRows].filter(Boolean).map((row) => [row.id, row]));
+  const references = Array.from(rowsById.values())
+    .map(crossReferenceSummary)
+    .slice(0, 6);
+  const partNumbers = uniqueCleanValues([
+    record.tokens || [],
+    references.flatMap((reference) => reference.labeledIdentifiers?.map((entry) => `${entry.label} ${entry.value}`) || []),
+  ]).slice(0, 24);
+  return {
+    id: job.id,
+    title: job.title || job.vehicle || "Saved job",
+    customer: job.customer || "",
+    vehicle: job.vehicle || record.vehicle?.label || "",
+    vin: job.vin || "",
+    service: job.service || "",
+    schedule: job.schedule || job.createdAt || "",
+    status: job.status || "",
+    programmer: job.programmer || "",
+    keyCode: job.keyCode || "",
+    price: job.price || "",
+    payment: job.payment || "",
+    partNumbers,
+    oemSources: uniqueCleanValues(references.flatMap((reference) => reference.oemPartNumbers || [])).slice(0, 16),
+    matchedTokens,
+    matchedReferences: references,
+    notes: job.notes || [],
+    outcome: record.outcome || partHistoryOutcome(job),
+    proofText: record.text || partHistoryJobText(job),
+  };
+}
+
 function proofVaultJobMatches(record, compactQuery, searchTokens) {
   if (!compactQuery && !searchTokens.length) return true;
   const compactText = compactToken([
@@ -5623,18 +5754,34 @@ function buildProofVault(query, jobs = [], partsReference = {}) {
   const referenceRows = cleanQuery ? findPartHistoryReferenceRows(partsReference, cleanQuery) : [];
   const searchTokens = cleanQuery ? partHistorySearchTokens(cleanQuery, referenceRows) : [];
   const compactQuery = compactToken(cleanQuery);
-  const allRecords = (jobs || [])
-    .map((job) => proofVaultJobRecord(job, partsReference, searchTokens, referenceRows, { includeReferences: Boolean(cleanQuery) }))
-    .sort((a, b) => (Date.parse(b.schedule) || 0) - (Date.parse(a.schedule) || 0));
-  const matchedRecords = cleanQuery ? allRecords.filter((record) => proofVaultJobMatches(record, compactQuery, searchTokens)) : allRecords;
+  const index = jobEvidenceIndex(jobs, partsReference);
+  const strictVin = normalizeVinCandidate(cleanQuery);
+  const tokenCandidates = cleanQuery && !strictVin
+    ? uniqueById(searchTokens.flatMap((token) => index.byToken.get(compactToken(token)) || []), (record) => record.id || record.title)
+    : [];
+  const candidateRecords = strictVin
+    ? index.byVin.get(strictVin) || []
+    : tokenCandidates.length
+      ? tokenCandidates
+      : index.records;
+  const matchedEvidence = cleanQuery
+    ? candidateRecords.filter((record) => {
+        if (strictVin) return record.vins.includes(strictVin);
+        if (searchTokens.length && evidenceMatchedTokens(record, searchTokens).length) return true;
+        return compactQuery && record.compactText.includes(compactQuery);
+      })
+    : candidateRecords;
+  const matchedRecords = matchedEvidence.map((record) =>
+    proofVaultEvidenceRecord(record, partsReference, searchTokens, referenceRows, { includeReferences: Boolean(cleanQuery) }),
+  );
   const records = cleanQuery ? matchedRecords.slice(0, 80) : matchedRecords.slice(0, 16);
-  const history = cleanQuery ? buildPartHistory(cleanQuery, jobs, partsReference) : null;
+  const history = cleanQuery ? buildPartHistory(cleanQuery, index, partsReference) : null;
   return {
     generatedAt: new Date().toISOString(),
     query: cleanQuery,
     mode: cleanQuery ? "search" : "recent",
     summary: {
-      totalJobs: jobs?.length || 0,
+      totalJobs: index.records.length,
       matchingJobs: matchedRecords.length,
       shownJobs: records.length,
       referenceRows: partsReference?.totalRows || partsReference?.rows?.length || 0,
@@ -6728,6 +6875,198 @@ function compactProofPatterns(payload = {}) {
   };
 }
 
+function workbenchClampPercent(value, fallback = 55) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function workbenchConfidenceLabel(percent) {
+  const value = Number(percent) || 0;
+  if (value >= 90) return "High";
+  if (value >= 78) return "Strong";
+  if (value >= 62) return "Verify";
+  return "Low";
+}
+
+function workbenchChoice(id, label, value, confidence, source = "", detail = "", ownerEvidence = []) {
+  return {
+    id,
+    label,
+    value: cleanString(value) || "Verify",
+    confidence: workbenchClampPercent(confidence, 55),
+    source: cleanString(source),
+    detail: cleanString(detail),
+    ownerEvidence: uniqueCleanValues(ownerEvidence).slice(0, 8),
+  };
+}
+
+function proofPatternGroupLabel(group = {}) {
+  if (!Number(group.records || 0)) return "No proof";
+  if (group.kind === "exact-vin") return "Exact VIN";
+  if (group.kind === "vin-pattern") return "VIN pattern";
+  if (group.kind === "vehicle") return "Vehicle history";
+  return group.label || "Proof";
+}
+
+function proofFamilyDisplay(family = {}) {
+  const expected = cleanString(family.expectedFamily);
+  if (expected === "proximity") return "Prox / smart";
+  if (expected === "remote-head") return "Remote head / flip";
+  if (expected === "transponder" || expected === "keyed") return "Keyed / transponder";
+  return cleanString(family.label) || "Verify key type";
+}
+
+function bestPartDecisionValue(partHistory, proofPatterns, partQuery) {
+  const topPart = proofPatterns?.best?.topParts?.[0];
+  if (topPart?.value) return topPart.value;
+  const firstReference = partHistory?.crossReferences?.[0];
+  return (
+    firstReference?.primaryLabel ||
+    firstReference?.primary ||
+    partHistory?.primaryIdentifier ||
+    partQuery ||
+    ""
+  );
+}
+
+function bestProgrammerDecisionValue(partHistory, proofPatterns, coverage) {
+  const proofProgrammer = proofPatterns?.best?.programmers?.[0];
+  if (proofProgrammer?.value) return proofProgrammer.value;
+  const historyProgrammer = partHistory?.programmerEvidence?.programmers?.[0];
+  if (historyProgrammer?.name) return historyProgrammer.name;
+  const coverageProgrammer = coverage?.programmers?.[0];
+  return coverageProgrammer?.name || "";
+}
+
+function bestDecodeDecisionValue(lishiLookup, profile) {
+  const tool = lishiLookup?.tools?.[0];
+  if (tool?.canonical || tool?.tool) return tool.canonical || tool.tool;
+  const reference = profile?.vehicleReference || {};
+  return reference.keyway?.primary || reference.lishi?.primary || "";
+}
+
+function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, proofPatterns, warnings = [] }) {
+  const title = workbenchVehicleLabel(profile, body.q);
+  const bestPattern = proofPatterns?.best || {};
+  const patternRecords = Number(bestPattern.records || 0);
+  const patternConfidence = Number(bestPattern.confidencePercent || 0);
+  const exactProof = Number(bestPattern.kind === "exact-vin" ? bestPattern.records || 0 : 0);
+  const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
+  const partJobs = Number(partHistory?.jobs?.length || 0);
+  const proofRecords = Number(proofVault?.summary?.matchingJobs || 0);
+  const lishiTools = Number(lishiLookup?.tools?.length || 0);
+  const autoRows = Number(autoBaseline?.rows?.length || 0);
+  const hasVin = Boolean(profile.vin || body.vin);
+  const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
+  const partValue = bestPartDecisionValue(partHistory, proofPatterns, partQuery);
+  const programmerValue = bestProgrammerDecisionValue(partHistory, proofPatterns, coverage);
+  const decodeValue = bestDecodeDecisionValue(lishiLookup, profile);
+  const proofValue = proofPatternGroupLabel(bestPattern);
+  const keyTypeValue = proofFamilyDisplay(bestPattern.ignitionFamily);
+  const partOnlySearch = Boolean(partQuery && !hasVehicle && !hasVin);
+
+  const choices = [
+    workbenchChoice(
+      "vehicle",
+      "Vehicle",
+      title,
+      hasVin ? 94 : hasVehicle ? 82 : 58,
+      hasVin ? "VIN" : hasVehicle ? "YMM" : "Search",
+      profile.vin || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+      [profile.confidence, profile.vinDetails?.checkDigitValid === false ? "VIN check digit flagged by local parser." : ""],
+    ),
+    workbenchChoice(
+      "key-type",
+      "Key Type",
+      keyTypeValue,
+      patternRecords ? patternConfidence : partRows ? 66 : 52,
+      patternRecords ? "Shop proof" : "Reference",
+      patternRecords ? `${patternRecords} proof record${patternRecords === 1 ? "" : "s"}` : "",
+      [bestPattern.label, bestPattern.ignitionFamily?.label],
+    ),
+    workbenchChoice(
+      "part",
+      "Part",
+      partValue || "Part needed",
+      Math.max(patternRecords && partValue ? patternConfidence : 0, partJobs ? evidenceConfidenceFromCount(partJobs, 78) : 0, partRows ? 68 + Math.min(partRows * 4, 18) : 0, partQuery ? 58 : 42),
+      patternRecords && partValue ? "Proof pattern" : partRows ? "Cross-reference" : partJobs ? "Part history" : "Needed",
+      partJobs ? `${partJobs} matching saved job${partJobs === 1 ? "" : "s"}` : "",
+      [
+        bestPattern.topParts?.[0] ? `${bestPattern.topParts[0].value} seen ${bestPattern.topParts[0].count} time${bestPattern.topParts[0].count === 1 ? "" : "s"}.` : "",
+        partRows ? `${partRows} cross-reference row${partRows === 1 ? "" : "s"}.` : "",
+      ],
+    ),
+    workbenchChoice(
+      "programmer",
+      "Programmer",
+      programmerValue || "Verify coverage",
+      programmerValue ? Math.max(patternRecords ? patternConfidence - 4 : 0, partHistory?.programmerEvidence?.programmers?.[0]?.observedCoveragePercent || 0, coverage?.programmers?.[0]?.observedCoveragePercent || 0, 64) : 42,
+      programmerValue ? "Observed" : "Needed",
+      partHistory?.programmerEvidence?.programmers?.[0]?.jobs ? `${partHistory.programmerEvidence.programmers[0].jobs} job record${partHistory.programmerEvidence.programmers[0].jobs === 1 ? "" : "s"}` : "",
+      [
+        partHistory?.programmerEvidence?.programmers?.[0]?.vehicles || [],
+        coverage?.programmers?.[0]?.jobs ? `${coverage.programmers[0].jobs} total saved jobs mention ${coverage.programmers[0].name}.` : "",
+      ],
+    ),
+    workbenchChoice(
+      "decode",
+      "Decode",
+      decodeValue || "Verify keyway",
+      lishiTools ? 86 + Math.min(lishiTools * 2, 10) : autoRows ? 62 : 48,
+      lishiTools ? "Lishi" : "Manual verify",
+      lishiTools ? `${lishiTools} matched tool${lishiTools === 1 ? "" : "s"}` : "",
+      [profile.vehicleReference?.keyway?.primary, profile.vehicleReference?.lishi?.primary],
+    ),
+    workbenchChoice(
+      "proof",
+      "Proof",
+      proofValue,
+      exactProof ? 100 : patternRecords ? patternConfidence : proofRecords ? evidenceConfidenceFromCount(proofRecords, 74) : 35,
+      exactProof ? "Exact" : patternRecords ? "Pattern" : proofRecords ? "Vault" : "None",
+      patternRecords ? `${patternRecords} proof record${patternRecords === 1 ? "" : "s"}` : "",
+      [
+        bestPattern.label,
+        proofVault?.summary?.matchingJobs ? `${proofVault.summary.matchingJobs} Proof Vault match${proofVault.summary.matchingJobs === 1 ? "" : "es"}.` : "",
+      ],
+    ),
+  ];
+  const weightedChoices = choices.filter((choice) => choice.confidence > 0);
+  const overall = weightedChoices.length
+    ? workbenchClampPercent(weightedChoices.reduce((sum, choice) => sum + choice.confidence, 0) / weightedChoices.length, 0)
+    : 0;
+  const blockers = uniqueCleanValues([
+    !hasVin && !partOnlySearch ? "VIN" : "",
+    choices.find((choice) => choice.id === "part")?.confidence < 65 ? "part proof" : "",
+    choices.find((choice) => choice.id === "decode")?.confidence < 65 ? "keyway" : "",
+    choices.find((choice) => choice.id === "programmer")?.confidence < 65 ? "programmer" : "",
+  ]).slice(0, 5);
+  const bestMove = blockers.length
+    ? `Verify ${blockers[0]}`
+    : partOnlySearch
+      ? "Use part proof"
+    : choices.find((choice) => choice.id === "part")?.value
+      ? "Proceed with verified path"
+      : "Build proof packet";
+  return {
+    generatedAt: new Date().toISOString(),
+    title,
+    overall,
+    confidenceLabel: workbenchConfidenceLabel(overall),
+    bestMove,
+    blockers,
+    advisories: uniqueCleanValues(warnings || []).slice(0, 5),
+    choices,
+    fieldSteps: uniqueCleanValues([
+      "Authorize",
+      choices.find((choice) => choice.id === "part")?.value,
+      choices.find((choice) => choice.id === "decode")?.value,
+      choices.find((choice) => choice.id === "programmer")?.value,
+      "Save proof",
+    ]).slice(0, 5),
+  };
+}
+
 async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const requestedVin = explicitWorkbenchVin(body);
   const profile = await resolveWorkbenchProfile(body, store);
@@ -6738,12 +7077,11 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const referenceVault = await readReferenceVault();
   const keyIntelligence = await readKeyIntelligence().catch(() => ({ records: [] }));
   const keyIntelligenceRecords = Array.isArray(keyIntelligence) ? keyIntelligence : keyIntelligence.records || [];
-  const proofPatterns =
-    profile.proofPatterns ||
-    buildProofPatternBaseline(cleanJobs, partsReference, {
-      vin: profile.vin || requestedVin,
-      vehicle,
-    });
+  const evidenceIndex = buildJobEvidenceIndex(cleanJobs, partsReference);
+  const proofPatterns = buildProofPatternBaseline(evidenceIndex, partsReference, {
+    vin: profile.vin || requestedVin,
+    vehicle,
+  });
   profile.proofPatterns = proofPatterns;
   if (profile.shopEvidence) profile.shopEvidence.proofPatterns = proofPatterns;
   const partQuery = workbenchPrimaryPartQuery(profile, body);
@@ -6751,8 +7089,8 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const autoQuery = workbenchAutoQuery(profile, body);
   const proofQuery = cleanString(body.proofQuery || requestedVin || partQuery || body.q || profile.vin || workbenchVehicleLabel(profile));
   const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
-    partQuery ? Promise.resolve(buildPartHistory(partQuery, cleanJobs, partsReference)) : Promise.resolve(null),
-    Promise.resolve(buildProofVault(proofQuery, cleanJobs, partsReference)),
+    partQuery ? Promise.resolve(buildPartHistory(partQuery, evidenceIndex, partsReference)) : Promise.resolve(null),
+    Promise.resolve(buildProofVault(proofQuery, evidenceIndex, partsReference)),
     Promise.resolve(buildLishiLookup(lishiReference, {
       q: lishiQuery,
       year: vehicle.year,
@@ -6795,6 +7133,19 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     proofPatterns,
     warnings,
   });
+  const decisionEngine = buildWorkbenchDecisionEngine({
+    body,
+    profile,
+    vehicle,
+    partQuery,
+    partHistory,
+    proofVault,
+    lishiLookup,
+    autoBaseline,
+    coverage,
+    proofPatterns,
+    warnings,
+  });
   return {
     generatedAt: new Date().toISOString(),
     title: workbenchVehicleLabel(profile, body.q),
@@ -6820,6 +7171,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       keyIntelligenceRecords: keyIntelligenceRecords.length || 0,
       observedCoveragePercent: coverage.summary?.observedCoveragePercent,
     },
+    decisionEngine,
     nextActions: [
       { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
       { label: partQuery ? `Check part history for ${partQuery}` : "Search LR/MW/TI/OE part history", target: "part-history", tone: partHistory?.jobs?.length ? "ready" : "verify" },
@@ -7030,11 +7382,12 @@ async function buildGlobalSearch(body = {}, store = { jobs: [] }) {
   const mode = body.mode === "subscriber" ? "subscriber" : "owner";
   const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
+  const evidenceIndex = buildJobEvidenceIndex(cleanJobs, partsReference);
   const lishiReference = await readLishiMasterReference();
   const vin = normalizeVinCandidate(query);
   const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
-    Promise.resolve(buildPartHistory(query, cleanJobs, partsReference)),
-    Promise.resolve(buildProofVault(query, cleanJobs, partsReference)),
+    Promise.resolve(buildPartHistory(query, evidenceIndex, partsReference)),
+    Promise.resolve(buildProofVault(query, evidenceIndex, partsReference)),
     Promise.resolve(buildLishiLookup(lishiReference, { q: query, limit: 16 })),
     buildAutoCodeBaseline({ q: query, limit: 30 }),
   ]);

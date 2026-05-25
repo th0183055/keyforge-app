@@ -6620,46 +6620,88 @@ function renderWorkbenchSources(payload = {}) {
 function renderWorkbenchAiBrief(payload = {}) {
   const brief = payload.aiBrief || {};
   if (!brief.decision) return "";
+  if (appMode !== "owner") return "";
   const evidence = brief.evidence || [];
   const gaps = brief.gaps || [];
   const nextSteps = brief.nextSteps || [];
   return `
-    <section class="ai-brief-panel">
+    <details class="ai-brief-panel workbench-owner-brief">
+      <summary>
+        <span>${escapeHtml(brief.headline || "AI field brief")}</span>
+        <strong>${escapeHtml(`${brief.confidencePercent || 0}%`)}</strong>
+      </summary>
       <div class="ai-brief-main">
-        <p class="eyebrow">${escapeHtml(brief.headline || "AI field brief")}</p>
         <h3>${escapeHtml(brief.decision)}</h3>
         <p>${escapeHtml(brief.technicianNote || "Use the verified data in this packet before dispatch.")}</p>
         <button class="secondary-action small" type="button" data-workbench-open="ai">Ask AI Bench</button>
       </div>
-      <div class="ai-brief-score">
-        <span>${escapeHtml(brief.confidenceLabel || "Developing")}</span>
-        <strong>${escapeHtml(brief.confidencePercent || 0)}%</strong>
-        <small>Packet confidence</small>
-      </div>
       <div class="ai-brief-columns">
-        <article>
-          <strong>Evidence</strong>
-          <ul>
-            ${
-              evidence.length
-                ? evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
-                : `<li>No matching proof yet.</li>`
-            }
-          </ul>
-        </article>
-        <article>
-          <strong>Gaps</strong>
-          <ul>
-            ${gaps.length ? gaps.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>No major gaps beyond normal verification.</li>`}
-          </ul>
-        </article>
-        <article>
-          <strong>Next</strong>
-          <ul>
-            ${nextSteps.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-          </ul>
-        </article>
+        <article><strong>Evidence</strong><ul>${evidence.length ? evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>No matching proof yet.</li>`}</ul></article>
+        <article><strong>Gaps</strong><ul>${gaps.length ? gaps.map((item) => `<li>${escapeHtml(item)}</li>`).join("") : `<li>No major gaps beyond normal verification.</li>`}</ul></article>
+        <article><strong>Next</strong><ul>${nextSteps.slice(0, 4).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></article>
       </div>
+    </details>
+  `;
+}
+
+function renderWorkbenchDecisionEngine(payload = {}) {
+  const engine = payload.decisionEngine || {};
+  const choices = engine.choices || [];
+  if (!choices.length) return "";
+  const ownerEvidence = appMode === "owner"
+    ? `
+      <details class="decision-owner-detail compact">
+        <summary>Owner evidence</summary>
+        <section class="decision-evidence-grid">
+          ${choices
+            .map(
+              (choice) => `
+                <article>
+                  <span>${escapeHtml(choice.label)}</span>
+                  <strong>${escapeHtml(choice.value)}</strong>
+                  <small>${escapeHtml([choice.source, choice.detail].filter(Boolean).join(" | ") || `${choice.confidence}%`)}</small>
+                  ${
+                    (choice.ownerEvidence || []).length
+                      ? `<p>${escapeHtml(choice.ownerEvidence.slice(0, 3).join(" | "))}</p>`
+                      : ""
+                  }
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+      </details>
+    `
+    : "";
+  return `
+    <section class="workbench-decision-panel">
+      <div class="workbench-decision-head">
+        <div>
+          <p class="eyebrow">Decision Engine</p>
+          <h3>${escapeHtml(engine.bestMove || "Build verified path")}</h3>
+        </div>
+        <div class="workbench-decision-score">
+          <span>${escapeHtml(engine.confidenceLabel || "Verify")}</span>
+          <strong>${escapeHtml(`${engine.overall || 0}%`)}</strong>
+        </div>
+      </div>
+      <section class="workbench-decision-grid">
+        ${choices
+          .map(
+            (choice) => `
+              <article>
+                <span>${escapeHtml(choice.label)}</span>
+                <strong>${escapeHtml(choice.value)}</strong>
+                <em>${escapeHtml(`${choice.confidence}%`)}</em>
+              </article>
+            `,
+          )
+          .join("")}
+      </section>
+      <div class="workbench-step-strip">
+        ${(engine.fieldSteps || []).map((step) => `<span>${escapeHtml(step)}</span>`).join("")}
+      </div>
+      ${ownerEvidence}
     </section>
   `;
 }
@@ -6676,6 +6718,7 @@ function renderJobWorkbench(payload = {}) {
     ["Coverage", overview.observedCoveragePercent ?? "N/A", "Observed shop proof"],
   ];
   workbenchResult.innerHTML = `
+    ${renderWorkbenchDecisionEngine(payload)}
     ${renderWorkbenchAiBrief(payload)}
     <section class="history-summary-grid">
       ${metrics
