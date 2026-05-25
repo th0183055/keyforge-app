@@ -3481,6 +3481,10 @@ textarea {
   background: #f7faf9;
 }
 
+.field-final-v2 {
+  gap: 12px;
+}
+
 .confidence-final-head {
   display: flex;
   gap: 12px;
@@ -3505,13 +3509,49 @@ textarea {
   line-height: 1;
 }
 
+.field-final-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid #cfd8de;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffffff, #edf2f4);
+}
+
+.field-final-hero h3 {
+  margin: 0;
+  font-size: clamp(1.55rem, 4vw, 2.25rem);
+  line-height: 1.04;
+}
+
+.field-final-hero > strong {
+  display: grid;
+  place-items: center;
+  min-width: 88px;
+  min-height: 64px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2a2f36, #050608);
+  color: white;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
 .confidence-choice-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
-.confidence-choice-card {
+.field-final-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.confidence-choice-card,
+.field-final-tile {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
@@ -3524,23 +3564,28 @@ textarea {
   background: white;
 }
 
-.confidence-choice-card.high {
+.confidence-choice-card.high,
+.field-final-tile.high {
   border-left-color: #1f7a4d;
 }
 
-.confidence-choice-card.good {
+.confidence-choice-card.good,
+.field-final-tile.good {
   border-left-color: #497caa;
 }
 
-.confidence-choice-card.medium {
+.confidence-choice-card.medium,
+.field-final-tile.medium {
   border-left-color: #b47a2a;
 }
 
-.confidence-choice-card.verify {
+.confidence-choice-card.verify,
+.field-final-tile.verify {
   border-left-color: #9b3a31;
 }
 
 .confidence-choice-card span,
+.field-final-tile span,
 .field-final-strip span,
 .decision-owner-detail summary {
   display: block;
@@ -3551,6 +3596,7 @@ textarea {
 }
 
 .confidence-choice-card strong,
+.field-final-tile strong,
 .field-final-strip strong {
   display: block;
   margin-top: 4px;
@@ -3559,7 +3605,8 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.confidence-choice-card small {
+.confidence-choice-card small,
+.field-final-tile small {
   display: block;
   margin-top: 5px;
   color: var(--muted);
@@ -3569,7 +3616,8 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.confidence-choice-card em {
+.confidence-choice-card em,
+.field-final-tile em {
   display: grid;
   place-items: center;
   min-width: 54px;
@@ -5336,6 +5384,7 @@ textarea {
   .programmer-option,
   .lishi-reference-grid,
   .confidence-choice-grid,
+  .field-final-grid,
   .field-final-strip,
   .job-rundown-grid,
   .job-rundown-lists {
@@ -7105,21 +7154,37 @@ textarea:focus {
   gap: 12px;
 }
 
+.training-center-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.training-center-result {
+  display: grid;
+  gap: 12px;
+}
+
 .mission-hero,
+.training-hero,
 .mission-score-grid article,
+.training-summary-grid article,
 .mission-pillar-grid article,
 .mission-section,
+.training-section,
 .mission-risk-card,
 .mission-action-card,
 .mission-proof-grid article,
 .mission-data-grid article,
-.mission-proof-list article {
+.mission-proof-list article,
+.training-gap-list article,
+.training-row-card {
   border: 1px solid #cfd5dc;
   border-radius: 8px;
   background: rgba(246, 248, 250, 0.9);
 }
 
-.mission-hero {
+.mission-hero,
+.training-hero {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 14px;
@@ -7127,22 +7192,32 @@ textarea:focus {
   padding: 14px;
 }
 
-.mission-hero.ready {
+.mission-hero.ready,
+.training-hero.ready,
+.training-gap-list article.ready,
+.training-row-card.ready {
   border-color: #a8d2b5;
   background: linear-gradient(135deg, #f4fbf6, rgba(246, 248, 250, 0.92));
 }
 
-.mission-hero.warn {
+.mission-hero.warn,
+.training-hero.warn,
+.training-gap-list article.warn,
+.training-row-card.warn {
   border-color: #d7aa58;
   background: linear-gradient(135deg, #fff8e8, rgba(246, 248, 250, 0.92));
 }
 
-.mission-hero.danger {
+.mission-hero.danger,
+.training-hero.danger,
+.training-gap-list article.danger,
+.training-row-card.danger {
   border-color: #ce8c8c;
   background: linear-gradient(135deg, #fff0f0, rgba(246, 248, 250, 0.92));
 }
 
-.mission-score {
+.mission-score,
+.training-score {
   display: grid;
   place-items: center;
   width: 88px;
@@ -7152,12 +7227,14 @@ textarea:focus {
   color: white;
 }
 
-.mission-score strong {
+.mission-score strong,
+.training-score strong {
   font-size: 2rem;
   line-height: 1;
 }
 
-.mission-score span {
+.mission-score span,
+.training-score span {
   font-size: 0.66rem;
   font-weight: 900;
   letter-spacing: 0.08em;
@@ -7166,19 +7243,24 @@ textarea:focus {
 
 .mission-hero h3,
 .mission-hero p,
+.training-hero h3,
+.training-hero p,
 .mission-section h3,
+.training-section h3,
 .mission-risk-card h3,
 .mission-action-card h3 {
   margin: 0;
 }
 
-.mission-hero p:not(.eyebrow) {
+.mission-hero p:not(.eyebrow),
+.training-hero p:not(.eyebrow) {
   margin-top: 6px;
   color: var(--muted);
   line-height: 1.4;
 }
 
 .mission-score-grid,
+.training-summary-grid,
 .mission-pillar-grid,
 .mission-proof-grid,
 .mission-data-grid {
@@ -7187,6 +7269,10 @@ textarea:focus {
 }
 
 .mission-score-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.training-summary-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
@@ -7200,6 +7286,7 @@ textarea:focus {
 }
 
 .mission-score-grid article,
+.training-summary-grid article,
 .mission-pillar-grid article,
 .mission-proof-grid article,
 .mission-data-grid article {
@@ -7223,10 +7310,14 @@ textarea:focus {
 }
 
 .mission-score-grid span,
+.training-summary-grid span,
 .mission-pillar-grid span,
 .mission-proof-grid span,
 .mission-data-grid span,
-.mission-proof-list span {
+.mission-proof-list span,
+.training-gap-list span,
+.training-row-card span,
+.training-check-grid span {
   display: block;
   color: var(--muted);
   font-size: 0.66rem;
@@ -7236,18 +7327,26 @@ textarea:focus {
 }
 
 .mission-score-grid strong,
+.training-summary-grid strong,
 .mission-pillar-grid strong,
 .mission-proof-grid strong,
 .mission-data-grid strong,
-.mission-proof-list strong {
+.mission-proof-list strong,
+.training-gap-list strong,
+.training-row-card strong,
+.training-check-grid strong {
   display: block;
   margin-top: 4px;
   overflow-wrap: anywhere;
 }
 
 .mission-score-grid p,
+.training-summary-grid p,
 .mission-proof-grid p,
-.mission-proof-list p {
+.mission-proof-list p,
+.training-gap-list p,
+.training-row-card p,
+.training-check-grid p {
   margin: 5px 0 0;
   color: var(--muted);
   line-height: 1.35;
@@ -7277,10 +7376,68 @@ textarea:focus {
   line-height: 1.42;
 }
 
-.mission-section {
+.mission-section,
+.training-section {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.training-gap-list,
+.training-row-list {
+  display: grid;
+  gap: 8px;
+}
+
+.training-gap-list article,
+.training-row-card {
+  min-width: 0;
+  padding: 10px;
+}
+
+.training-row-card {
+  display: grid;
+  gap: 10px;
+}
+
+.training-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.training-row-head em {
+  display: grid;
+  place-items: center;
+  min-width: 58px;
+  min-height: 44px;
+  border-radius: 8px;
+  background: #17202a;
+  color: white;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.training-check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.training-check-grid div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #dce2e8;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.training-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .mission-action-section {
@@ -7370,7 +7527,10 @@ textarea:focus {
   .mission-data-grid,
   .mission-action-section,
   .mission-mini-columns,
-  .mission-action-list {
+  .mission-action-list,
+  .training-summary-grid,
+  .training-check-grid,
+  .field-final-grid {
     grid-template-columns: 1fr;
   }
 
@@ -7390,14 +7550,16 @@ textarea:focus {
   .proof-vault-actions,
   .proof-card-actions,
   .workbench-action-buttons,
-  .mission-control-actions {
+  .mission-control-actions,
+  .training-actions {
     justify-content: stretch;
   }
 
   .proof-vault-actions > *,
   .proof-card-actions > *,
   .workbench-action-buttons > *,
-  .mission-control-actions > * {
+  .mission-control-actions > *,
+  .training-actions > * {
     flex: 1 1 140px;
   }
 
@@ -7414,14 +7576,22 @@ textarea:focus {
     grid-template-columns: 46px minmax(0, 1fr) auto;
   }
 
-  .mission-hero {
+  .mission-hero,
+  .training-hero,
+  .field-final-hero {
     grid-template-columns: 1fr;
     gap: 10px;
     padding: 10px;
   }
 
-  .mission-score {
+  .mission-score,
+  .training-score {
     width: 72px;
+  }
+
+  .field-final-hero > strong {
+    justify-self: start;
+    min-width: 74px;
   }
 }
 
@@ -7535,6 +7705,7 @@ textarea:focus {
   .proof-card-actions,
   .workbench-action-buttons,
   .mission-control-actions,
+  .training-actions,
   .ai-route-actions,
   .ai-action-list,
   .ai-message-actions,
@@ -7547,6 +7718,7 @@ textarea:focus {
   .proof-card-actions > *,
   .workbench-action-buttons > *,
   .mission-control-actions > *,
+  .training-actions > *,
   .ai-route-actions > *,
   .ai-action-list > *,
   .ai-message-actions > *,
@@ -7577,6 +7749,10 @@ textarea:focus {
   .proof-record-card,
   .workbench-section,
   .mission-section,
+  .training-section,
+  .training-gap-list article,
+  .training-row-card,
+  .training-check-grid div,
   .reference-row-card,
   .code-source-panel {
     border-radius: 7px;
@@ -7590,6 +7766,8 @@ textarea:focus {
   .workbench-grid,
   .code-desk-grid,
   .lishi-result-grid,
+  .training-summary-grid,
+  .training-check-grid,
   .coverage-summary-grid,
   .coverage-gap-grid {
     gap: 8px;

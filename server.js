@@ -1905,6 +1905,236 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
   };
 }
 
+function trainingTokenSet(values = []) {
+  return new Set(uniqueCleanValues(Array.isArray(values) ? values : [values]).map(compactToken).filter((token) => token.length >= 4));
+}
+
+function trainingTokensOverlap(left = [], right = []) {
+  const leftSet = trainingTokenSet(left);
+  const rightTokens = Array.from(trainingTokenSet(right));
+  return rightTokens.some((token) => leftSet.has(token) || Array.from(leftSet).some((item) => item.includes(token) || token.includes(item)));
+}
+
+function trainingTopCounts(records = [], valueFn = () => []) {
+  const counts = new Map();
+  for (const record of records || []) {
+    const rawValues = valueFn(record);
+    for (const value of uniqueCleanValues(Array.isArray(rawValues) ? rawValues : [rawValues])) {
+      const key = compactToken(value);
+      if (!key || key.length < 4) continue;
+      const current = counts.get(key) || { value, count: 0, examples: [] };
+      current.count += 1;
+      if (record.title && current.examples.length < 3) current.examples.push(record.title);
+      counts.set(key, current);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+function trainingPeerRecords(index, record) {
+  const withoutSelf = (records = []) => uniqueById(records.filter((item) => item.id !== record.id), (item) => item.id || item.title);
+  const exactVin = withoutSelf((record.vins || []).flatMap((vin) => index.byVin.get(vin) || []));
+  const vinPattern = withoutSelf((record.patternKeys || []).flatMap((key) => index.byPattern.get(key) || []));
+  const vehicle = withoutSelf(index.byVehicle.get(String(record.vehicleKey || "").toUpperCase()) || []);
+  const part = withoutSelf((record.tokens || []).flatMap((token) => index.byToken.get(compactToken(token)) || []));
+  if (exactVin.length) return { source: "Exact VIN peers", records: exactVin, baseConfidence: 96 };
+  if (vinPattern.length) return { source: "VIN pattern peers", records: vinPattern, baseConfidence: 84 };
+  if (vehicle.length) return { source: "Vehicle peers", records: vehicle, baseConfidence: 72 };
+  if (part.length) return { source: "Part token peers", records: part, baseConfidence: 64 };
+  return { source: "No peers", records: [], baseConfidence: 35 };
+}
+
+function trainingActualPartTokens(record = {}) {
+  return uniqueCleanValues([
+    record.proofPatternRecord?.partTokens || [],
+    record.tokens || [],
+  ]).filter((value) => {
+    const token = compactToken(value);
+    if (token.length < 4) return false;
+    if (normalizeVinCandidate(value)) return false;
+    if (/^(?:ADD|AKL|AUTO|FIELD|LOCK|LOCKOUT|SERVICE|WORKED|COMPLETED|OUTCOMEWORKED|PARTOUTCOME)$/.test(token)) return false;
+    return /\d/.test(token);
+  });
+}
+
+function trainingFamilyKey(record = {}) {
+  return record.proofPatternRecord?.ignitionFamily?.expectedFamily || record.proofPatternRecord?.ignitionFamily?.key || "unknown";
+}
+
+function buildTrainingBacktestRow(record, index) {
+  const peers = trainingPeerRecords(index, record);
+  const actualParts = trainingActualPartTokens(record);
+  const predictedParts = trainingTopCounts(peers.records, (item) => trainingActualPartTokens(item));
+  const predictedProgrammers = trainingTopCounts(peers.records, (item) => item.programmer || item.job?.programmer || "");
+  const predictedFamilies = trainingTopCounts(peers.records, (item) => trainingFamilyKey(item));
+  const predictedPart = predictedParts[0] || null;
+  const predictedProgrammer = predictedProgrammers[0] || null;
+  const predictedFamily = predictedFamilies[0] || null;
+  const actualProgrammer = cleanString(record.programmer || record.job?.programmer);
+  const actualFamily = trainingFamilyKey(record);
+  const partHit = Boolean(predictedPart?.value && trainingTokensOverlap([predictedPart.value], actualParts));
+  const programmerHit = Boolean(
+    predictedProgrammer?.value &&
+      actualProgrammer &&
+      compactToken(predictedProgrammer.value) === compactToken(programmerDisplayName(actualProgrammer) || actualProgrammer),
+  );
+  const familyHit = Boolean(predictedFamily?.value && compactToken(predictedFamily.value) === compactToken(actualFamily));
+  const confidence = Math.min(
+    100,
+    Math.round(peers.baseConfidence + Math.min(peers.records.length * 3, 12) + (partHit ? 4 : 0) + (programmerHit ? 4 : 0) + (familyHit ? 2 : 0)),
+  );
+  const hasActualPart = actualParts.length > 0;
+  const status = !peers.records.length || !hasActualPart
+    ? "needs-proof"
+    : partHit && (programmerHit || !actualProgrammer)
+      ? "ready"
+      : "conflict";
+  const blockers = uniqueCleanValues([
+    !hasActualPart ? "Missing part identifier" : "",
+    !peers.records.length ? "No peer proof" : "",
+    predictedPart && !partHit ? "Part mismatch" : "",
+    actualProgrammer && predictedProgrammer && !programmerHit ? "Programmer mismatch" : "",
+    predictedFamily && !familyHit ? "Key type mismatch" : "",
+  ]);
+  return {
+    id: record.id,
+    title: record.title,
+    vehicle: record.vehicle?.label || record.job?.vehicle || "",
+    vin: record.vins?.[0] || record.job?.vin || "",
+    outcome: record.outcome?.label || record.outcome?.key || "",
+    source: peers.source,
+    peerCount: peers.records.length,
+    confidence,
+    status,
+    blockers,
+    actual: {
+      part: actualParts[0] || "",
+      parts: actualParts.slice(0, 8),
+      programmer: actualProgrammer,
+      family: actualFamily,
+    },
+    predicted: {
+      part: predictedPart?.value || "",
+      partCount: predictedPart?.count || 0,
+      programmer: predictedProgrammer?.value || "",
+      programmerCount: predictedProgrammer?.count || 0,
+      family: predictedFamily?.value || "",
+      familyCount: predictedFamily?.count || 0,
+    },
+  };
+}
+
+function buildTrainingClusterConflicts(rows = []) {
+  const clusters = new Map();
+  for (const row of rows) {
+    const key = compactToken(row.vehicle || row.vin || row.title);
+    if (!key) continue;
+    const cluster = clusters.get(key) || { label: row.vehicle || row.vin || row.title, rows: [] };
+    cluster.rows.push(row);
+    clusters.set(key, cluster);
+  }
+  return Array.from(clusters.values())
+    .map((cluster) => {
+      const parts = trainingTopCounts(cluster.rows, (row) => row.actual?.parts || row.actual?.part || []);
+      const programmers = trainingTopCounts(cluster.rows, (row) => row.actual?.programmer || "");
+      return {
+        label: cluster.label,
+        jobs: cluster.rows.length,
+        parts: parts.slice(0, 4),
+        programmers: programmers.slice(0, 4),
+        conflict:
+          parts.length > 1 && parts[0].count === parts[1].count
+            ? "Part split"
+            : programmers.length > 1 && programmers[0].count === programmers[1].count
+              ? "Programmer split"
+              : "",
+      };
+    })
+    .filter((cluster) => cluster.conflict)
+    .slice(0, 12);
+}
+
+async function buildTrainingCenter(body = {}, store = { jobs: [] }) {
+  const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const partsReference = await readPartsCrossReference();
+  const index = buildJobEvidenceIndex(jobs, partsReference);
+  const rows = index.records
+    .filter((record) => record.vehicle?.automotive || record.vins?.length)
+    .map((record) => buildTrainingBacktestRow(record, index))
+    .sort((a, b) => {
+      const statusRank = { conflict: 0, "needs-proof": 1, ready: 2 };
+      return (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9) || a.confidence - b.confidence;
+    });
+  const tested = rows.length;
+  const ready = rows.filter((row) => row.status === "ready").length;
+  const conflicts = rows.filter((row) => row.status === "conflict").length;
+  const needsProof = rows.filter((row) => row.status === "needs-proof").length;
+  const partRows = rows.filter((row) => row.actual.parts?.length && row.predicted.part);
+  const programmerRows = rows.filter((row) => row.actual.programmer && row.predicted.programmer);
+  const partCorrect = partRows.filter((row) => trainingTokensOverlap([row.predicted.part], row.actual.parts)).length;
+  const programmerCorrect = programmerRows.filter((row) => compactToken(row.predicted.programmer) === compactToken(programmerDisplayName(row.actual.programmer) || row.actual.programmer)).length;
+  const averageConfidence = tested ? Math.round(rows.reduce((sum, row) => sum + row.confidence, 0) / tested) : 0;
+  return {
+    generatedAt: new Date().toISOString(),
+    title: "Decision Engine Training Center",
+    summary: {
+      testedJobs: tested,
+      ready,
+      conflicts,
+      needsProof,
+      averageConfidence,
+      partAccuracy: partRows.length ? Math.round((partCorrect / partRows.length) * 100) : 0,
+      programmerAccuracy: programmerRows.length ? Math.round((programmerCorrect / programmerRows.length) * 100) : 0,
+      aiFeedback: store.aiFeedback?.length || 0,
+      shopRules: store.shopRules?.length || 0,
+    },
+    rows: rows.slice(0, 80),
+    weakRecords: rows.filter((row) => row.status !== "ready" || row.confidence < 70).slice(0, 16),
+    conflicts: buildTrainingClusterConflicts(rows),
+    guidance: [
+      "Backtest uses saved/imported proof as the shop truth baseline.",
+      "Exact VIN peers rank first, then VIN pattern, vehicle, and part-token peers.",
+      "Teach AI marks owner review history; saving corrected worked jobs remains the strongest training signal.",
+    ],
+  };
+}
+
+function trainingFeedbackFromBody(body = {}) {
+  const verdict = cleanString(body.verdict || body.value || "used").toLowerCase();
+  const jobId = cleanString(body.jobId || body.id);
+  return cleanAiFeedback({
+    value: verdict === "wrong" || verdict === "conflict" ? "wrong" : "used",
+    title: `Training review${jobId ? `: ${jobId}` : ""}`,
+    note: cleanString(body.note || (verdict === "wrong" ? "Owner marked this Decision Engine row for correction." : "Owner confirmed this training row.")),
+    prompt: jobId,
+    target: "training-center",
+    contextSummary: body.contextSummary || [],
+  });
+}
+
+async function teachTrainingCenter(body = {}, store = { aiFeedback: [], shopRules: [] }) {
+  const feedback = trainingFeedbackFromBody(body);
+  store.aiFeedback.unshift(feedback);
+  store.aiFeedback = store.aiFeedback.slice(0, 1000);
+  let rule = null;
+  if (body.saveRule || body.ruleBody || body.ruleTitle) {
+    rule = cleanShopRule(
+      {
+        title: body.ruleTitle || feedback.note || feedback.title,
+        body: body.ruleBody || feedback.note || feedback.title,
+        target: "training-center",
+        tags: uniqueCleanValues(["training-center", body.verdict || body.value || "", body.tags || []]),
+        contextSummary: feedback.contextSummary,
+      },
+      feedback,
+    );
+    store.shopRules.unshift(rule);
+    store.shopRules = store.shopRules.slice(0, 500);
+  }
+  await writeStore(store);
+  return { feedback, rule, memory: aiMemorySummary(store, {}, "") };
+}
+
 async function buildStorageExport() {
   const [status, store, vehicleProfiles, referenceVault, publicReferenceSources, proofAttachments, supplierAccounts] = await Promise.all([
     buildStorageStatus(),
@@ -9487,7 +9717,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/audit-log",
   ];
   if (ownerOnlyPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return true;
-  if (pathname === "/api/mission-control") return true;
+  if (pathname === "/api/mission-control" || pathname === "/api/training-center" || pathname === "/api/training-center/teach") return true;
   if (pathname === "/api/jobs" || pathname.startsWith("/api/jobs/")) return true;
   if (pathname === "/api/jobs/sync" || pathname === "/api/part-outcomes" || pathname === "/api/worked-jobs/import") return true;
   if (pathname.startsWith("/api/proof-vault/attachments") && writeMethod) return true;
@@ -9592,6 +9822,17 @@ async function handleApi(request, response, pathname) {
   if ((request.method === "GET" || request.method === "POST") && pathname === "/api/mission-control") {
     const body = request.method === "POST" ? await readJsonBody(request) : {};
     sendJson(response, 200, await buildMissionControl(body, store));
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/training-center") {
+    const body = request.method === "POST" ? await readJsonBody(request) : {};
+    sendJson(response, 200, await buildTrainingCenter(body, store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/training-center/teach") {
+    sendJson(response, 201, await teachTrainingCenter(await readJsonBody(request), store));
     return;
   }
 

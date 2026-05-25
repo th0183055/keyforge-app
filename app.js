@@ -40,6 +40,7 @@ let latestAiAdvisor = null;
 let latestAiMemory = null;
 let latestAiCommander = null;
 let latestMissionControl = null;
+let latestTrainingCenter = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestAuthStatus = null;
@@ -134,6 +135,9 @@ const globalSearchResult = document.querySelector("#globalSearchResult");
 const missionControlResult = document.querySelector("#missionControlResult");
 const missionControlStatus = document.querySelector("#missionControlStatus");
 const refreshMissionControlButton = document.querySelector("#refreshMissionControl");
+const trainingCenterResult = document.querySelector("#trainingCenterResult");
+const trainingCenterStatus = document.querySelector("#trainingCenterStatus");
+const refreshTrainingCenterButton = document.querySelector("#refreshTrainingCenter");
 const dashboardJobs = document.querySelector("#dashboardJobs");
 const jobBoard = document.querySelector("#jobBoard");
 const vehicleGrid = document.querySelector("#vehicleGrid");
@@ -235,6 +239,10 @@ const routeMeta = {
   "mission-control": {
     eyebrow: "Owner command",
     title: "Run the platform from backend health to field readiness.",
+  },
+  "training-center": {
+    eyebrow: "Owner training",
+    title: "Backtest saved jobs and teach the Decision Engine.",
   },
   vin: {
     eyebrow: "VIN to key",
@@ -341,6 +349,7 @@ function showView(id, options = {}) {
   closeMobileMenu();
   if (scroll) mainElement?.scrollTo({ top: 0, left: 0, behavior: "auto" });
   if (id === "mission-control" && !latestMissionControl) loadMissionControl();
+  if (id === "training-center" && !latestTrainingCenter) loadTrainingCenter();
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
@@ -3211,6 +3220,19 @@ function renderConfidenceChoiceCard(choice) {
   `;
 }
 
+function renderFieldFinalTile(choice) {
+  const tone = confidenceTone(choice.confidence);
+  return `
+    <article class="field-final-tile ${escapeHtml(tone)}">
+      <div>
+        <span>${escapeHtml(choice.label)}</span>
+        <strong>${escapeHtml(choice.value)}</strong>
+      </div>
+      <em>${escapeHtml(`${choice.confidence}%`)}</em>
+    </article>
+  `;
+}
+
 function renderProgrammerCoverageScreen(profile) {
   const snapshot = selectedPartSnapshot(profile);
   if (!snapshot) {
@@ -3395,21 +3417,21 @@ function renderFinalJobSummaryScreen(profile) {
     `
     : "";
   return `
-    <section class="program-screen final-rundown-step confidence-final-screen">
-      <div class="confidence-final-head">
+    <section class="program-screen final-rundown-step confidence-final-screen field-final-v2">
+      <div class="field-final-hero">
         <div>
           <p class="eyebrow">Final decision</p>
-          <h3>Highest-confidence path</h3>
+          <h3>${escapeHtml(packet.overall >= 82 ? "Ready path" : packet.overall >= 62 ? "Verify path" : "Review path")}</h3>
         </div>
         <strong>${escapeHtml(`${packet.overall}%`)}</strong>
       </div>
       ${renderSelectedKeyMini(snapshot)}
-      <section class="confidence-choice-grid">
-        ${packet.choices.map(renderConfidenceChoiceCard).join("")}
+      <section class="field-final-grid">
+        ${packet.choices.map(renderFieldFinalTile).join("")}
       </section>
       <section class="field-final-strip">
         <article>
-          <span>Bring</span>
+          <span>Grab</span>
           <strong>${escapeHtml(packet.kit.length ? packet.kit.join(" | ") : "Standard kit")}</strong>
         </article>
         <article>
@@ -4301,6 +4323,255 @@ async function loadMissionControl({ quiet = false } = {}) {
     if (missionControlStatus) missionControlStatus.textContent = error.message;
     missionControlResult.innerHTML = `<article class="assistant-card"><strong>Mission Control unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
     return null;
+  }
+}
+
+function trainingStatusLabel(status) {
+  if (status === "ready") return "Ready";
+  if (status === "conflict") return "Conflict";
+  return "Needs proof";
+}
+
+function trainingToneClass(status, confidence = 0) {
+  if (status === "ready") return "ready";
+  if (status === "conflict") return "danger";
+  return Number(confidence) >= 70 ? "warn" : "danger";
+}
+
+function renderTrainingSummaryCards(summary = {}) {
+  const cards = [
+    ["Tested", summary.testedJobs || 0, "Saved/imported jobs"],
+    ["Ready", summary.ready || 0, "Can support decisions"],
+    ["Needs proof", summary.needsProof || 0, "Missing peer evidence"],
+    ["Conflicts", summary.conflicts || 0, "Review before trusting"],
+    ["Parts", `${summary.partAccuracy || 0}%`, "Backtest match"],
+    ["Programmers", `${summary.programmerAccuracy || 0}%`, "Backtest match"],
+  ];
+  return `
+    <section class="training-summary-grid">
+      ${cards
+        .map(
+          ([label, value, note]) => `
+            <article>
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(note)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderTrainingWeakRecords(rows = []) {
+  if (!rows.length) {
+    return `
+      <section class="training-section">
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">Weak proof</p>
+            <h3>No urgent training gaps</h3>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+  return `
+    <section class="training-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Weak proof</p>
+          <h3>Train these first</h3>
+        </div>
+      </div>
+      <div class="training-gap-list">
+        ${rows
+          .slice(0, 8)
+          .map(
+            (row) => `
+              <article class="${escapeHtml(trainingToneClass(row.status, row.confidence))}">
+                <span>${escapeHtml(trainingStatusLabel(row.status))}</span>
+                <strong>${escapeHtml(row.vehicle || row.title || row.vin || "Saved proof")}</strong>
+                <p>${escapeHtml((row.blockers || []).join(" | ") || row.source || "Needs owner review")}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTrainingConflicts(conflicts = []) {
+  if (!conflicts.length) return "";
+  return `
+    <section class="training-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Cluster conflicts</p>
+          <h3>Same vehicle, split proof</h3>
+        </div>
+      </div>
+      <div class="training-gap-list">
+        ${conflicts
+          .slice(0, 6)
+          .map(
+            (conflict) => `
+              <article class="danger">
+                <span>${escapeHtml(conflict.conflict)}</span>
+                <strong>${escapeHtml(conflict.label)}</strong>
+                <p>${escapeHtml(`${conflict.jobs || 0} jobs | Parts: ${(conflict.parts || []).map((item) => `${item.value} (${item.count})`).join(", ") || "None"}`)}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTrainingRows(rows = []) {
+  return `
+    <section class="training-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">Backtest rows</p>
+          <h3>${escapeHtml(`${rows.length} decisions reviewed`)}</h3>
+        </div>
+      </div>
+      <div class="training-row-list">
+        ${
+          rows.length
+            ? rows
+                .map(
+                  (row) => `
+                    <article class="training-row-card ${escapeHtml(trainingToneClass(row.status, row.confidence))}">
+                      <div class="training-row-head">
+                        <div>
+                          <span>${escapeHtml(trainingStatusLabel(row.status))}</span>
+                          <strong>${escapeHtml(row.vehicle || row.title || row.vin || "Saved proof")}</strong>
+                          <p>${escapeHtml([row.vin, row.source, `${row.peerCount || 0} peer${row.peerCount === 1 ? "" : "s"}`].filter(Boolean).join(" | "))}</p>
+                        </div>
+                        <em>${escapeHtml(`${row.confidence || 0}%`)}</em>
+                      </div>
+                      <div class="training-check-grid">
+                        <div>
+                          <span>Part</span>
+                          <strong>${escapeHtml(row.predicted?.part || "No prediction")}</strong>
+                          <p>${escapeHtml(row.actual?.part ? `Actual ${row.actual.part}` : "Actual missing")}</p>
+                        </div>
+                        <div>
+                          <span>Programmer</span>
+                          <strong>${escapeHtml(row.predicted?.programmer || "No prediction")}</strong>
+                          <p>${escapeHtml(row.actual?.programmer ? `Actual ${row.actual.programmer}` : "Actual missing")}</p>
+                        </div>
+                        <div>
+                          <span>Key family</span>
+                          <strong>${escapeHtml(row.predicted?.family || "Unknown")}</strong>
+                          <p>${escapeHtml(row.actual?.family ? `Actual ${row.actual.family}` : "Actual missing")}</p>
+                        </div>
+                      </div>
+                      <div class="training-actions">
+                        <button class="secondary-action small" type="button" data-training-teach="${escapeHtml(row.id)}" data-training-verdict="used">Confirm</button>
+                        <button class="secondary-action small" type="button" data-training-teach="${escapeHtml(row.id)}" data-training-verdict="wrong">Flag</button>
+                      </div>
+                    </article>
+                  `,
+                )
+                .join("")
+            : `<article class="assistant-card"><strong>No training rows yet</strong><p>Import or save worked jobs with VIN and part proof to build the shop truth layer.</p></article>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderTrainingCenter(payload = latestTrainingCenter) {
+  if (!trainingCenterResult) return;
+  latestTrainingCenter = payload;
+  if (!payload) {
+    trainingCenterResult.innerHTML = `<article class="assistant-card"><strong>Training Center unavailable</strong><p>Run the backtest when the server is awake.</p></article>`;
+    return;
+  }
+  const summary = payload.summary || {};
+  const tone = missionToneClass(summary.averageConfidence || 0);
+  trainingCenterResult.innerHTML = `
+    <section class="training-hero ${escapeHtml(tone)}">
+      <div class="training-score">
+        <strong>${escapeHtml(summary.averageConfidence || 0)}</strong>
+        <span>Avg confidence</span>
+      </div>
+      <div>
+        <p class="eyebrow">${escapeHtml(payload.title || "Decision Engine Training Center")}</p>
+        <h3>${escapeHtml(`${summary.ready || 0} ready / ${summary.conflicts || 0} conflicts / ${summary.needsProof || 0} need proof`)}</h3>
+        <p>${escapeHtml((payload.guidance || [])[0] || "Backtest saved proof against the current Decision Engine.")}</p>
+      </div>
+    </section>
+    ${renderTrainingSummaryCards(summary)}
+    ${renderTrainingWeakRecords(payload.weakRecords || [])}
+    ${renderTrainingConflicts(payload.conflicts || [])}
+    ${renderTrainingRows(payload.rows || [])}
+  `;
+  if (trainingCenterStatus) {
+    trainingCenterStatus.textContent = `Training Center updated ${new Date(payload.generatedAt || Date.now()).toLocaleString()}.`;
+  }
+}
+
+async function loadTrainingCenter({ quiet = false } = {}) {
+  if (!trainingCenterResult) return null;
+  try {
+    if (!quiet && trainingCenterStatus) trainingCenterStatus.textContent = "Backtesting saved jobs against the Decision Engine...";
+    const payload = await api("/api/training-center", {
+      method: "POST",
+      body: JSON.stringify({ jobs: localArchivedJobs() }),
+      timeoutMs: 30000,
+    });
+    renderTrainingCenter(payload);
+    return payload;
+  } catch (error) {
+    if (trainingCenterStatus) trainingCenterStatus.textContent = error.message;
+    trainingCenterResult.innerHTML = `<article class="assistant-card"><strong>Training Center unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+async function teachTrainingRow(jobId, verdict, button) {
+  if (!jobId) return;
+  const originalText = button?.textContent || "";
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = verdict === "wrong" ? "Flagging..." : "Saving...";
+    }
+    const row = latestTrainingCenter?.rows?.find((item) => item.id === jobId);
+    await api("/api/training-center/teach", {
+      method: "POST",
+      body: JSON.stringify({
+        jobId,
+        verdict,
+        note: verdict === "wrong" ? "Owner flagged this training row for correction." : "Owner confirmed this training row.",
+        contextSummary: row
+          ? [
+              row.vehicle,
+              row.vin,
+              `Predicted part ${row.predicted?.part || "none"}`,
+              `Actual part ${row.actual?.part || "missing"}`,
+              `Confidence ${row.confidence || 0}%`,
+            ].filter(Boolean)
+          : [],
+      }),
+      timeoutMs: 12000,
+    });
+    if (trainingCenterStatus) trainingCenterStatus.textContent = verdict === "wrong" ? "Training row flagged for AI memory." : "Training row confirmed for AI memory.";
+    await loadTrainingCenter({ quiet: true });
+  } catch (error) {
+    if (trainingCenterStatus) trainingCenterStatus.textContent = error.message;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 
@@ -9588,6 +9859,7 @@ globalSearchForm?.addEventListener("submit", (event) => {
 });
 
 refreshMissionControlButton?.addEventListener("click", () => loadMissionControl());
+refreshTrainingCenterButton?.addEventListener("click", () => loadTrainingCenter());
 refreshCoverageDashboardButton?.addEventListener("click", () => loadCoverageDashboard());
 syncProofVaultButton?.addEventListener("click", async () => {
   if (proofVaultStatus) proofVaultStatus.textContent = "Syncing local proof...";
@@ -9693,6 +9965,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const trainingTeachButton = event.target.closest("[data-training-teach]");
+  if (trainingTeachButton) {
+    teachTrainingRow(trainingTeachButton.dataset.trainingTeach, trainingTeachButton.dataset.trainingVerdict, trainingTeachButton);
+    return;
+  }
+
   const missionOpenButton = event.target.closest("[data-mission-open]");
   if (missionOpenButton) {
     showView(missionOpenButton.dataset.missionOpen || "workbench");

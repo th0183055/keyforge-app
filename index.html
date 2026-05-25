@@ -129,6 +129,10 @@
                 <span>Mission Control</span>
                 <small>Health and gaps</small>
               </button>
+              <button class="nav-item" data-view="training-center" data-owner-only>
+                <span>Training Center</span>
+                <small>Backtest decisions</small>
+              </button>
               <button class="nav-item" data-view="settings" data-owner-only>
                 <span>Settings</span>
                 <small>Sources and storage</small>
@@ -216,6 +220,22 @@
             </div>
             <div class="form-status" id="missionControlStatus">Backend, storage, proof, references, and AI readiness load here.</div>
             <div class="mission-control-result" id="missionControlResult"></div>
+          </section>
+        </section>
+
+        <section class="view" id="training-center">
+          <section class="panel wide training-center-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Owner training</p>
+                <h3>Training Center</h3>
+              </div>
+              <div class="mission-control-actions">
+                <button class="secondary-action small" type="button" id="refreshTrainingCenter">Run Backtest</button>
+              </div>
+            </div>
+            <div class="form-status" id="trainingCenterStatus">Backtest saved jobs against the Decision Engine.</div>
+            <div class="training-center-result" id="trainingCenterResult"></div>
           </section>
         </section>
 
