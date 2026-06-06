@@ -6016,7 +6016,7 @@ textarea:focus {
 
 .code-desk-form {
   display: grid;
-  grid-template-columns: minmax(170px, 0.7fr) minmax(170px, 0.7fr) minmax(280px, 1.4fr) auto;
+  grid-template-columns: minmax(160px, 0.62fr) minmax(155px, 0.58fr) minmax(260px, 1.25fr) minmax(150px, 0.55fr) auto;
   gap: 12px;
   align-items: end;
   margin-bottom: 12px;
@@ -6110,6 +6110,106 @@ textarea:focus {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.code-desk-field-packet,
+.code-desk-ops-grid article,
+.code-desk-series-panel article {
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  background: rgba(246, 248, 250, 0.94);
+}
+
+.code-desk-field-packet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+}
+
+.code-desk-field-packet.ready {
+  border-color: #a8d2b5;
+  background: linear-gradient(135deg, #f4fbf6, rgba(246, 248, 250, 0.94));
+}
+
+.code-desk-field-packet.warn {
+  border-color: #d7aa58;
+  background: linear-gradient(135deg, #fff8e8, rgba(246, 248, 250, 0.94));
+}
+
+.code-desk-field-packet.danger {
+  border-color: #ce8c8c;
+  background: linear-gradient(135deg, #fff0f0, rgba(246, 248, 250, 0.94));
+}
+
+.code-desk-field-packet h3,
+.code-desk-field-packet p,
+.code-desk-ops-grid p,
+.code-desk-series-panel p {
+  margin: 0;
+}
+
+.code-desk-field-packet h3 {
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  line-height: 1.08;
+}
+
+.code-desk-field-packet p:not(.eyebrow) {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.code-desk-field-packet > strong {
+  display: grid;
+  place-items: center;
+  min-width: 76px;
+  min-height: 58px;
+  border-radius: 10px;
+  background: #17202a;
+  color: white;
+  font-size: 1.3rem;
+}
+
+.code-desk-ops-grid,
+.code-desk-series-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.code-desk-series-panel {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.code-desk-ops-grid article,
+.code-desk-series-panel article {
+  min-width: 0;
+  padding: 11px;
+}
+
+.code-desk-ops-grid span,
+.code-desk-series-panel span {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.code-desk-ops-grid strong,
+.code-desk-series-panel strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.code-desk-ops-grid p,
+.code-desk-series-panel p {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .code-desk-grid {
@@ -7510,6 +7610,9 @@ textarea:focus {
   .ai-brief-panel,
   .ai-brief-columns,
   .code-desk-summary-grid,
+  .code-desk-ops-grid,
+  .code-desk-series-panel,
+  .code-desk-field-packet,
   .code-desk-grid,
   .lishi-result-grid,
   .auto-baseline-grid,
@@ -7753,6 +7856,9 @@ textarea:focus {
   .training-gap-list article,
   .training-row-card,
   .training-check-grid div,
+  .code-desk-field-packet,
+  .code-desk-ops-grid article,
+  .code-desk-series-panel article,
   .reference-row-card,
   .code-source-panel {
     border-radius: 7px;
@@ -7765,6 +7871,8 @@ textarea:focus {
   .history-job-grid,
   .workbench-grid,
   .code-desk-grid,
+  .code-desk-ops-grid,
+  .code-desk-series-panel,
   .lishi-result-grid,
   .training-summary-grid,
   .training-check-grid,

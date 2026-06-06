@@ -26,6 +26,9 @@ let proofVaultStorageMode = "browser-local";
 let proofVaultAttachmentMaxBytes = 1_500_000;
 let codeDeskImportedRecords = [];
 let codeDeskCustomSystems = [];
+let codeDeskLessons = [];
+let latestCodeDeskLibrary = null;
+let codeDeskSyncStarted = false;
 let latestCodeDeskAutoBaseline = null;
 let latestCodeDeskResult = null;
 let latestApiHealth = null;
@@ -51,6 +54,7 @@ const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
 const codeDeskImportKey = "timlockCodeDeskImportsV1";
 const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
+const codeDeskLessonsKey = "timlockCodeDeskLessonsV1";
 const fieldLookupCacheKey = "timlockFieldLookupCacheV1";
 const dispatchPackArchiveKey = "timlockDispatchPacksV1";
 const currentJobContextKey = "timlockCurrentJobContextV1";
@@ -193,6 +197,7 @@ const codeDeskResult = document.querySelector("#codeDeskResult");
 const importCodeDeskButton = document.querySelector("#importCodeDesk");
 const exportCodeDeskButton = document.querySelector("#exportCodeDesk");
 const clearCodeDeskButton = document.querySelector("#clearCodeDesk");
+const syncCodeDeskButton = document.querySelector("#syncCodeDesk");
 const codeDeskImportInput = document.querySelector("#codeDeskImportInput");
 const codeDeskAutoForm = document.querySelector("#codeDeskAutoForm");
 const codeDeskAutoStatus = document.querySelector("#codeDeskAutoStatus");
@@ -5730,6 +5735,49 @@ function saveCodeDeskSystems(systems) {
   localStorage.setItem(codeDeskSystemKey, JSON.stringify(codeDeskCustomSystems));
 }
 
+function normalizeCodeDeskLesson(lesson = {}) {
+  if (!lesson || typeof lesson !== "object") return null;
+  const system = cleanInput(lesson.system || "");
+  const code = cleanInput(lesson.code || "");
+  const bitting = normalizeBittingInput(lesson.bitting || "").join("");
+  const outcome = cleanInput(lesson.outcome || lesson.value || "reviewed").toLowerCase();
+  const createdAt = cleanInput(lesson.createdAt) || new Date().toISOString();
+  return {
+    id: cleanInput(lesson.id) || `${compactCodeDeskKey(system)}-${compactCodeDeskKey(code)}-${bitting}-${createdAt}`,
+    system,
+    mode: cleanInput(lesson.mode || ""),
+    code,
+    bitting,
+    outcome,
+    confidence: Number.isFinite(Number(lesson.confidence)) ? Math.max(0, Math.min(100, Math.round(Number(lesson.confidence)))) : null,
+    vehicle: cleanInput(lesson.vehicle || ""),
+    partNumber: cleanInput(lesson.partNumber || ""),
+    notes: cleanInput(lesson.notes || lesson.note || ""),
+    createdAt,
+  };
+}
+
+function loadCodeDeskLessons() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(codeDeskLessonsKey) || "[]");
+    return Array.isArray(parsed) ? parsed.map(normalizeCodeDeskLesson).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCodeDeskLessons(lessons) {
+  codeDeskLessons = (lessons || []).map(normalizeCodeDeskLesson).filter(Boolean).slice(0, 2000);
+  localStorage.setItem(codeDeskLessonsKey, JSON.stringify(codeDeskLessons));
+}
+
+function mergeByCodeDeskId(existing = [], incoming = [], normalizer = (item) => item) {
+  const map = new Map();
+  existing.map(normalizer).filter(Boolean).forEach((item) => map.set(item.id, item));
+  incoming.map(normalizer).filter(Boolean).forEach((item) => map.set(item.id, { ...(map.get(item.id) || {}), ...item }));
+  return Array.from(map.values());
+}
+
 function codeDeskAvailableSystems() {
   const map = new Map();
   [...codeDeskSystems, ...codeDeskCustomSystems].forEach((system) => {
@@ -6018,6 +6066,128 @@ function codeDeskBittingDistance(left, right) {
   return distance;
 }
 
+function codeDeskMacsIssues(system, bitting = []) {
+  const macs = Number(system.macs);
+  if (!Number.isFinite(macs) || macs <= 0) return [];
+  const cuts = Array.isArray(bitting) ? bitting : normalizeBittingInput(bitting);
+  const issues = [];
+  for (let index = 1; index < cuts.length; index += 1) {
+    const previous = Number(cuts[index - 1]);
+    const current = Number(cuts[index]);
+    if (!Number.isFinite(previous) || !Number.isFinite(current)) continue;
+    const jump = Math.abs(current - previous);
+    if (jump > macs) issues.push(`P${index}-P${index + 1} MACS ${jump} > ${macs}`);
+  }
+  return issues;
+}
+
+function codeDeskMeasurementWarnings(measurementRows = []) {
+  return (measurementRows || [])
+    .filter((row) => Number.isFinite(Number(row.difference)) && Number(row.difference) > 0.006)
+    .map((row) => `P${row.position} ${codeDeskFormatMeasurement(row.difference)} off`);
+}
+
+function codeDeskLessonSummary(result = {}) {
+  const systemKey = compactCodeDeskKey(result.system?.name || result.system?.id || "");
+  const bittingKey = normalizeBittingInput(result.bitting || []).join("");
+  const codeKey = compactCodeDeskKey(result.verifiedCandidates?.[0]?.code || result.query || "");
+  const matched = codeDeskLessons.filter((lesson) => {
+    const systemMatch = !lesson.system || !systemKey || compactCodeDeskKey(lesson.system).includes(systemKey) || systemKey.includes(compactCodeDeskKey(lesson.system));
+    const bittingMatch = !lesson.bitting || !bittingKey || lesson.bitting === bittingKey;
+    const codeMatch = !lesson.code || !codeKey || compactCodeDeskKey(lesson.code) === codeKey;
+    return systemMatch && (bittingMatch || codeMatch);
+  });
+  return {
+    matched,
+    worked: matched.filter((lesson) => /worked|confirmed|used|correct/.test(lesson.outcome)).length,
+    wrong: matched.filter((lesson) => /wrong|failed|reject|bad/.test(lesson.outcome)).length,
+  };
+}
+
+function codeDeskSeriesStats(system = selectedCodeDeskSystem()) {
+  const matching = codeDeskImportedRecords.filter((record) => codeDeskSystemMatchesRecord(system, record));
+  const prefixCounts = new Map();
+  matching.forEach((record) => {
+    const code = compactCodeDeskKey(record.code);
+    if (!code) return;
+    const prefix = code.slice(0, Math.min(3, code.length));
+    prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
+  });
+  const prefixes = Array.from(prefixCounts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 6)
+    .map(([prefix, count]) => ({ prefix, count }));
+  return {
+    records: matching.length,
+    withCodes: matching.filter((record) => cleanInput(record.code)).length,
+    withBitting: matching.filter((record) => cleanInput(record.bitting)).length,
+    prefixes,
+  };
+}
+
+function codeDeskModeLabel(mode) {
+  if (mode === "code") return "Code to cuts";
+  if (mode === "reverse") return "Cuts to code";
+  if (mode === "measurements") return "Measurements to cuts";
+  return "Cuts / bitting";
+}
+
+function buildCodeDeskFieldPacket(result = {}) {
+  const top = result.verifiedCandidates?.[0];
+  const auth = result.authorization || "reference";
+  const hasDepthCard = Boolean(Object.keys(result.system?.depths || {}).length);
+  const bitting = normalizeBittingInput(result.bitting || []).join("");
+  const macsIssues = codeDeskMacsIssues(result.system || {}, bitting);
+  const measurementWarnings = codeDeskMeasurementWarnings(result.measurementRows || []);
+  const invalidCuts = (result.cutRows || []).filter((row) => !row.valid).map((row) => `P${row.position}:${row.cut}`);
+  const lessons = codeDeskLessonSummary(result);
+  let confidence = 25;
+  if (top) confidence = Math.max(confidence, top.matchScore || 0);
+  else if (bitting && hasDepthCard) confidence = 72;
+  else if (bitting) confidence = 54;
+  else if (result.matches?.length) confidence = 62;
+  if (auth === "verified") confidence += 6;
+  if (lessons.worked) confidence += Math.min(10, lessons.worked * 4);
+  if (!hasDepthCard && bitting) confidence -= 12;
+  confidence -= macsIssues.length * 8;
+  confidence -= measurementWarnings.length * 8;
+  confidence -= invalidCuts.length * 10;
+  if (lessons.wrong) confidence -= Math.min(16, lessons.wrong * 6);
+  confidence = clampPercent(confidence, 0);
+  const tone = confidence >= 86 && auth === "verified" ? "ready" : confidence >= 68 ? "warn" : "danger";
+  const headline =
+    auth !== "verified"
+      ? "Reference only"
+      : top?.code
+        ? `${codeDeskModeLabel(result.mode)}: ${top.code}`
+        : bitting
+          ? `${codeDeskModeLabel(result.mode)}: ${bitting}`
+          : "Import or enter code data";
+  const warnings = [
+    auth !== "verified" ? "Authorization not marked verified" : "",
+    !hasDepthCard ? "Exact depth-space card missing" : "",
+    ...invalidCuts.map((item) => `Invalid cut ${item}`),
+    ...macsIssues,
+    ...measurementWarnings.map((item) => `Measurement ${item}`),
+    lessons.wrong ? `${lessons.wrong} prior owner flag${lessons.wrong === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  const next = warnings.length
+    ? ["Verify proof/authorization", "Confirm exact system/card", "Compare against lock or trusted source"]
+    : ["Cut from verified card", "Save worked result", "Attach proof if used on a job"];
+  return {
+    headline,
+    tone,
+    confidence,
+    direction: codeDeskModeLabel(result.mode),
+    authorization: auth === "verified" ? "Verified" : auth === "training" ? "Training" : "Reference",
+    code: top?.code || result.matches?.[0]?.code || "",
+    bitting,
+    warnings,
+    next,
+    lessons,
+  };
+}
+
 function codeDeskVerifiedCandidates(system, bitting = [], query = "", mode = "bitting") {
   const targetBitting = Array.isArray(bitting) ? bitting.join("") : normalizeBittingInput(bitting).join("");
   const compactQuery = compactCodeDeskKey(query);
@@ -6120,8 +6290,57 @@ function renderCodeDeskRecord(record) {
   `;
 }
 
+function renderCodeDeskFieldPacket(packet = {}) {
+  return `
+    <section class="code-desk-field-packet ${escapeHtml(packet.tone || "warn")}">
+      <div>
+        <p class="eyebrow">Code intelligence</p>
+        <h3>${escapeHtml(packet.headline || "Code Desk packet")}</h3>
+        <p>${escapeHtml([packet.direction, packet.authorization, packet.bitting ? `Cuts ${packet.bitting}` : "", packet.code ? `Code ${packet.code}` : ""].filter(Boolean).join(" | "))}</p>
+      </div>
+      <strong>${escapeHtml(`${packet.confidence || 0}%`)}</strong>
+    </section>
+    <section class="code-desk-ops-grid">
+      <article>
+        <span>Use status</span>
+        <strong>${escapeHtml(packet.warnings?.length ? "Verify first" : "Ready with proof")}</strong>
+        <p>${escapeHtml(packet.warnings?.slice(0, 4).join(" | ") || "No packet warnings from current data.")}</p>
+      </article>
+      <article>
+        <span>Next</span>
+        <strong>${escapeHtml((packet.next || [])[0] || "Review")}</strong>
+        <p>${escapeHtml((packet.next || []).slice(1).join(" | ") || "Save the outcome so AI learns.")}</p>
+      </article>
+      <article>
+        <span>AI memory</span>
+        <strong>${escapeHtml(`${packet.lessons?.worked || 0} worked / ${packet.lessons?.wrong || 0} flags`)}</strong>
+        <p>Owner learning marks tune future Code Desk confidence.</p>
+      </article>
+    </section>
+  `;
+}
+
+function renderCodeDeskSeriesPanel(result = {}) {
+  const stats = codeDeskSeriesStats(result.system);
+  return `
+    <section class="code-desk-series-panel">
+      <article>
+        <span>Authorized library</span>
+        <strong>${escapeHtml(`${stats.records} records`)}</strong>
+        <p>${escapeHtml(`${stats.withCodes} codes | ${stats.withBitting} bittings | ${codeDeskLessons.length} learned outcomes`)}</p>
+      </article>
+      <article>
+        <span>Code series</span>
+        <strong>${escapeHtml(stats.prefixes.length ? stats.prefixes.map((item) => `${item.prefix} (${item.count})`).join(" | ") : "Import ready")}</strong>
+        <p>Series clues help cuts-to-code and code-to-cuts ranking after authorized imports.</p>
+      </article>
+    </section>
+  `;
+}
+
 function renderCodeDeskResult(result) {
   if (!codeDeskResult) return;
+  result.packet = buildCodeDeskFieldPacket(result);
   latestCodeDeskResult = result;
   const depthRows = codeDeskDepthRows(result.system);
   const cutRows = result.cutRows || [];
@@ -6130,6 +6349,7 @@ function renderCodeDeskResult(result) {
   const topVerified = verifiedCandidates[0];
   codeDeskResult.dataset.ready = "result";
   codeDeskResult.innerHTML = `
+    ${renderCodeDeskFieldPacket(result.packet)}
     <section class="code-desk-summary-grid">
       <article class="metric">
         <span>System</span>
@@ -6198,6 +6418,7 @@ function renderCodeDeskResult(result) {
         </div>
       </article>
     </section>
+    ${renderCodeDeskSeriesPanel(result)}
     <section class="history-section">
       <div class="panel-header tight">
         <div>
@@ -6211,6 +6432,17 @@ function renderCodeDeskResult(result) {
             ? verifiedCandidates.map(renderCodeDeskCandidate).join("")
             : `<article class="assistant-card"><strong>No verified code candidate</strong><p>Enter bitting/cuts or measurements, then import authorized code records with code and bitting columns to verify code direction.</p></article>`
         }
+      </div>
+      <div class="training-actions code-desk-learn-actions">
+        ${
+          topVerified || result.bitting?.length || result.matches?.length
+            ? `
+              <button class="secondary-action small" type="button" data-code-desk-learn="worked">Mark Worked</button>
+              <button class="secondary-action small" type="button" data-code-desk-learn="wrong">Flag Wrong</button>
+            `
+            : ""
+        }
+        <button class="secondary-action small" type="button" data-ai-prompt="Explain this Code Desk result safely">Ask AI</button>
       </div>
     </section>
     <section class="history-section">
@@ -6234,6 +6466,7 @@ function runCodeDesk() {
   const system = selectedCodeDeskSystem();
   const mode = data.get("mode") || "bitting";
   const query = cleanInput(data.get("query"));
+  const authorization = cleanInput(data.get("authorization") || "reference");
   let bitting = [];
   let measurementRows = [];
   let matches = [];
@@ -6258,6 +6491,7 @@ function runCodeDesk() {
     system,
     mode,
     query,
+    authorization,
     bitting,
     cutRows: codeDeskCutRows(system, bitting),
     measurementRows,
@@ -6276,6 +6510,11 @@ function renderCodeDesk() {
   if (!codeDeskForm || !codeDeskResult) return;
   codeDeskImportedRecords = loadCodeDeskImports();
   codeDeskCustomSystems = loadCodeDeskSystems();
+  codeDeskLessons = loadCodeDeskLessons();
+  if (appMode === "owner" && !codeDeskSyncStarted) {
+    codeDeskSyncStarted = true;
+    syncCodeDeskLibrary({ quiet: true, push: false });
+  }
   const select = codeDeskForm.elements.system;
   if (select) {
     const current = select.value;
@@ -6338,6 +6577,7 @@ async function importCodeDeskFile(file) {
       verifiedCandidates: [],
     });
     if (codeDeskStatus) codeDeskStatus.textContent = `Imported ${imported.records.length} code records and ${imported.systems.length} depth-space cards.`;
+    syncCodeDeskLibrary({ quiet: true, push: true });
   } catch (error) {
     if (codeDeskStatus) codeDeskStatus.textContent = `Import failed: ${error.message}`;
   }
@@ -6351,6 +6591,85 @@ function exportCodeDeskRecords() {
     systems: codeDeskAvailableSystems().map(({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom }) => ({ id, name, category, family, blanks, spaces, depths, macs, cuts, stop, source, notes, custom })),
   });
   if (codeDeskStatus) codeDeskStatus.textContent = "Code Desk records exported.";
+}
+
+async function syncCodeDeskLibrary({ quiet = false, push = true } = {}) {
+  if (appMode !== "owner") return null;
+  try {
+    if (!quiet && codeDeskStatus) codeDeskStatus.textContent = "Syncing Code Desk library...";
+    const serverLibrary = await api("/api/code-desk/library", { timeoutMs: 18000 });
+    latestCodeDeskLibrary = serverLibrary;
+    saveCodeDeskImports(mergeByCodeDeskId(codeDeskImportedRecords, serverLibrary.records || [], normalizeCodeDeskRecord));
+    saveCodeDeskSystems(mergeByCodeDeskId(codeDeskCustomSystems, serverLibrary.systems || [], normalizeCodeDeskSystem));
+    saveCodeDeskLessons(mergeByCodeDeskId(codeDeskLessons, serverLibrary.lessons || [], normalizeCodeDeskLesson));
+    if (push) {
+      latestCodeDeskLibrary = await api("/api/code-desk/library", {
+        method: "POST",
+        body: JSON.stringify({
+          records: codeDeskImportedRecords,
+          systems: codeDeskCustomSystems,
+          lessons: codeDeskLessons,
+        }),
+        timeoutMs: 30000,
+      });
+      saveCodeDeskImports(mergeByCodeDeskId(codeDeskImportedRecords, latestCodeDeskLibrary.records || [], normalizeCodeDeskRecord));
+      saveCodeDeskSystems(mergeByCodeDeskId(codeDeskCustomSystems, latestCodeDeskLibrary.systems || [], normalizeCodeDeskSystem));
+      saveCodeDeskLessons(mergeByCodeDeskId(codeDeskLessons, latestCodeDeskLibrary.lessons || [], normalizeCodeDeskLesson));
+    }
+    renderCodeDesk();
+    if (codeDeskStatus) {
+      const summary = latestCodeDeskLibrary?.summary || serverLibrary.summary || {};
+      codeDeskStatus.textContent = `Code Desk synced: ${summary.records || codeDeskImportedRecords.length} records, ${summary.systems || codeDeskCustomSystems.length} cards, ${summary.lessons || codeDeskLessons.length} lessons.`;
+    }
+    return latestCodeDeskLibrary || serverLibrary;
+  } catch (error) {
+    if (!quiet && codeDeskStatus) codeDeskStatus.textContent = `Code Desk sync skipped: ${error.message}`;
+    return null;
+  }
+}
+
+async function learnCodeDeskOutcome(outcome, button) {
+  if (!latestCodeDeskResult) return;
+  const top = latestCodeDeskResult.verifiedCandidates?.[0] || latestCodeDeskResult.matches?.[0] || {};
+  const packet = latestCodeDeskResult.packet || buildCodeDeskFieldPacket(latestCodeDeskResult);
+  const autoRow = latestCodeDeskAutoBaseline?.rows?.[0] || {};
+  const vehicleLabel = top.vehicle || [autoRow.year, autoRow.make, autoRow.model].filter(Boolean).join(" ");
+  const lesson = normalizeCodeDeskLesson({
+    system: latestCodeDeskResult.system?.name || latestCodeDeskResult.system?.id || "",
+    mode: latestCodeDeskResult.mode || "",
+    code: top.code || "",
+    bitting: latestCodeDeskResult.bitting?.join("") || top.bitting || "",
+    outcome,
+    confidence: packet.confidence,
+    vehicle: vehicleLabel,
+    partNumber: top.partNumber || "",
+    notes: outcome === "wrong" ? "Owner flagged Code Desk result." : "Owner confirmed Code Desk result worked.",
+  });
+  if (!lesson) return;
+  const originalText = button?.textContent || "";
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = outcome === "wrong" ? "Flagging..." : "Saving...";
+    }
+    saveCodeDeskLessons(mergeByCodeDeskId([lesson], codeDeskLessons, normalizeCodeDeskLesson));
+    if (appMode === "owner") {
+      await api("/api/code-desk/learn", {
+        method: "POST",
+        body: JSON.stringify(lesson),
+        timeoutMs: 12000,
+      });
+    }
+    renderCodeDeskResult(latestCodeDeskResult);
+    if (codeDeskStatus) codeDeskStatus.textContent = outcome === "wrong" ? "Code Desk result flagged for AI memory." : "Code Desk result saved as worked for AI memory.";
+  } catch (error) {
+    if (codeDeskStatus) codeDeskStatus.textContent = `Learning save failed: ${error.message}`;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function renderAutoDatabaseSupport(items = []) {
@@ -8561,8 +8880,11 @@ function compactCodeDeskForAi() {
     mode: result.mode || codeDeskForm?.elements.mode?.value || "",
     query: result.query || cleanInput(codeDeskForm?.elements.query?.value || ""),
     bitting: result.bitting?.join("") || "",
+    packet: result.packet ? { confidence: result.packet.confidence, headline: result.packet.headline, warnings: result.packet.warnings?.slice(0, 5) || [] } : null,
     verifiedCandidates: result.verifiedCandidates?.length || 0,
     importedRecords: codeDeskImportedRecords.length,
+    importedSystems: codeDeskCustomSystems.length,
+    lessons: codeDeskLessons.length,
   };
 }
 
@@ -9888,11 +10210,13 @@ codeDeskForm?.addEventListener("submit", (event) => {
 });
 importCodeDeskButton?.addEventListener("click", () => codeDeskImportInput?.click());
 exportCodeDeskButton?.addEventListener("click", exportCodeDeskRecords);
+syncCodeDeskButton?.addEventListener("click", () => syncCodeDeskLibrary({ quiet: false, push: true }));
 clearCodeDeskButton?.addEventListener("click", () => {
   saveCodeDeskImports([]);
+  saveCodeDeskLessons([]);
   if (codeDeskResult) codeDeskResult.dataset.ready = "";
   renderCodeDesk();
-  if (codeDeskStatus) codeDeskStatus.textContent = "Imported Code Desk records cleared.";
+  if (codeDeskStatus) codeDeskStatus.textContent = "Browser Code Desk records cleared. Server library is unchanged.";
 });
 codeDeskImportInput?.addEventListener("change", async () => {
   await importCodeDeskFile(codeDeskImportInput.files?.[0]);
@@ -9965,6 +10289,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const codeDeskLearnButton = event.target.closest("[data-code-desk-learn]");
+  if (codeDeskLearnButton) {
+    learnCodeDeskOutcome(codeDeskLearnButton.dataset.codeDeskLearn, codeDeskLearnButton);
+    return;
+  }
+
   const trainingTeachButton = event.target.closest("[data-training-teach]");
   if (trainingTeachButton) {
     teachTrainingRow(trainingTeachButton.dataset.trainingTeach, trainingTeachButton.dataset.trainingVerdict, trainingTeachButton);

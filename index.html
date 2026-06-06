@@ -413,6 +413,7 @@
                 <h3>Code Desk</h3>
               </div>
               <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="syncCodeDesk">Sync Library</button>
                 <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes / Cards</button>
                 <button class="secondary-action small" type="button" id="exportCodeDesk">Export Codes</button>
                 <button class="secondary-action small" type="button" id="clearCodeDesk">Clear Codes</button>
@@ -436,6 +437,14 @@
               <label class="wide-field">
                 Code, bitting, or measurements
                 <input name="query" placeholder="Y164 cuts, .329 .306 .283, or authorized code" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <label>
+                Authorization
+                <select name="authorization">
+                  <option value="verified">Verified job/proof</option>
+                  <option value="reference">Reference only</option>
+                  <option value="training">Training bench</option>
+                </select>
               </label>
               <button class="primary-action" type="submit">Run Desk</button>
             </form>

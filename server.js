@@ -109,6 +109,9 @@ const emptyStore = {
   auditLog: [],
   aiFeedback: [],
   shopRules: [],
+  codeDeskRecords: [],
+  codeDeskSystems: [],
+  codeDeskLessons: [],
   aiPreferences: {
     voice: "field-pro",
     ownerTone: "direct",
@@ -135,6 +138,9 @@ function normalizeStore(store = {}) {
     auditLog: Array.isArray(store.auditLog) ? store.auditLog : [],
     aiFeedback: Array.isArray(store.aiFeedback) ? store.aiFeedback : [],
     shopRules: Array.isArray(store.shopRules) ? store.shopRules : [],
+    codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
+    codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
+    codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
     aiPreferences: {
       ...emptyStore.aiPreferences,
       ...(store.aiPreferences && typeof store.aiPreferences === "object" ? store.aiPreferences : {}),
@@ -1527,6 +1533,9 @@ function mergeStorageStore(currentStore, incomingStore = {}, replace = false) {
     auditLog: mergeStorageRecords(current.auditLog, incoming.auditLog, ["createdAt", "prompt", "route"], "audit"),
     aiFeedback: mergeStorageRecords(current.aiFeedback, incoming.aiFeedback, ["createdAt", "prompt", "value"], "ai-feedback"),
     shopRules: mergeStorageRecords(current.shopRules, incoming.shopRules, ["title", "body", "createdAt"], "shop-rule"),
+    codeDeskRecords: mergeStorageRecords(current.codeDeskRecords, incoming.codeDeskRecords, ["system", "code", "bitting"], "code-desk-record"),
+    codeDeskSystems: mergeStorageRecords(current.codeDeskSystems, incoming.codeDeskSystems, ["name", "id"], "code-desk-system"),
+    codeDeskLessons: mergeStorageRecords(current.codeDeskLessons, incoming.codeDeskLessons, ["createdAt", "system", "code", "bitting", "outcome"], "code-desk-lesson"),
     aiPreferences: {
       ...current.aiPreferences,
       ...(incoming.aiPreferences && typeof incoming.aiPreferences === "object" ? incoming.aiPreferences : {}),
@@ -6664,6 +6673,169 @@ function autoDatabaseSupport(row = {}, vpicRow = null, jobs = [], observedJobCou
   ];
 }
 
+function serverCodeDeskList(value = []) {
+  if (Array.isArray(value)) return value.map(cleanString).filter(Boolean);
+  return cleanString(value)
+    .split(/[|;,/]+/)
+    .map(cleanString)
+    .filter(Boolean);
+}
+
+function serverCodeDeskNumberList(value = []) {
+  const raw = Array.isArray(value) ? value : cleanString(value).match(/\d+(?:\.\d+)?/g) || [];
+  return raw
+    .map(Number)
+    .map((number) => (number > 1 ? number / 1000 : number))
+    .filter((number) => Number.isFinite(number));
+}
+
+function serverCodeDeskDepthMap(value = {}) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([cut, depth]) => [cleanString(cut).toUpperCase(), Number(depth) > 1 ? Number(depth) / 1000 : Number(depth)])
+        .filter(([cut, depth]) => cut && Number.isFinite(depth)),
+    );
+  }
+  const depths = {};
+  cleanString(value)
+    .split(/[|;,]+/)
+    .forEach((pair) => {
+      const match = pair.match(/([0-9A-Z?]+)\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+      if (!match) return;
+      const depth = Number(match[2]);
+      if (Number.isFinite(depth)) depths[match[1].toUpperCase()] = depth > 1 ? depth / 1000 : depth;
+    });
+  return depths;
+}
+
+function serverNormalizeBitting(value = "") {
+  return cleanString(value).replace(/[^0-9?]/g, "");
+}
+
+function cleanCodeDeskRecord(input = {}) {
+  const system = cleanString(input.system || input.keyway || input.blank || input.card);
+  const code = cleanString(input.code || input.keyCode || input.lockCode || input.factoryCode);
+  const bitting = serverNormalizeBitting(input.bitting || input.cuts || input.depths);
+  if (!code && !bitting) return null;
+  const base = {
+    system,
+    keyway: cleanString(input.keyway || input.blank || ""),
+    code,
+    bitting,
+    vehicle: cleanString(input.vehicle || input.application || ""),
+    partNumber: cleanString(input.partNumber || input.part || input.sku || ""),
+    source: cleanString(input.source || input.origin || ""),
+    notes: cleanString(input.notes || input.note || ""),
+    importedAt: cleanString(input.importedAt) || new Date().toISOString(),
+  };
+  return {
+    id: cleanString(input.id) || `cdr-${sha256Hex(JSON.stringify(base)).slice(0, 18)}`,
+    ...base,
+  };
+}
+
+function cleanCodeDeskSystem(input = {}) {
+  const name = cleanString(input.name || input.system || input.card || input.keyway || input.description);
+  if (!name) return null;
+  const base = {
+    name,
+    category: cleanString(input.category || input.type) || "Imported",
+    family: cleanString(input.family || input.format || input.style) || "Depth-space card",
+    blanks: uniqueCleanValues(serverCodeDeskList(input.blanks || input.blank || input.keyway)),
+    spaces: serverCodeDeskNumberList(input.spaces || input.space || input.spaceList || input.space_list),
+    depths: serverCodeDeskDepthMap(input.depths || input.depthMap || input.depth_map || input.depthsByCut),
+    macs: cleanString(input.macs || input.mac) || "Verify",
+    cuts: cleanString(input.cuts || input.positions || ""),
+    stop: cleanString(input.stop || input.stopType || "") || "Card-specific",
+    source: cleanString(input.source || input.origin || "") || "Owner import",
+    notes: uniqueCleanValues(serverCodeDeskList(input.notes || input.note)).slice(0, 12),
+    custom: true,
+    importedAt: cleanString(input.importedAt) || new Date().toISOString(),
+  };
+  const id = cleanString(input.id) || `cds-${sha256Hex(JSON.stringify({ name, blanks: base.blanks, spaces: base.spaces, depths: base.depths })).slice(0, 16)}`;
+  return { id, ...base };
+}
+
+function cleanCodeDeskLesson(input = {}) {
+  const base = {
+    system: cleanString(input.system || ""),
+    mode: cleanString(input.mode || ""),
+    code: cleanString(input.code || ""),
+    bitting: serverNormalizeBitting(input.bitting || ""),
+    outcome: cleanString(input.outcome || input.value || "reviewed").toLowerCase(),
+    confidence: Number.isFinite(Number(input.confidence)) ? Math.max(0, Math.min(100, Math.round(Number(input.confidence)))) : null,
+    vehicle: cleanString(input.vehicle || ""),
+    partNumber: cleanString(input.partNumber || ""),
+    notes: cleanString(input.notes || input.note || ""),
+    createdAt: cleanString(input.createdAt) || new Date().toISOString(),
+  };
+  return {
+    id: cleanString(input.id) || `cdl-${sha256Hex(JSON.stringify(base)).slice(0, 18)}`,
+    ...base,
+  };
+}
+
+function codeDeskLibrarySummary(store = {}) {
+  const records = Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [];
+  const systems = Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [];
+  const lessons = Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [];
+  const systemCount = new Set(records.map((record) => cleanString(record.system || record.keyway)).filter(Boolean)).size;
+  return {
+    records: records.length,
+    systems: systems.length,
+    lessons: lessons.length,
+    recordSystems: systemCount,
+    learnedWorked: lessons.filter((lesson) => /worked|confirmed|used|correct/.test(cleanString(lesson.outcome))).length,
+    learnedWrong: lessons.filter((lesson) => /wrong|failed|reject|bad/.test(cleanString(lesson.outcome))).length,
+  };
+}
+
+function publicCodeDeskLibrary(store = {}) {
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: codeDeskLibrarySummary(store),
+    records: (store.codeDeskRecords || []).map(cleanCodeDeskRecord).filter(Boolean).slice(0, 20000),
+    systems: (store.codeDeskSystems || []).map(cleanCodeDeskSystem).filter(Boolean).slice(0, 1000),
+    lessons: (store.codeDeskLessons || []).map(cleanCodeDeskLesson).filter(Boolean).slice(0, 2000),
+  };
+}
+
+async function importCodeDeskLibrary(body = {}, store = {}) {
+  const incomingRecords = (body.records || body.codeRecords || []).map(cleanCodeDeskRecord).filter(Boolean);
+  const incomingSystems = (body.systems || body.cards || body.depthSpaceCards || []).map(cleanCodeDeskSystem).filter(Boolean);
+  const incomingLessons = (body.lessons || body.learning || []).map(cleanCodeDeskLesson).filter(Boolean);
+  const replace = Boolean(body.replace);
+  store.codeDeskRecords = replace
+    ? incomingRecords
+    : mergeStorageRecords(store.codeDeskRecords, incomingRecords, ["system", "code", "bitting"], "code-desk-record");
+  store.codeDeskSystems = replace
+    ? incomingSystems
+    : mergeStorageRecords(store.codeDeskSystems, incomingSystems, ["name", "id"], "code-desk-system");
+  store.codeDeskLessons = replace
+    ? incomingLessons
+    : mergeStorageRecords(store.codeDeskLessons, incomingLessons, ["createdAt", "system", "code", "bitting", "outcome"], "code-desk-lesson");
+  await writeStore(store);
+  return publicCodeDeskLibrary(store);
+}
+
+async function learnCodeDesk(body = {}, store = {}) {
+  const lesson = cleanCodeDeskLesson(body);
+  store.codeDeskLessons = mergeStorageRecords([lesson], store.codeDeskLessons, ["createdAt", "system", "code", "bitting", "outcome"], "code-desk-lesson").slice(0, 2000);
+  const feedback = cleanAiFeedback({
+    value: /wrong|failed|reject|bad/.test(lesson.outcome) ? "wrong" : "used",
+    title: `Code Desk ${lesson.outcome}`,
+    note: lesson.notes || `${lesson.system || "Code Desk"} ${lesson.code || lesson.bitting || "reviewed"}`,
+    prompt: [lesson.system, lesson.code, lesson.bitting].filter(Boolean).join(" "),
+    target: "code-desk",
+    contextSummary: [lesson.vehicle, lesson.partNumber, lesson.mode, lesson.outcome].filter(Boolean),
+  });
+  store.aiFeedback.unshift(feedback);
+  store.aiFeedback = store.aiFeedback.slice(0, 1000);
+  await writeStore(store);
+  return { lesson, feedback, summary: codeDeskLibrarySummary(store) };
+}
+
 function autoJobVehicleCounts(jobs = []) {
   const makeModel = new Map();
   for (const job of jobs || []) {
@@ -6834,6 +7006,7 @@ function referenceListSources() {
     { id: "lishi-applications", label: "Lishi applications", note: "Vehicle coverage rows from the Lishi master reference." },
     { id: "programming", label: "Programming reference", note: "Local year/make/model programmer and security rows." },
     { id: "auto-baseline", label: "Auto Code Desk baseline", note: "Merged programming/vPIC/code-readiness view." },
+    { id: "code-desk-library", label: "Code Desk library", note: "Owner synced authorized codes, depth-space cards, and AI learning marks." },
     { id: "key-intelligence", label: "Key intelligence", note: "Built-in verified key systems, tools, programmers, and source records." },
     { id: "master-catalog", label: "Master parts catalog", note: "Imported master catalog identifiers and application clues." },
     { id: "key-innovations", label: "Key Innovations labels", note: "Imported supplier label/SKU extraction." },
@@ -6872,6 +7045,15 @@ async function buildReferenceList(options = {}, store = { jobs: [] }) {
     rows = baseline.rows || [];
     generatedAt = baseline.generatedAt || "";
     sourceNote = baseline.source || "";
+  } else if (source === "code-desk-library") {
+    rows = [
+      ...(store.codeDeskSystems || []).map((row) => ({ recordType: "Depth-space card", ...row })),
+      ...(store.codeDeskRecords || []).map((row) => ({ recordType: "Code record", ...row })),
+      ...(store.codeDeskLessons || []).map((row) => ({ recordType: "Learning mark", ...row })),
+    ];
+    generatedAt = new Date().toISOString();
+    const summary = codeDeskLibrarySummary(store);
+    sourceNote = `${summary.records} code records, ${summary.systems} cards, ${summary.lessons} learning marks.`;
   } else if (source === "key-intelligence") {
     const reference = await readKeyIntelligence().catch(() => ({ records: [] }));
     rows = Array.isArray(reference) ? reference : reference.records || reference.keyIntelligence || [];
@@ -9718,6 +9900,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
   ];
   if (ownerOnlyPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return true;
   if (pathname === "/api/mission-control" || pathname === "/api/training-center" || pathname === "/api/training-center/teach") return true;
+  if (pathname === "/api/code-desk/library" || pathname === "/api/code-desk/learn") return true;
   if (pathname === "/api/jobs" || pathname.startsWith("/api/jobs/")) return true;
   if (pathname === "/api/jobs/sync" || pathname === "/api/part-outcomes" || pathname === "/api/worked-jobs/import") return true;
   if (pathname.startsWith("/api/proof-vault/attachments") && writeMethod) return true;
@@ -10196,6 +10379,21 @@ async function handleApi(request, response, pathname) {
         limit: url.searchParams.get("limit"),
       }),
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/code-desk/library") {
+    sendJson(response, 200, publicCodeDeskLibrary(store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/code-desk/library") {
+    sendJson(response, 200, await importCodeDeskLibrary(await readJsonBody(request), store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/code-desk/learn") {
+    sendJson(response, 201, await learnCodeDesk(await readJsonBody(request), store));
     return;
   }
 
