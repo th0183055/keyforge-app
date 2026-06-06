@@ -5050,6 +5050,82 @@ function lishiVehicleApplicationScore(application, { make, model, year }) {
   return score;
 }
 
+function lishiHasVehicleContext(options = {}) {
+  return Boolean(cleanString(options.make) || cleanString(options.model) || cleanString(options.year));
+}
+
+function lishiToolAliasTokens(tool = {}) {
+  return [tool.tool, tool.canonical, ...(tool.aliases || [])]
+    .map((value) => normalizeVehicleText(value).replace(/\s+/g, ""))
+    .filter(Boolean);
+}
+
+function lishiQueryHasToolAlias(tool = {}, query = "") {
+  const queryNorm = normalizeVehicleText(query);
+  if (!queryNorm) return false;
+  const queryCompact = queryNorm.replace(/\s+/g, "");
+  const queryTokens = lishiTokens(query).map((token) => token.replace(/\s+/g, ""));
+  return lishiToolAliasTokens(tool).some((alias) => queryCompact === alias || queryTokens.includes(alias));
+}
+
+function lishiVehicleApplicationMatches(applications = [], options = {}) {
+  return applications
+    .map((application) => ({
+      application,
+      score: lishiVehicleApplicationScore(application, options),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.application.model).localeCompare(String(b.application.model)));
+}
+
+function lishiToolEvidence(tool = {}, applications = [], options = {}) {
+  const vehicleContext = lishiHasVehicleContext(options);
+  const vehicleMatches = lishiVehicleApplicationMatches(applications, options);
+  const exactToolQuery = lishiQueryHasToolAlias(tool, options.q);
+  const bestVehicleScore = vehicleMatches[0]?.score || 0;
+  const vehicleConfirmed = Boolean(vehicleContext && vehicleMatches.length);
+  const matchStatus = vehicleConfirmed
+    ? "vehicle-confirmed"
+    : vehicleContext && exactToolQuery
+      ? "keyway-shortlist"
+      : vehicleContext
+        ? "verify-required"
+        : exactToolQuery
+          ? "tool-confirmed"
+          : "search-match";
+  const confidencePercent = vehicleConfirmed
+    ? Math.min(98, 72 + Math.min(26, Math.round(bestVehicleScore / 8)))
+    : matchStatus === "tool-confirmed"
+      ? 90
+      : matchStatus === "keyway-shortlist"
+        ? 58
+        : matchStatus === "search-match"
+          ? 54
+          : 30;
+  const warnings = uniqueCleanValues([
+    vehicleContext && !vehicleConfirmed ? "No imported vehicle/application row confirmed this exact year/make/model." : "",
+    matchStatus === "keyway-shortlist" ? "Tool/keyway token matched, but the vehicle row did not confirm it. Verify at the lock or insert." : "",
+    matchStatus === "verify-required" ? "Confirm the mechanical keyway at the vehicle before choosing a Lishi." : "",
+  ]);
+  return {
+    vehicleConfirmed,
+    matchStatus,
+    matchLabel:
+      matchStatus === "vehicle-confirmed"
+        ? "Vehicle match"
+        : matchStatus === "keyway-shortlist"
+          ? "Verify keyway"
+          : matchStatus === "tool-confirmed"
+            ? "Tool match"
+            : matchStatus === "verify-required"
+              ? "Verify required"
+              : "Search match",
+    confidencePercent,
+    vehicleMatches,
+    warnings,
+  };
+}
+
 function lishiToolSearchText(tool, applications = []) {
   return [
     tool.tool,
@@ -5086,16 +5162,22 @@ function lishiToolScore(tool, applications, options) {
   }
   if (category && !(tool.categories || []).some((item) => lishiTextMatch(item, category))) return 0;
   const vehicleScores = applications.map((application) => lishiVehicleApplicationScore(application, options)).filter(Boolean);
+  if (lishiHasVehicleContext(options) && !vehicleScores.length && !lishiQueryHasToolAlias(tool, query)) return 0;
   if ((options.make || options.model || options.year) && !vehicleScores.length && !queryMatched) return 0;
   score += vehicleScores.reduce((total, item) => total + item, 0);
   score += Math.min(60, Number(tool.pdfCoverageRows || tool.applicationCount || 0));
   return score || (query || category || options.make || options.model || options.year ? 0 : 1);
 }
 
-function publicLishiTool(tool, applications = [], score = 0) {
+function publicLishiTool(tool, applications = [], score = 0, evidence = {}) {
   return {
     id: tool.id,
     score,
+    confidencePercent: evidence.confidencePercent || 0,
+    matchStatus: evidence.matchStatus || "search-match",
+    matchLabel: evidence.matchLabel || "Search match",
+    vehicleConfirmed: Boolean(evidence.vehicleConfirmed),
+    warnings: evidence.warnings || [],
     tool: tool.tool,
     canonical: tool.canonical,
     categories: tool.categories || [],
@@ -5106,6 +5188,7 @@ function publicLishiTool(tool, applications = [], score = 0) {
     aliases: tool.aliases || [],
     sourceNote: tool.sourceNote,
     applicationCount: applications.length || tool.applicationCount || 0,
+    vehicleMatchedApplications: (evidence.vehicleMatches || []).slice(0, 6).map((item) => item.application),
     applications: applications.slice(0, 10),
   };
 }
@@ -5120,20 +5203,40 @@ function buildLishiLookup(reference, options = {}) {
   const scoredTools = (reference.tools || [])
     .map((tool) => {
       const applications = applicationsByTool.get(tool.id) || [];
-      return { tool, applications, score: lishiToolScore(tool, applications, options) };
+      const evidence = lishiToolEvidence(tool, applications, options);
+      return { tool, applications, evidence, score: lishiToolScore(tool, applications, options) };
     })
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score || String(a.tool.canonical).localeCompare(String(b.tool.canonical)));
+    .sort(
+      (a, b) =>
+        Number(b.evidence.vehicleConfirmed) - Number(a.evidence.vehicleConfirmed) ||
+        b.evidence.confidencePercent - a.evidence.confidencePercent ||
+        b.score - a.score ||
+        String(a.tool.canonical).localeCompare(String(b.tool.canonical)),
+    );
 
   const matchedApplications = (reference.applications || [])
     .map((application) => {
       const queryText = `${application.canonical} ${application.toolFromPdf} ${application.manufacturer} ${application.model} ${application.yearsText} ${application.sourceTitle}`;
-      let score = lishiVehicleApplicationScore(application, options);
-      if (options.q && lishiTextMatch(queryText, options.q)) score += 80;
+      const vehicleScore = lishiVehicleApplicationScore(application, options);
+      let score = vehicleScore;
+      if (options.q && lishiTextMatch(queryText, options.q)) score += lishiHasVehicleContext(options) ? (vehicleScore ? 20 : 0) : 80;
       return { ...application, score };
     })
     .filter((application) => application.score > 0)
     .sort((a, b) => b.score - a.score || String(a.manufacturer).localeCompare(String(b.manufacturer)));
+  const confirmedTools = scoredTools.filter((item) => item.evidence.vehicleConfirmed).length;
+  const keywayShortlistTools = scoredTools.filter((item) => item.evidence.matchStatus === "keyway-shortlist").length;
+  const vehicleContext = lishiHasVehicleContext(options);
+  const matchStatus = confirmedTools
+    ? "vehicle-confirmed"
+    : vehicleContext && keywayShortlistTools
+      ? "keyway-shortlist"
+      : vehicleContext
+        ? "verify-required"
+        : scoredTools.length
+          ? "search-match"
+          : "no-match";
 
   return {
     generatedAt: reference.generatedAt,
@@ -5151,8 +5254,19 @@ function buildLishiLookup(reference, options = {}) {
     },
     returnedTools: Math.min(limit, scoredTools.length),
     matchedTools: scoredTools.length,
+    confirmedTools,
+    keywayShortlistTools,
+    matchStatus,
+    decision:
+      matchStatus === "vehicle-confirmed"
+        ? "Use the vehicle-confirmed Lishi shortlist, then verify at the lock."
+        : matchStatus === "keyway-shortlist"
+          ? "Treat these as keyway candidates only. Confirm at the lock or insert before use."
+          : vehicleContext
+            ? "No vehicle-confirmed Lishi row was found. Verify the mechanical keyway at the vehicle."
+            : "Search results are not vehicle-confirmed until year/make/model are supplied.",
     matchedApplications: matchedApplications.length,
-    tools: scoredTools.slice(0, limit).map((item) => publicLishiTool(item.tool, item.applications, item.score)),
+    tools: scoredTools.slice(0, limit).map((item) => publicLishiTool(item.tool, item.applications, item.score, item.evidence)),
     applications: matchedApplications.slice(0, limit),
     cleanupNotes: (reference.cleanupNotes || []).slice(0, 20),
     sources: reference.sources || [],
@@ -7537,6 +7651,10 @@ function compactLishiLookup(payload = {}) {
     categories: payload.categories || [],
     returnedTools: payload.returnedTools || 0,
     matchedTools: payload.matchedTools || 0,
+    confirmedTools: payload.confirmedTools || 0,
+    keywayShortlistTools: payload.keywayShortlistTools || 0,
+    matchStatus: payload.matchStatus || "",
+    decision: payload.decision || "",
     matchedApplications: payload.matchedApplications || 0,
     tools: (payload.tools || []).slice(0, 12),
     applications: (payload.applications || []).slice(0, 12),
@@ -7652,8 +7770,10 @@ function bestProgrammerDecisionValue(partHistory, proofPatterns, coverage) {
 }
 
 function bestDecodeDecisionValue(lishiLookup, profile) {
-  const tool = lishiLookup?.tools?.[0];
-  if (tool?.canonical || tool?.tool) return tool.canonical || tool.tool;
+  const vehicleConfirmed = (lishiLookup?.tools || []).find((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
+  if (vehicleConfirmed?.canonical || vehicleConfirmed?.tool) return vehicleConfirmed.canonical || vehicleConfirmed.tool;
+  const shortlist = (lishiLookup?.tools || []).find((tool) => tool.matchStatus === "keyway-shortlist");
+  if (shortlist?.canonical || shortlist?.tool) return `Verify ${shortlist.canonical || shortlist.tool}`;
   const reference = profile?.vehicleReference || {};
   return reference.keyway?.primary || reference.lishi?.primary || "";
 }
@@ -7668,6 +7788,8 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
   const partJobs = Number(partHistory?.jobs?.length || 0);
   const proofRecords = Number(proofVault?.summary?.matchingJobs || 0);
   const lishiTools = Number(lishiLookup?.tools?.length || 0);
+  const lishiConfirmedTools = Number(lishiLookup?.confirmedTools || (lishiLookup?.tools || []).filter((tool) => tool.vehicleConfirmed).length || 0);
+  const lishiShortlistTools = Number(lishiLookup?.keywayShortlistTools || (lishiLookup?.tools || []).filter((tool) => tool.matchStatus === "keyway-shortlist").length || 0);
   const autoRows = Number(autoBaseline?.rows?.length || 0);
   const hasVin = Boolean(profile.vin || body.vin);
   const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
@@ -7725,10 +7847,14 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
       "decode",
       "Decode",
       decodeValue || "Verify keyway",
-      lishiTools ? 86 + Math.min(lishiTools * 2, 10) : autoRows ? 62 : 48,
-      lishiTools ? "Lishi" : "Manual verify",
-      lishiTools ? `${lishiTools} matched tool${lishiTools === 1 ? "" : "s"}` : "",
-      [profile.vehicleReference?.keyway?.primary, profile.vehicleReference?.lishi?.primary],
+      lishiConfirmedTools ? 90 + Math.min(lishiConfirmedTools * 2, 8) : lishiShortlistTools ? 58 : autoRows ? 54 : 42,
+      lishiConfirmedTools ? "Vehicle-confirmed Lishi" : lishiShortlistTools ? "Keyway shortlist" : "Manual verify",
+      lishiConfirmedTools
+        ? `${lishiConfirmedTools} vehicle-confirmed tool${lishiConfirmedTools === 1 ? "" : "s"}`
+        : lishiShortlistTools
+          ? `${lishiShortlistTools} keyway candidate${lishiShortlistTools === 1 ? "" : "s"}`
+          : "",
+      [lishiLookup?.decision, profile.vehicleReference?.keyway?.primary, profile.vehicleReference?.lishi?.primary],
     ),
     workbenchChoice(
       "proof",
@@ -7830,7 +7956,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     ...(profile.vehicleReference?.warnings || []),
     profile.confidence && /verify|partial|inconclusive/i.test(profile.confidence) ? profile.confidence : "",
     !partHistory?.jobs?.length && partQuery ? "No saved job proof matched this part yet." : "",
-    !lishiLookup?.tools?.length ? "No Lishi tool matched the current vehicle/keyway query." : "",
+    !lishiLookup?.confirmedTools ? lishiLookup?.decision || "No vehicle-confirmed Lishi tool matched the current vehicle/keyway query." : "",
   ]).slice(0, 8);
   const aiBrief = buildWorkbenchAiBrief({
     body,
@@ -7887,7 +8013,15 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     nextActions: [
       { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
       { label: partQuery ? `Check part history for ${partQuery}` : "Search LR/MW/TI/OE part history", target: "part-history", tone: partHistory?.jobs?.length ? "ready" : "verify" },
-      { label: lishiLookup?.tools?.length ? "Open matched Lishi tools" : "Confirm keyway before Lishi use", target: "lishi", tone: lishiLookup?.tools?.length ? "ready" : "verify" },
+      {
+        label: lishiLookup?.confirmedTools
+          ? "Open vehicle-confirmed Lishi tools"
+          : lishiLookup?.keywayShortlistTools
+            ? "Verify Lishi keyway shortlist"
+            : "Confirm keyway before Lishi use",
+        target: "lishi",
+        tone: lishiLookup?.confirmedTools ? "ready" : "verify",
+      },
       { label: "Review auto code/programming baseline", target: "code-desk", tone: autoBaseline.rows?.length ? "ready" : "verify" },
       { label: "Save worked job when complete", target: "learn", tone: "required" },
     ],
@@ -7953,6 +8087,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   const patternConfidence = Number(bestPattern.confidencePercent || 0);
   const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
   const lishiTools = Number(lishiLookup?.tools?.length || 0);
+  const lishiConfirmedTools = Number(lishiLookup?.confirmedTools || (lishiLookup?.tools || []).filter((tool) => tool.vehicleConfirmed).length || 0);
   const autoRows = Number(autoBaseline?.rows?.length || 0);
   const observedCoverage = Number(coverage?.summary?.observedCoveragePercent);
   const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
@@ -7967,7 +8102,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
         Math.min(directProof * 8 + relatedProof * 4, 28) +
         Math.min(Math.round(patternConfidence / 8), 12) +
         Math.min(partRows * 5, 12) +
-        (lishiTools ? 6 : 0) +
+        (lishiConfirmedTools ? 6 : lishiTools ? 2 : 0) +
         (autoRows ? 4 : 0) +
         (Number.isFinite(observedCoverage) ? Math.min(observedCoverage / 10, 8) : 0),
     ),
@@ -7994,7 +8129,11 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
       ? `Most observed part clue: ${bestPattern.topParts[0].value} (${bestPattern.topParts[0].count} proof record${bestPattern.topParts[0].count === 1 ? "" : "s"}).`
       : "",
     partRows ? `${partRows} part cross-reference row${partRows === 1 ? "" : "s"} matched ${partQuery || body.q || "the search"}.` : "",
-    lishiTools ? `${lishiTools} Lishi tool match${lishiTools === 1 ? "" : "es"} are available from the imported master reference.` : "",
+    lishiConfirmedTools
+      ? `${lishiConfirmedTools} vehicle-confirmed Lishi tool match${lishiConfirmedTools === 1 ? "" : "es"} are available from the imported master reference.`
+      : lishiTools
+        ? `${lishiTools} Lishi keyway candidate${lishiTools === 1 ? "" : "s"} need lock/insert verification.`
+        : "",
     autoRows ? `${autoRows} automotive code/programming baseline row${autoRows === 1 ? "" : "s"} matched.` : "",
     Number.isFinite(observedCoverage) ? `${observedCoverage}% observed shop coverage is represented in the saved-job set.` : "",
   ]).slice(0, 5);
@@ -8002,14 +8141,14 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
     !matchedProof ? "No saved worked-job proof matched yet." : "",
     !patternProof ? "No proof-pattern baseline matched this VIN/vehicle yet." : "",
     !partRows && partQuery ? "No cross-reference row matched the part query." : "",
-    !lishiTools ? "No Lishi/keyway match is confirmed from the current query." : "",
+    !lishiConfirmedTools ? "No vehicle-confirmed Lishi/keyway match is confirmed from the current query." : "",
     !hasVin ? "VIN-level identity is not attached to this packet yet." : "",
     ...(warnings || []),
   ]).slice(0, 5);
   const nextSteps = uniqueCleanValues([
     "Confirm authorization and attach proof before sensitive work.",
     partQuery ? `Review part history for ${partQuery}.` : "Search the part number family if a key is selected.",
-    lishiTools ? "Open matched Lishi tools and verify against the lock/keyway." : "Confirm keyway from the lock, insert, or decoded source.",
+    lishiConfirmedTools ? "Open vehicle-confirmed Lishi tools and verify against the lock/keyway." : "Confirm keyway from the lock, insert, or decoded source.",
     autoRows ? "Review Code Desk auto baseline before importing/using authorized code data." : "Use Code Desk only after the correct system/depth-space card is verified.",
     "Save the worked job outcome after completion so coverage percentages improve.",
   ]).slice(0, 5);

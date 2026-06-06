@@ -2815,6 +2815,8 @@ function compactToolToken(value) {
 
 function importedLishiToolsForProfile(profile, lishi = lishiReferenceForProfile(profile)) {
   const tools = profile?.lishiLookup?.tools || [];
+  const vehicleConfirmed = tools.filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
+  if (vehicleConfirmed.length) return vehicleConfirmed;
   const preferred = [...new Set([...(lishi.keyways || []), lishi.fallbackPrimary, lishi.primary].flatMap((value) => extractKeywayTokens(value)))].map(compactToolToken);
   if (!preferred.length) return tools;
   const exact = tools.filter((tool) => {
@@ -3307,6 +3309,10 @@ function renderLishiDecodeScreen(profile) {
   }
   const reference = profile.vehicleReference || {};
   const lishi = lishiReferenceForProfile(profile, snapshot);
+  const importedTools = importedLishiToolsForProfile(profile, lishi);
+  const confirmedImportedTools = importedTools.filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
+  const topImportedTool = confirmedImportedTools[0] || importedTools[0] || null;
+  const toolToGrab = topImportedTool?.canonical || topImportedTool?.tool || "";
   const codeSources = [
     "NASTF SDRM / Vehicle Security Professional account for OEM security access where supported",
     "OEM service-information portals tied to the vehicle make and authorized locksmith credentials",
@@ -3315,7 +3321,8 @@ function renderLishiDecodeScreen(profile) {
   ];
   const rows = [
     ["Lishi / keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Confirm from lock or emergency insert"],
-    ["Tool to grab", lishi.primary],
+    ["Tool to grab", confirmedImportedTools.length ? toolToGrab : toolToGrab ? `Verify ${toolToGrab}` : "Verify keyway at lock"],
+    ["Match status", profile.lishiLookup?.decision || ""],
     ["Alternates", [...new Set([...(reference.lishi?.alternates || []), ...(reference.keyway?.alternates || [])])].join(" | ")],
     ["Decode plan", (reference.decodePlan || []).slice(0, 3).join(" | ")],
     ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
@@ -6971,6 +6978,8 @@ function lishiLookupParamsFromProfile(profile) {
 
 function renderLishiToolCard(tool) {
   const applications = tool.applications || [];
+  const vehicleApplications = tool.vehicleMatchedApplications || [];
+  const status = tool.matchLabel || (tool.vehicleConfirmed ? "Vehicle match" : `${tool.applicationCount || 0} apps`);
   return `
     <article class="lishi-tool-card">
       <div class="history-job-head">
@@ -6978,9 +6987,15 @@ function renderLishiToolCard(tool) {
           <span>${escapeHtml((tool.categories || []).slice(0, 2).join(" | ") || "Lishi tool")}</span>
           <strong>${escapeHtml(tool.canonical || tool.tool)}</strong>
         </div>
-        <span class="status">${escapeHtml(`${tool.applicationCount || 0} apps`)}</span>
+        <span class="status">${escapeHtml(status)}</span>
       </div>
       <p>${escapeHtml(tool.primaryFunction || "Verify function before use.")}</p>
+      ${
+        vehicleApplications.length
+          ? `<small>${escapeHtml(vehicleApplications.slice(0, 2).map((item) => [item.yearsText, item.manufacturer, item.model].filter(Boolean).join(" ")).join(" | "))}</small>`
+          : ""
+      }
+      ${(tool.warnings || []).length ? `<small>${escapeHtml(tool.warnings[0])}</small>` : ""}
       <div class="part-chip-row">
         ${(tool.aliases || []).slice(0, 6).map((alias) => `<span class="part-chip">${escapeHtml(alias)}</span>`).join("")}
       </div>
@@ -7036,9 +7051,9 @@ function renderLishiLookup(payload = {}) {
         <p>${escapeHtml(`${payload.matchedTools || 0} matched`)}</p>
       </article>
       <article class="metric">
-        <span>Applications</span>
-        <strong>${escapeHtml(payload.stats?.applications || 0)}</strong>
-        <p>${escapeHtml(`${payload.matchedApplications || 0} matched`)}</p>
+        <span>Confirmed</span>
+        <strong>${escapeHtml(payload.confirmedTools || 0)}</strong>
+        <p>${escapeHtml(payload.keywayShortlistTools ? `${payload.keywayShortlistTools} verify` : `${payload.matchedApplications || 0} rows`)}</p>
       </article>
       <article class="metric">
         <span>Categories</span>
@@ -7051,6 +7066,10 @@ function renderLishiLookup(payload = {}) {
         <p>Verify before quoting</p>
       </article>
     </section>
+    <article class="assistant-card">
+      <strong>${escapeHtml(payload.matchStatus === "vehicle-confirmed" ? "Vehicle-confirmed Lishi shortlist" : payload.matchStatus === "keyway-shortlist" ? "Keyway shortlist needs verification" : "Verify mechanical keyway")}</strong>
+      <p>${escapeHtml(payload.decision || "Confirm the actual lock/keyway before using a Lishi.")}</p>
+    </article>
     <section class="lishi-result-grid">
       <div>
         <div class="panel-header tight">
@@ -7216,15 +7235,17 @@ function renderWorkbenchPartHistory(payload = {}) {
 function renderWorkbenchLishi(payload = {}) {
   const lookup = payload.lishi || {};
   const tools = lookup.tools || [];
+  const confirmed = lookup.confirmedTools || tools.filter((tool) => tool.vehicleConfirmed).length;
   return `
     <section class="workbench-section">
       <div class="panel-header tight">
         <div>
           <p class="eyebrow">Lishi / decode</p>
-          <h3>${escapeHtml(tools.length ? "Matched tools" : "Confirm keyway")}</h3>
+          <h3>${escapeHtml(confirmed ? "Vehicle-confirmed tools" : tools.length ? "Verify keyway shortlist" : "Confirm keyway")}</h3>
         </div>
         <button class="secondary-action small" type="button" data-workbench-open="lishi">Open Lishi Lookup</button>
       </div>
+      ${lookup.decision ? `<p class="muted-copy">${escapeHtml(lookup.decision)}</p>` : ""}
       <div class="lishi-tool-list compact">
         ${tools.length ? tools.slice(0, 5).map(renderLishiToolCard).join("") : `<article class="assistant-card"><strong>No Lishi match yet</strong><p>Use the keyway from the lock/insert or a broader make/model search.</p></article>`}
       </div>
@@ -7793,19 +7814,20 @@ function openGlobalSearchTarget(target, query, source = "") {
 function renderProfileLishiLookup(lookup) {
   const tools = lookup?.tools || [];
   if (!tools.length) return "";
+  const confirmed = lookup.confirmedTools || tools.filter((tool) => tool.vehicleConfirmed).length;
   return `
     <section class="profile-lishi-lookup">
       <div class="panel-header tight">
         <div>
           <p class="eyebrow">Imported Lishi reference</p>
-          <h3>Tool matches from master workbook</h3>
+          <h3>${escapeHtml(confirmed ? "Vehicle-confirmed Lishi tools" : "Verify Lishi keyway")}</h3>
         </div>
         <button class="secondary-action small" type="button" data-open-lishi-current>Open Lishi Tool</button>
       </div>
       <div class="part-chip-row">
         ${tools.slice(0, 8).map((tool) => `<span class="part-chip">${escapeHtml(tool.canonical || tool.tool)}</span>`).join("")}
       </div>
-      <p class="muted-copy">${escapeHtml(`${lookup.matchedApplications || 0} vehicle/application rows matched. Verify current availability and tool coverage before using.`)}</p>
+      <p class="muted-copy">${escapeHtml(lookup.decision || `${lookup.matchedApplications || 0} vehicle/application rows matched. Verify current availability and tool coverage before using.`)}</p>
     </section>
   `;
 }
@@ -9034,6 +9056,9 @@ function compactLishiForAi(payload = latestLishiLookup) {
   return {
     query: payload.query || cleanInput(lishiLookupForm?.elements.lishiQuery?.value || ""),
     matchedTools: payload.tools?.length || payload.returnedTools || 0,
+    confirmedTools: payload.confirmedTools || 0,
+    matchStatus: payload.matchStatus || "",
+    decision: payload.decision || "",
     matchedApplications: payload.matchedApplications || payload.applications?.length || 0,
     tools: (payload.tools || []).slice(0, 5).map((tool) => tool.canonical || tool.tool),
     applications: (payload.applications || []).slice(0, 5).map((application) =>
