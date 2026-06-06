@@ -7266,6 +7266,10 @@ textarea:focus {
 
 .mission-hero,
 .training-hero,
+.mission-intel-section,
+.mission-intel-metrics article,
+.mission-intel-grid > article,
+.mission-intel-list div,
 .mission-score-grid article,
 .training-summary-grid article,
 .mission-pillar-grid article,
@@ -7310,6 +7314,9 @@ textarea:focus {
 
 .mission-hero.danger,
 .training-hero.danger,
+.mission-intel-section.danger,
+.mission-intel-metrics article.danger,
+.mission-intel-list div.danger,
 .training-gap-list article.danger,
 .training-row-card.danger {
   border-color: #ce8c8c;
@@ -7341,10 +7348,20 @@ textarea:focus {
   text-transform: uppercase;
 }
 
+.mission-score.compact {
+  width: 72px;
+}
+
+.mission-score.compact strong {
+  font-size: 1.7rem;
+}
+
 .mission-hero h3,
 .mission-hero p,
 .training-hero h3,
 .training-hero p,
+.mission-intel-head h3,
+.mission-intel-head p,
 .mission-section h3,
 .training-section h3,
 .mission-risk-card h3,
@@ -7361,6 +7378,7 @@ textarea:focus {
 
 .mission-score-grid,
 .training-summary-grid,
+.mission-intel-metrics,
 .mission-pillar-grid,
 .mission-proof-grid,
 .mission-data-grid {
@@ -7369,7 +7387,7 @@ textarea:focus {
 }
 
 .mission-score-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .training-summary-grid {
@@ -7385,8 +7403,77 @@ textarea:focus {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.mission-intel-section {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.mission-intel-section.ready {
+  border-color: #a8d2b5;
+  background: linear-gradient(135deg, #f4fbf6, rgba(246, 248, 250, 0.92));
+}
+
+.mission-intel-section.warn {
+  border-color: #d7aa58;
+  background: linear-gradient(135deg, #fff8e8, rgba(246, 248, 250, 0.92));
+}
+
+.mission-intel-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.mission-intel-head p:not(.eyebrow) {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.mission-intel-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.mission-intel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mission-intel-grid > article {
+  min-width: 0;
+  padding: 10px;
+}
+
+.mission-cleanup-list,
+.mission-intel-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mission-cleanup-list button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.mission-cleanup-list button span {
+  display: block;
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+.mission-intel-list div {
+  min-width: 0;
+  padding: 9px;
+}
+
 .mission-score-grid article,
 .training-summary-grid article,
+.mission-intel-metrics article,
 .mission-pillar-grid article,
 .mission-proof-grid article,
 .mission-data-grid article {
@@ -7395,22 +7482,27 @@ textarea:focus {
 }
 
 .mission-score-grid article.ready,
+.mission-intel-metrics article.ready,
 .mission-pillar-grid article.ready {
   border-color: #a8d2b5;
 }
 
 .mission-score-grid article.warn,
+.mission-intel-metrics article.warn,
 .mission-pillar-grid article.warn {
   border-color: #d7aa58;
 }
 
 .mission-score-grid article.danger,
+.mission-intel-metrics article.danger,
 .mission-pillar-grid article.danger {
   border-color: #ce8c8c;
 }
 
 .mission-score-grid span,
 .training-summary-grid span,
+.mission-intel-metrics span,
+.mission-intel-list span,
 .mission-pillar-grid span,
 .mission-proof-grid span,
 .mission-data-grid span,
@@ -7428,6 +7520,8 @@ textarea:focus {
 
 .mission-score-grid strong,
 .training-summary-grid strong,
+.mission-intel-metrics strong,
+.mission-intel-list strong,
 .mission-pillar-grid strong,
 .mission-proof-grid strong,
 .mission-data-grid strong,
@@ -7442,6 +7536,8 @@ textarea:focus {
 
 .mission-score-grid p,
 .training-summary-grid p,
+.mission-intel-metrics p,
+.mission-intel-list p,
 .mission-proof-grid p,
 .mission-proof-list p,
 .training-gap-list p,
@@ -7625,6 +7721,8 @@ textarea:focus {
   .coverage-summary-grid,
   .coverage-gap-grid,
   .mission-score-grid,
+  .mission-intel-metrics,
+  .mission-intel-grid,
   .mission-pillar-grid,
   .mission-proof-grid,
   .mission-data-grid,
@@ -7680,6 +7778,7 @@ textarea:focus {
   }
 
   .mission-hero,
+  .mission-intel-head,
   .training-hero,
   .field-final-hero {
     grid-template-columns: 1fr;

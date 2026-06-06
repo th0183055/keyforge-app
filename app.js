@@ -4072,14 +4072,20 @@ function missionControlBrief(payload = latestMissionControl) {
   const cards = (payload.scorecards || []).map((card) => `${card.label}: ${card.value}${card.detail ? ` (${card.detail})` : ""}`);
   const risks = payload.riskQueue || [];
   const actions = payload.actionStack || [];
+  const audit = payload.intelligenceAudit || {};
+  const cleanup = audit.cleanupQueue || [];
   return [
     "TIMLOCK MISSION CONTROL BRIEF",
     `Generated: ${new Date(payload.generatedAt || Date.now()).toLocaleString()}`,
     `Readiness: ${payload.readinessScore || 0}% - ${payload.readinessLabel || "Unknown"}`,
     payload.headline || "",
+    audit.overall !== undefined ? `Shop Intelligence: ${audit.overall}% - ${audit.headline || ""}` : "",
     "",
     "Scorecards:",
     ...cards.map((item, index) => `${index + 1}. ${item}`),
+    "",
+    "Intelligence Cleanup:",
+    ...(cleanup.length ? cleanup : [{ title: "No urgent cleanup", detail: "Shop intelligence audit is clear." }]).slice(0, 6).map((item, index) => `${index + 1}. ${item.title}: ${item.detail || ""}`),
     "",
     "Top Risks:",
     ...(risks.length ? risks : ["No urgent risks reported."]).slice(0, 8).map((item, index) => `${index + 1}. ${item}`),
@@ -4128,6 +4134,137 @@ function renderMissionPillars(pillars = []) {
   `;
 }
 
+function renderMissionIntelligence(audit = {}) {
+  if (!audit || !audit.metrics) return "";
+  const cleanup = audit.cleanupQueue || [];
+  const weakJobs = audit.weakJobs || [];
+  const conflicts = audit.conflicts || [];
+  const codeDesk = audit.codeDesk || {};
+  return `
+    <section class="mission-intel-section ${escapeHtml(missionToneClass(audit.tone || audit.overall))}">
+      <div class="mission-intel-head">
+        <div class="mission-score compact">
+          <strong>${escapeHtml(audit.overall || 0)}</strong>
+          <span>Intel</span>
+        </div>
+        <div>
+          <p class="eyebrow">${escapeHtml(audit.title || "Shop Intelligence Audit")}</p>
+          <h3>${escapeHtml(audit.headline || "Data quality audit loaded.")}</h3>
+          <p>${escapeHtml((audit.rules || [])[0] || "Exact proof beats broad lookup evidence.")}</p>
+        </div>
+      </div>
+      <div class="mission-intel-metrics">
+        ${(audit.metrics || [])
+          .map(
+            (metric) => `
+              <article class="${escapeHtml(missionToneClass(metric.tone))}">
+                <span>${escapeHtml(metric.label)}</span>
+                <strong>${escapeHtml(metric.value)}</strong>
+                <p>${escapeHtml(metric.detail || "")}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="mission-intel-grid">
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Cleanup queue</p>
+              <h3>${escapeHtml(`${cleanup.length} moves`)}</h3>
+            </div>
+          </div>
+          <div class="mission-cleanup-list">
+            ${
+              cleanup.length
+                ? cleanup
+                    .slice(0, 6)
+                    .map(
+                      (task) => `
+                        <button class="secondary-action small" type="button" data-mission-open="${escapeHtml(task.target || "coverage")}">
+                          <strong>${escapeHtml(task.title)}</strong>
+                          <span>${escapeHtml(task.detail)}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<p class="muted-copy">No urgent intelligence cleanup moves.</p>`
+            }
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Weak proof</p>
+              <h3>${escapeHtml(`${weakJobs.length} records`)}</h3>
+            </div>
+          </div>
+          <div class="mission-intel-list">
+            ${
+              weakJobs.length
+                ? weakJobs
+                    .slice(0, 5)
+                    .map(
+                      (job) => `
+                        <div class="${escapeHtml(missionToneClass(job.tone || job.score))}">
+                          <span>${escapeHtml(`${job.score || 0}%`)}</span>
+                          <strong>${escapeHtml(job.vehicle || job.title || "Saved job")}</strong>
+                          <p>${escapeHtml((job.gaps || []).join(" | ") || "Proof looks clean")}</p>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<p class="muted-copy">No weak proof records surfaced.</p>`
+            }
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Conflict radar</p>
+              <h3>${escapeHtml(`${conflicts.length} splits`)}</h3>
+            </div>
+          </div>
+          <div class="mission-intel-list">
+            ${
+              conflicts.length
+                ? conflicts
+                    .slice(0, 5)
+                    .map(
+                      (conflict) => `
+                        <div class="${escapeHtml(conflict.severity === "high" ? "danger" : "warn")}">
+                          <span>${escapeHtml(conflict.kind || "Proof")}</span>
+                          <strong>${escapeHtml(conflict.label)}</strong>
+                          <p>${escapeHtml((conflict.reasons || []).join(" | "))}</p>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<p class="muted-copy">No split proof clusters found.</p>`
+            }
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Code Desk audit</p>
+              <h3>${escapeHtml(`${codeDesk.score || 0}%`)}</h3>
+            </div>
+            <button class="secondary-action small" type="button" data-mission-open="code-desk">Open</button>
+          </div>
+          <div class="mission-intel-list">
+            <div class="${escapeHtml(missionToneClass(codeDesk.tone || codeDesk.score))}">
+              <span>${escapeHtml(`${codeDesk.records || 0} codes / ${codeDesk.systems || 0} cards`)}</span>
+              <strong>${escapeHtml(`${codeDesk.worked || 0} worked / ${codeDesk.wrong || 0} flags`)}</strong>
+              <p>${escapeHtml((codeDesk.gaps || []).slice(0, 3).join(" | ") || "Authorized code library looks connected.")}</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
 function renderMissionDataMap(data = {}) {
   const rows = [
     ["Saved jobs", data.savedJobs],
@@ -4146,6 +4283,9 @@ function renderMissionDataMap(data = {}) {
     ["Public sources", data.publicSources],
     ["AI feedback", data.aiFeedback],
     ["Shop rules", data.shopRules],
+    ["Code records", data.codeDeskRecords],
+    ["Code cards", data.codeDeskSystems],
+    ["Code lessons", data.codeDeskLessons],
   ];
   return `
     <section class="mission-section">
@@ -4298,6 +4438,7 @@ function renderMissionControl(payload = latestMissionControl) {
       </div>
     </section>
     ${renderMissionScorecards(payload.scorecards || [])}
+    ${renderMissionIntelligence(payload.intelligenceAudit || {})}
     ${renderMissionPillars(payload.pillars || [])}
     ${renderMissionRisks(payload.riskQueue || [], payload.actionStack || [])}
     ${renderMissionCoverage(payload.coverageSnapshot || {})}

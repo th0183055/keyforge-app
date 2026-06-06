@@ -1675,6 +1675,291 @@ function missionScorecard(label, value, detail = "", tone = "") {
   };
 }
 
+function missionAttachmentJobIds(proofAttachments = {}) {
+  return new Set(
+    (proofAttachments.attachments || [])
+      .map((attachment) => cleanString(attachment.jobId || attachment.jobID || attachment.job))
+      .filter(Boolean),
+  );
+}
+
+function missionQualityRecord(record = {}, partsReference = {}, attachmentJobIds = new Set()) {
+  const job = record.job || record;
+  const vehicle = record.vehicle || coverageVehicleForJob(job);
+  const vins = record.vins || jobVins(job);
+  const partNumbers = coveragePartNumbersForJob(job, partsReference);
+  const outcome = record.outcome || partHistoryOutcome(job);
+  const programmer = programmerDisplayName(job.programmer) || cleanString(job.programmer);
+  const hasNotes = uniqueCleanValues([job.notes || [], job.note, job.service, job.keyCode, job.price]).length > 0;
+  const hasAttachment = Boolean(job.id && attachmentJobIds.has(job.id));
+  const gaps = uniqueCleanValues([
+    vins.length ? "" : "VIN missing",
+    vehicle.make && vehicle.model ? "" : "vehicle not parsed",
+    partNumbers.length ? "" : "part number missing",
+    programmer ? "" : "programmer missing",
+    outcome?.key && outcome.key !== "unknown" ? "" : "outcome not scored",
+    hasAttachment ? "" : "proof attachment missing",
+    hasNotes ? "" : "job notes sparse",
+  ]);
+  const score = Math.min(
+    100,
+    Math.round(
+      (vins.length ? 16 : 0) +
+        (vehicle.make && vehicle.model ? 14 : 0) +
+        (partNumbers.length ? 18 : 0) +
+        (programmer ? 16 : 0) +
+        (outcome?.key && outcome.key !== "unknown" ? 16 : 0) +
+        (hasAttachment ? 12 : 0) +
+        (hasNotes ? 8 : 0),
+    ),
+  );
+  return {
+    id: cleanString(job.id || record.id || record.title),
+    title: cleanString(job.title || job.vehicle || record.title || vehicle.label || "Saved job"),
+    vehicle: vehicle.label,
+    vin: vins[0] || cleanString(job.vin),
+    programmer,
+    partNumbers: partNumbers.slice(0, 8),
+    outcome: outcome?.label || outcome?.key || "",
+    hasAttachment,
+    score,
+    tone: missionToneFromScore(score),
+    gaps: gaps.slice(0, 6),
+  };
+}
+
+function missionTopValueGroups(records = [], valueFn = () => []) {
+  const counts = new Map();
+  for (const record of records || []) {
+    const raw = valueFn(record);
+    const values = uniqueCleanValues(Array.isArray(raw) ? raw : [raw]);
+    for (const value of values) {
+      const compact = compactToken(value);
+      if (!compact || compact.length < 3) continue;
+      const current = counts.get(compact) || { value, count: 0 };
+      current.count += 1;
+      counts.set(compact, current);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+function missionConflictSummary(label, records = [], kind = "cluster") {
+  const parts = missionTopValueGroups(records, (record) => trainingActualPartTokens(record));
+  const programmers = missionTopValueGroups(records, (record) => record.programmer || record.job?.programmer || "");
+  const outcomes = missionTopValueGroups(records, (record) => record.outcome?.label || record.outcome?.key || partHistoryOutcome(record.job || record).key);
+  const families = missionTopValueGroups(records, (record) => trainingFamilyKey(record));
+  const splitReasons = uniqueCleanValues([
+    parts.length > 1 ? "part split" : "",
+    programmers.length > 1 ? "programmer split" : "",
+    outcomes.length > 1 ? "outcome split" : "",
+    families.length > 1 ? "key family split" : "",
+  ]);
+  if (!splitReasons.length) return null;
+  return {
+    kind,
+    label,
+    jobs: records.length,
+    severity: kind === "VIN" ? "high" : splitReasons.length > 1 ? "medium" : "low",
+    reasons: splitReasons,
+    parts: parts.slice(0, 4),
+    programmers: programmers.slice(0, 4),
+    outcomes: outcomes.slice(0, 4),
+    families: families.slice(0, 4),
+  };
+}
+
+function missionProofConflicts(index) {
+  const conflicts = [];
+  for (const [vin, records] of index.byVin.entries()) {
+    if (records.length < 2) continue;
+    const summary = missionConflictSummary(vin, records, "VIN");
+    if (summary) conflicts.push(summary);
+  }
+  for (const [vehicleKey, records] of index.byVehicle.entries()) {
+    if (!vehicleKey || records.length < 4) continue;
+    const label = records.find((record) => record.vehicle?.label)?.vehicle?.label || vehicleKey;
+    const summary = missionConflictSummary(label, records, "vehicle");
+    if (summary) conflicts.push(summary);
+  }
+  const severityRank = { high: 0, medium: 1, low: 2 };
+  return conflicts
+    .sort((a, b) => (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) || b.jobs - a.jobs)
+    .slice(0, 12);
+}
+
+function missionCodeDeskAudit(store = {}) {
+  const records = store.codeDeskRecords || [];
+  const systems = store.codeDeskSystems || [];
+  const lessons = store.codeDeskLessons || [];
+  const systemKeys = new Set(
+    systems
+      .flatMap((system) => [system.id, system.name, system.keyway, system.blanks || []])
+      .flat(Infinity)
+      .map(compactToken)
+      .filter(Boolean),
+  );
+  const recordSystemCounts = new Map();
+  for (const record of records) {
+    const key = compactToken(record.system || record.keyway || record.blank || record.card);
+    if (key) recordSystemCounts.set(key, (recordSystemCounts.get(key) || 0) + 1);
+  }
+  const orphanedRecords = records.filter((record) => {
+    const key = compactToken(record.system || record.keyway || record.blank || record.card);
+    return key && !systemKeys.has(key);
+  });
+  const systemsWithoutRecords = systems.filter((system) => {
+    const keys = [system.id, system.name, system.keyway, system.blanks || []].flat(Infinity).map(compactToken).filter(Boolean);
+    return keys.length && !keys.some((key) => recordSystemCounts.has(key));
+  });
+  const worked = lessons.filter((lesson) => /worked|confirmed|used|correct/.test(cleanString(lesson.outcome))).length;
+  const wrong = lessons.filter((lesson) => /wrong|failed|reject|bad/.test(cleanString(lesson.outcome))).length;
+  const score = Math.min(
+    100,
+    Math.round(
+      (systems.length ? 26 : 0) +
+        (records.length ? 30 : 0) +
+        (lessons.length ? 18 : 0) +
+        (records.length && !orphanedRecords.length ? 14 : 0) +
+        (systems.length && !systemsWithoutRecords.length ? 12 : 0) -
+        Math.min(25, wrong * 4),
+    ),
+  );
+  return {
+    score,
+    tone: missionToneFromScore(score),
+    records: records.length,
+    systems: systems.length,
+    lessons: lessons.length,
+    worked,
+    wrong,
+    orphanedRecords: orphanedRecords.slice(0, 8).map((record) => ({
+      system: record.system || record.keyway || "",
+      code: record.code || "",
+      bitting: record.bitting || "",
+    })),
+    systemsWithoutRecords: systemsWithoutRecords.slice(0, 8).map((system) => system.name || system.id),
+    gaps: uniqueCleanValues([
+      systems.length ? "" : "Import exact depth-space cards",
+      records.length ? "" : "Import authorized code records",
+      lessons.length ? "" : "Use Mark Worked / Flag Wrong to train Code Desk",
+      orphanedRecords.length ? `${orphanedRecords.length} code record${orphanedRecords.length === 1 ? "" : "s"} do not match an imported card` : "",
+      systemsWithoutRecords.length ? `${systemsWithoutRecords.length} card${systemsWithoutRecords.length === 1 ? "" : "s"} have no code records yet` : "",
+    ]),
+  };
+}
+
+function missionCoverageHotspots(coverage = {}) {
+  const makeHotspots = (coverage.makes || [])
+    .filter((item) => (item.jobs || 0) >= 2 && (item.observedCoveragePercent === null || Number(item.observedCoveragePercent || 0) < 80))
+    .slice(0, 6)
+    .map((item) => ({
+      label: item.key,
+      type: "Make",
+      jobs: item.jobs,
+      score: item.observedCoveragePercent ?? 0,
+      detail: `${item.successes || 0} worked / ${item.warnings || 0} warnings / ${item.unknown || 0} unknown`,
+    }));
+  const partHotspots = (coverage.parts || [])
+    .filter((item) => item.key !== "Part number not recorded" && (item.jobs || 0) >= 2 && (item.observedCoveragePercent === null || Number(item.observedCoveragePercent || 0) < 85))
+    .slice(0, 6)
+    .map((item) => ({
+      label: item.key,
+      type: "Part",
+      jobs: item.jobs,
+      score: item.observedCoveragePercent ?? 0,
+      detail: `${item.vehicles?.slice(0, 2).join(", ") || "vehicles"} | ${item.programmers?.slice(0, 2).join(", ") || "programmer missing"}`,
+    }));
+  return [...makeHotspots, ...partHotspots].slice(0, 10);
+}
+
+function missionCleanupTask(title, detail, target = "coverage", impact = "medium", priority = 50) {
+  return {
+    title: cleanString(title),
+    detail: cleanString(detail),
+    target,
+    impact,
+    priority,
+  };
+}
+
+function buildMissionIntelligenceAudit({ jobs = [], partsReference = {}, proofAttachments = {}, coverage = {}, store = {} } = {}) {
+  const attachmentJobIds = missionAttachmentJobIds(proofAttachments);
+  const index = buildJobEvidenceIndex(jobs, partsReference);
+  const records = index.records.filter((record) => record.vehicle?.automotive || record.vins?.length || record.tokens?.length);
+  const qualityRows = records.map((record) => missionQualityRecord(record, partsReference, attachmentJobIds));
+  const averageQuality = qualityRows.length
+    ? Math.round(qualityRows.reduce((sum, row) => sum + row.score, 0) / qualityRows.length)
+    : 0;
+  const weakJobs = qualityRows
+    .filter((row) => row.score < 78 || row.gaps.length)
+    .sort((a, b) => a.score - b.score || a.title.localeCompare(b.title))
+    .slice(0, 12);
+  const conflicts = missionProofConflicts(index);
+  const trainingRows = records
+    .map((record) => buildTrainingBacktestRow(record, index))
+    .filter(Boolean);
+  const trainingReady = trainingRows.filter((row) => row.status === "ready").length;
+  const trainingConflicts = trainingRows.filter((row) => row.status === "conflict").length;
+  const trainingScore = trainingRows.length
+    ? Math.round((trainingReady / trainingRows.length) * 100 - Math.min(20, trainingConflicts * 2))
+    : 0;
+  const codeDesk = missionCodeDeskAudit(store);
+  const coverageSummary = coverage.summary || {};
+  const coverageScore = Math.round(
+    ((coverageSummary.observedCoveragePercent || 0) +
+      (coverageSummary.programmerProofPercent || 0) +
+      (coverageSummary.partProofPercent || 0) +
+      (coverageSummary.crossReferencePercent || 0)) /
+      4,
+  );
+  const conflictScore = Math.max(0, 100 - conflicts.filter((item) => item.severity === "high").length * 18 - conflicts.length * 5);
+  const overall = Math.max(
+    0,
+    Math.min(100, Math.round(averageQuality * 0.32 + coverageScore * 0.24 + codeDesk.score * 0.18 + trainingScore * 0.16 + conflictScore * 0.1)),
+  );
+  const hotspots = missionCoverageHotspots(coverage);
+  const cleanupQueue = [
+    ...weakJobs.slice(0, 4).map((row) => missionCleanupTask(`Clean up ${row.vehicle || row.title}`, row.gaps.join(" | "), "learn", "high", 92 - row.score)),
+    ...conflicts.slice(0, 3).map((conflict) => missionCleanupTask(`Resolve ${conflict.kind} conflict`, `${conflict.label}: ${conflict.reasons.join(", ")}`, "training-center", conflict.severity === "high" ? "high" : "medium", 88)),
+    ...codeDesk.gaps.slice(0, 3).map((gap) => missionCleanupTask("Tighten Code Desk", gap, "code-desk", "medium", 78)),
+    ...hotspots.slice(0, 3).map((item) => missionCleanupTask(`Improve ${item.type} coverage`, `${item.label}: ${item.detail}`, "coverage", "medium", 70)),
+  ]
+    .filter((task) => task.title && task.detail)
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 12);
+  return {
+    generatedAt: new Date().toISOString(),
+    title: "Shop Intelligence Audit",
+    headline:
+      overall >= 84
+        ? "Shop intelligence is clean enough to trust as a decision layer."
+        : overall >= 62
+          ? "Shop intelligence is useful, but cleanup will lift confidence fast."
+          : "Shop intelligence needs proof cleanup before it should drive subscriber decisions.",
+    overall,
+    tone: missionToneFromScore(overall),
+    metrics: [
+      missionScorecard("Job quality", `${averageQuality}%`, `${weakJobs.length} cleanup candidates`, missionToneFromScore(averageQuality)),
+      missionScorecard("Coverage", `${coverageScore}%`, `${coverageSummary.automotiveJobs || 0} automotive jobs`, missionToneFromScore(coverageScore)),
+      missionScorecard("Code Desk", `${codeDesk.score}%`, `${codeDesk.records} codes / ${codeDesk.systems} cards`, codeDesk.tone),
+      missionScorecard("Backtest", `${Math.max(0, trainingScore)}%`, `${trainingReady}/${trainingRows.length} ready`, missionToneFromScore(trainingScore)),
+      missionScorecard("Conflicts", `${conflictScore}%`, `${conflicts.length} split proof clusters`, missionToneFromScore(conflictScore)),
+    ],
+    weakJobs,
+    conflicts,
+    codeDesk,
+    hotspots,
+    cleanupQueue,
+    rules: [
+      "Exact VIN proof outranks VIN pattern, vehicle, and part-alias proof.",
+      "A part number is not trusted until at least one job, cross-reference, or imported card supports it.",
+      "Code Desk confidence rises only from authorized imports and owner marked outcomes.",
+      "Subscriber screens should show the single best choice; owner screens keep the audit trail.",
+    ],
+  };
+}
+
 async function buildMissionControl(body = {}, store = { jobs: [] }) {
   const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
   const [
@@ -1714,6 +1999,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
     proofAttachments,
   });
   const codeBaseline = await buildAutoCodeBaseline({ limit: 24 }).catch(() => ({ totalRows: 0, returnedRows: 0, rows: [] }));
+  const intelligenceAudit = buildMissionIntelligenceAudit({ jobs, partsReference, proofAttachments, coverage, store });
   const storageWarnings = storage.warnings || [];
   const healthIssues = (health.files || []).filter((file) => !file.ok && !file.optional);
   const coverageSummary = coverage.summary || {};
@@ -1734,6 +2020,9 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
     publicSources: publicSources.sources?.length || 0,
     aiFeedback: store.aiFeedback?.length || 0,
     shopRules: store.shopRules?.length || 0,
+    codeDeskRecords: store.codeDeskRecords?.length || 0,
+    codeDeskSystems: store.codeDeskSystems?.length || 0,
+    codeDeskLessons: store.codeDeskLessons?.length || 0,
   };
   const storageScore =
     storage.status === "durable"
@@ -1771,9 +2060,17 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
     ...(coverage.gaps?.missingProgrammer || []).slice(0, 3).map((job) => `Add programmer proof: ${job.vehicle || job.title || job.id}`),
     ...(coverage.gaps?.missingPart || []).slice(0, 3).map((job) => `Add part proof: ${job.vehicle || job.title || job.id}`),
     ...(coverage.gaps?.needsOutcome || []).slice(0, 3).map((job) => `Score job outcome: ${job.vehicle || job.title || job.id}`),
+    ...(intelligenceAudit.conflicts || []).slice(0, 3).map((conflict) => `Resolve ${conflict.kind} proof conflict: ${conflict.label}`),
+    ...(intelligenceAudit.codeDesk?.gaps || []).slice(0, 2).map((gap) => `Code Desk: ${gap}`),
     ...(dataCounts.proofAttachments ? [] : ["Proof Vault has no server-backed attachment metadata yet."]),
   ]).slice(0, 12);
   const actionStack = [
+    ...(intelligenceAudit.cleanupQueue || []).slice(0, 4).map((task) => ({
+      label: task.title,
+      target: task.target,
+      detail: task.detail,
+      priority: task.priority || 82,
+    })),
     {
       label: "Build AI Field Packet",
       target: "ai",
@@ -1810,7 +2107,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
       detail: "Check auth, backups, R2/persistent storage, and attachment durability.",
       priority: storageWarnings.length ? 98 : 68,
     },
-  ].sort((a, b) => b.priority - a.priority);
+  ].sort((a, b) => b.priority - a.priority).slice(0, 10);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1830,6 +2127,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
       missionScorecard("Proof", `${coverageScore}%`, `${coverageSummary.automotiveJobs || 0} automotive jobs`, missionToneFromScore(coverageScore)),
       missionScorecard("Data", `${dataScore}%`, `${dataCounts.partsRows} parts rows / ${dataCounts.programmingRows} programming rows`, missionToneFromScore(dataScore)),
       missionScorecard("AI", `${aiScore}%`, advisor.headline || "AI advisor ready", missionToneFromScore(aiScore)),
+      missionScorecard("Intel", `${intelligenceAudit.overall}%`, `${intelligenceAudit.cleanupQueue?.length || 0} cleanup moves`, intelligenceAudit.tone),
     ],
     pillars: [
       {
@@ -1878,6 +2176,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
       },
     ],
     dataMap: dataCounts,
+    intelligenceAudit,
     coverageSnapshot: {
       summary: coverageSummary,
       topProgrammers: (coverage.programmers || []).slice(0, 5),
@@ -1908,6 +2207,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
     },
     releaseBrief: [
       "Mission Control now gives the owner one operational dashboard for backend health, proof readiness, data coverage, storage, auth, and AI learning.",
+      "The Shop Intelligence Audit finds weak proof, split evidence, Code Desk gaps, and exact cleanup moves before subscribers see bad recommendations.",
       "Use the risk queue as the nightly cleanup list and the action stack as the fastest path back into the exact app tools.",
       "Readiness percentages are shop-operational signals, not locksmith code/license guarantees.",
     ],
