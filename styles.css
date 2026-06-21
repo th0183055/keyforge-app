@@ -7271,6 +7271,11 @@ textarea:focus {
 .mission-intel-grid > article,
 .mission-intel-list div,
 .mission-score-grid article,
+.algorithm-lab-panel,
+.algorithm-lab-grid article,
+.algorithm-lab-columns > article,
+.algorithm-bucket-list div,
+.algorithm-cause-list div,
 .training-summary-grid article,
 .mission-pillar-grid article,
 .mission-section,
@@ -7298,6 +7303,7 @@ textarea:focus {
 
 .mission-hero.ready,
 .training-hero.ready,
+.algorithm-lab-panel.ready,
 .training-gap-list article.ready,
 .training-row-card.ready {
   border-color: #a8d2b5;
@@ -7306,6 +7312,7 @@ textarea:focus {
 
 .mission-hero.warn,
 .training-hero.warn,
+.algorithm-lab-panel.warn,
 .training-gap-list article.warn,
 .training-row-card.warn {
   border-color: #d7aa58;
@@ -7315,6 +7322,7 @@ textarea:focus {
 .mission-hero.danger,
 .training-hero.danger,
 .mission-intel-section.danger,
+.algorithm-lab-panel.danger,
 .mission-intel-metrics article.danger,
 .mission-intel-list div.danger,
 .training-gap-list article.danger,
@@ -7378,6 +7386,7 @@ textarea:focus {
 
 .mission-score-grid,
 .training-summary-grid,
+.algorithm-lab-grid,
 .mission-intel-metrics,
 .mission-pillar-grid,
 .mission-proof-grid,
@@ -7392,6 +7401,123 @@ textarea:focus {
 
 .training-summary-grid {
   grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.algorithm-lab-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.algorithm-lab-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(220px, 0.35fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.algorithm-lab-hero h3,
+.algorithm-lab-hero p,
+.algorithm-policy p {
+  margin: 0;
+}
+
+.algorithm-lab-hero p:not(.eyebrow),
+.algorithm-policy p {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.algorithm-policy {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.algorithm-policy span,
+.algorithm-lab-grid span,
+.algorithm-bucket-list span,
+.algorithm-cause-list span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.algorithm-policy strong,
+.algorithm-lab-grid strong,
+.algorithm-bucket-list strong,
+.algorithm-cause-list strong,
+.algorithm-action-list strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.algorithm-lab-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.algorithm-lab-grid article,
+.algorithm-lab-columns > article,
+.algorithm-bucket-list div,
+.algorithm-cause-list div {
+  min-width: 0;
+  padding: 10px;
+}
+
+.algorithm-lab-grid article.ready,
+.algorithm-bucket-list div.ready {
+  border-color: #a8d2b5;
+}
+
+.algorithm-lab-grid article.warn,
+.algorithm-bucket-list div.warn {
+  border-color: #d7aa58;
+}
+
+.algorithm-lab-grid article.danger,
+.algorithm-bucket-list div.danger {
+  border-color: #ce8c8c;
+}
+
+.algorithm-lab-grid p,
+.algorithm-bucket-list p,
+.algorithm-cause-list p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.algorithm-lab-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.algorithm-bucket-list,
+.algorithm-cause-list,
+.algorithm-action-list {
+  display: grid;
+  gap: 8px;
+}
+
+.algorithm-action-list button {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  text-align: left;
+}
+
+.algorithm-action-list button span {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .mission-pillar-grid,
@@ -7473,6 +7599,7 @@ textarea:focus {
 
 .mission-score-grid article,
 .training-summary-grid article,
+.algorithm-lab-grid article,
 .mission-intel-metrics article,
 .mission-pillar-grid article,
 .mission-proof-grid article,
@@ -7501,6 +7628,7 @@ textarea:focus {
 
 .mission-score-grid span,
 .training-summary-grid span,
+.algorithm-lab-grid span,
 .mission-intel-metrics span,
 .mission-intel-list span,
 .mission-pillar-grid span,
@@ -7520,6 +7648,7 @@ textarea:focus {
 
 .mission-score-grid strong,
 .training-summary-grid strong,
+.algorithm-lab-grid strong,
 .mission-intel-metrics strong,
 .mission-intel-list strong,
 .mission-pillar-grid strong,
@@ -7536,6 +7665,7 @@ textarea:focus {
 
 .mission-score-grid p,
 .training-summary-grid p,
+.algorithm-lab-grid p,
 .mission-intel-metrics p,
 .mission-intel-list p,
 .mission-proof-grid p,
@@ -7721,6 +7851,8 @@ textarea:focus {
   .coverage-summary-grid,
   .coverage-gap-grid,
   .mission-score-grid,
+  .algorithm-lab-grid,
+  .algorithm-lab-columns,
   .mission-intel-metrics,
   .mission-intel-grid,
   .mission-pillar-grid,
@@ -7779,6 +7911,7 @@ textarea:focus {
 
   .mission-hero,
   .mission-intel-head,
+  .algorithm-lab-hero,
   .training-hero,
   .field-final-hero {
     grid-template-columns: 1fr;

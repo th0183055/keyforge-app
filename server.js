@@ -1899,11 +1899,12 @@ function buildMissionIntelligenceAudit({ jobs = [], partsReference = {}, proofAt
   const trainingRows = records
     .map((record) => buildTrainingBacktestRow(record, index))
     .filter(Boolean);
+  const algorithmLab = buildTrainingAlgorithmLab(trainingRows, buildTrainingClusterConflicts(trainingRows), store);
   const trainingReady = trainingRows.filter((row) => row.status === "ready").length;
   const trainingConflicts = trainingRows.filter((row) => row.status === "conflict").length;
-  const trainingScore = trainingRows.length
+  const trainingScore = algorithmLab.score || (trainingRows.length
     ? Math.round((trainingReady / trainingRows.length) * 100 - Math.min(20, trainingConflicts * 2))
-    : 0;
+    : 0);
   const codeDesk = missionCodeDeskAudit(store);
   const coverageSummary = coverage.summary || {};
   const coverageScore = Math.round(
@@ -1921,6 +1922,7 @@ function buildMissionIntelligenceAudit({ jobs = [], partsReference = {}, proofAt
   const hotspots = missionCoverageHotspots(coverage);
   const cleanupQueue = [
     ...weakJobs.slice(0, 4).map((row) => missionCleanupTask(`Clean up ${row.vehicle || row.title}`, row.gaps.join(" | "), "learn", "high", 92 - row.score)),
+    ...(algorithmLab.actionPlan || []).slice(0, 3).map((item) => missionCleanupTask(item.title, item.detail, item.target || "training-center", item.impact || "high", item.priority || 90)),
     ...conflicts.slice(0, 3).map((conflict) => missionCleanupTask(`Resolve ${conflict.kind} conflict`, `${conflict.label}: ${conflict.reasons.join(", ")}`, "training-center", conflict.severity === "high" ? "high" : "medium", 88)),
     ...codeDesk.gaps.slice(0, 3).map((gap) => missionCleanupTask("Tighten Code Desk", gap, "code-desk", "medium", 78)),
     ...hotspots.slice(0, 3).map((item) => missionCleanupTask(`Improve ${item.type} coverage`, `${item.label}: ${item.detail}`, "coverage", "medium", 70)),
@@ -1943,12 +1945,13 @@ function buildMissionIntelligenceAudit({ jobs = [], partsReference = {}, proofAt
       missionScorecard("Job quality", `${averageQuality}%`, `${weakJobs.length} cleanup candidates`, missionToneFromScore(averageQuality)),
       missionScorecard("Coverage", `${coverageScore}%`, `${coverageSummary.automotiveJobs || 0} automotive jobs`, missionToneFromScore(coverageScore)),
       missionScorecard("Code Desk", `${codeDesk.score}%`, `${codeDesk.records} codes / ${codeDesk.systems} cards`, codeDesk.tone),
-      missionScorecard("Backtest", `${Math.max(0, trainingScore)}%`, `${trainingReady}/${trainingRows.length} ready`, missionToneFromScore(trainingScore)),
+      missionScorecard("Algorithm", `${Math.max(0, trainingScore)}%`, algorithmLab.readiness?.label || `${trainingReady}/${trainingRows.length} ready`, algorithmLab.readiness?.tone || missionToneFromScore(trainingScore)),
       missionScorecard("Conflicts", `${conflictScore}%`, `${conflicts.length} split proof clusters`, missionToneFromScore(conflictScore)),
     ],
     weakJobs,
     conflicts,
     codeDesk,
+    algorithmLab,
     hotspots,
     cleanupQueue,
     rules: [
@@ -2363,6 +2366,267 @@ function buildTrainingClusterConflicts(rows = []) {
     .slice(0, 12);
 }
 
+function trainingPartHit(row = {}) {
+  return Boolean(row.predicted?.part && trainingTokensOverlap([row.predicted.part], row.actual?.parts || []));
+}
+
+function trainingProgrammerHit(row = {}) {
+  const actual = cleanString(row.actual?.programmer);
+  const predicted = cleanString(row.predicted?.programmer);
+  return Boolean(actual && predicted && compactToken(predicted) === compactToken(programmerDisplayName(actual) || actual));
+}
+
+function trainingFamilyHit(row = {}) {
+  const actual = cleanString(row.actual?.family);
+  const predicted = cleanString(row.predicted?.family);
+  if (!actual || !predicted || compactToken(actual) === "UNKNOWN" || compactToken(predicted) === "UNKNOWN") return false;
+  return compactToken(actual) === compactToken(predicted);
+}
+
+function trainingBucketLabel(min, max) {
+  return max >= 100 ? `${min}-100%` : `${min}-${max}%`;
+}
+
+function trainingReadinessFromScore(score, highConfidenceWrong = 0, tested = 0) {
+  const value = Number(score) || 0;
+  if (!tested) {
+    return {
+      label: "No proof baseline",
+      tone: "danger",
+      summary: "Save or import worked jobs before the algorithm can be trusted.",
+      gate: "Owner training only",
+    };
+  }
+  if (value >= 88 && highConfidenceWrong === 0) {
+    return {
+      label: "Subscriber-grade",
+      tone: "ready",
+      summary: "The proof baseline is clean enough to drive a single best-choice workflow.",
+      gate: "Show one choice at 88%+ confidence",
+    };
+  }
+  if (value >= 74) {
+    return {
+      label: "Field-ready review",
+      tone: "warn",
+      summary: "Strong enough for owner-guided decisions; subscriber output should stay conservative.",
+      gate: "Show one choice at 92%+ confidence",
+    };
+  }
+  if (value >= 58) {
+    return {
+      label: "Training mode",
+      tone: "warn",
+      summary: "Useful for learning and owner review, but not ready for automatic final answers.",
+      gate: "Owner review required",
+    };
+  }
+  return {
+    label: "Do not publish",
+    tone: "danger",
+    summary: "The proof baseline has too many gaps or conflicts for single-choice recommendations.",
+    gate: "Block subscriber automation",
+  };
+}
+
+function buildTrainingConfidenceBuckets(rows = []) {
+  const buckets = [
+    { min: 90, max: 100 },
+    { min: 75, max: 89 },
+    { min: 60, max: 74 },
+    { min: 0, max: 59 },
+  ];
+  return buckets.map((bucket) => {
+    const bucketRows = rows.filter((row) => Number(row.confidence || 0) >= bucket.min && Number(row.confidence || 0) <= bucket.max);
+    const ready = bucketRows.filter((row) => row.status === "ready").length;
+    const conflict = bucketRows.filter((row) => row.status === "conflict").length;
+    const needsProof = bucketRows.filter((row) => row.status === "needs-proof").length;
+    const judged = ready + conflict;
+    return {
+      label: trainingBucketLabel(bucket.min, bucket.max),
+      total: bucketRows.length,
+      ready,
+      conflict,
+      needsProof,
+      accuracy: missionPercent(ready, judged),
+      tone: conflict && bucket.min >= 75 ? "danger" : missionToneFromScore(missionPercent(ready, Math.max(1, bucketRows.length))),
+    };
+  });
+}
+
+function buildTrainingFailureCauses(rows = []) {
+  const causes = new Map();
+  for (const row of rows) {
+    const blockers = row.blockers?.length ? row.blockers : row.status === "ready" ? [] : ["Owner review required"];
+    for (const blocker of blockers) {
+      const key = cleanString(blocker);
+      if (!key) continue;
+      const current = causes.get(key) || { label: key, count: 0, examples: [] };
+      current.count += 1;
+      if (current.examples.length < 3) current.examples.push(row.vehicle || row.title || row.vin || "Saved proof");
+      causes.set(key, current);
+    }
+  }
+  return Array.from(causes.values())
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 8);
+}
+
+function buildTrainingActionPlan({ score = 0, rows = [], conflicts = [], summary = {}, failureCauses = [] } = {}) {
+  const highConfidenceWrong = rows.filter((row) => row.status === "conflict" && Number(row.confidence || 0) >= 85);
+  const actions = [];
+  if (highConfidenceWrong.length) {
+    actions.push({
+      title: "Quarantine high-confidence conflicts",
+      detail: `${highConfidenceWrong.length} confident row${highConfidenceWrong.length === 1 ? "" : "s"} disagreed with saved proof. Review these before subscriber automation.`,
+      target: "training-center",
+      impact: "high",
+      priority: 99,
+    });
+  }
+  if ((summary.proofCoverage || 0) < 70) {
+    actions.push({
+      title: "Add part proof to saved jobs",
+      detail: `${summary.proofCoverage || 0}% of proof rows have enough signal to evaluate. VIN, part, programmer, and outcome should be present.`,
+      target: "proof-vault",
+      impact: "high",
+      priority: 94,
+    });
+  }
+  if ((summary.partAccuracy || 0) < 80) {
+    actions.push({
+      title: "Normalize part aliases",
+      detail: "Part prediction is below 80%. Merge LR, MW, TI, OEM, FCC, and shop aliases into the reference table.",
+      target: "part-history",
+      impact: "high",
+      priority: 92,
+    });
+  }
+  if ((summary.programmerAccuracy || 0) < 78) {
+    actions.push({
+      title: "Normalize programmer names",
+      detail: "Programmer proof is split by naming. Standardize Smart Pro, Autel, FDRS, VVDI, and fallback labels in worked jobs.",
+      target: "coverage",
+      impact: "medium",
+      priority: 86,
+    });
+  }
+  if (conflicts.length) {
+    actions.push({
+      title: "Resolve split vehicle clusters",
+      detail: `${conflicts.length} vehicle cluster${conflicts.length === 1 ? "" : "s"} have evenly split proof. Pick the correct part/programmer by year, trim, ignition type, or FCC.`,
+      target: "training-center",
+      impact: "medium",
+      priority: 84,
+    });
+  }
+  if (failureCauses[0] && actions.length < 5) {
+    actions.push({
+      title: `Fix ${failureCauses[0].label.toLowerCase()}`,
+      detail: `${failureCauses[0].count} row${failureCauses[0].count === 1 ? "" : "s"} are blocked by this cause.`,
+      target: "training-center",
+      impact: "medium",
+      priority: 78,
+    });
+  }
+  if (!actions.length && score >= 88) {
+    actions.push({
+      title: "Promote single-choice workflow",
+      detail: "The current proof baseline is clean. Use the same confidence gate in VIN, Workbench, Lishi, and final job summary.",
+      target: "vin",
+      impact: "high",
+      priority: 90,
+    });
+  }
+  return actions.slice(0, 6);
+}
+
+function buildTrainingAlgorithmLab(rows = [], clusterConflicts = [], store = {}) {
+  const tested = rows.length;
+  const ready = rows.filter((row) => row.status === "ready").length;
+  const conflicts = rows.filter((row) => row.status === "conflict").length;
+  const needsProof = rows.filter((row) => row.status === "needs-proof").length;
+  const partRows = rows.filter((row) => row.actual?.parts?.length && row.predicted?.part);
+  const programmerRows = rows.filter((row) => row.actual?.programmer && row.predicted?.programmer);
+  const familyRows = rows.filter((row) => {
+    const actual = compactToken(row.actual?.family);
+    const predicted = compactToken(row.predicted?.family);
+    return actual && predicted && actual !== "UNKNOWN" && predicted !== "UNKNOWN";
+  });
+  const partCorrect = partRows.filter(trainingPartHit).length;
+  const programmerCorrect = programmerRows.filter(trainingProgrammerHit).length;
+  const familyCorrect = familyRows.filter(trainingFamilyHit).length;
+  const averageConfidence = tested ? Math.round(rows.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / tested) : 0;
+  const judgedRows = rows.filter((row) => row.status !== "needs-proof");
+  const proofCoverage = missionPercent(judgedRows.length, tested);
+  const fieldReady = missionPercent(ready, tested);
+  const judgedAccuracy = missionPercent(ready, ready + conflicts);
+  const partAccuracy = missionPercent(partCorrect, partRows.length);
+  const programmerAccuracy = missionPercent(programmerCorrect, programmerRows.length);
+  const familyAccuracy = missionPercent(familyCorrect, familyRows.length);
+  const highConfidenceWrong = rows.filter((row) => row.status === "conflict" && Number(row.confidence || 0) >= 85);
+  const highConfidenceWrongRate = missionPercent(highConfidenceWrong.length, Math.max(1, rows.filter((row) => Number(row.confidence || 0) >= 85).length));
+  const calibrationGap = tested ? Math.abs(averageConfidence - judgedAccuracy) : 0;
+  const score = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        partAccuracy * 0.28 +
+          programmerAccuracy * 0.16 +
+          familyAccuracy * 0.12 +
+          fieldReady * 0.18 +
+          proofCoverage * 0.12 +
+          Math.max(0, 100 - highConfidenceWrongRate) * 0.1 +
+          Math.max(0, 100 - calibrationGap) * 0.04,
+      ),
+    ),
+  );
+  const failureCauses = buildTrainingFailureCauses(rows.filter((row) => row.status !== "ready"));
+  const summary = {
+    testedJobs: tested,
+    ready,
+    conflicts,
+    needsProof,
+    proofCoverage,
+    fieldReady,
+    judgedAccuracy,
+    averageConfidence,
+    calibrationGap,
+    partAccuracy,
+    programmerAccuracy,
+    familyAccuracy,
+    highConfidenceWrong: highConfidenceWrong.length,
+    highConfidenceWrongRate,
+    aiFeedback: store.aiFeedback?.length || 0,
+    shopRules: store.shopRules?.length || 0,
+  };
+  const readiness = trainingReadinessFromScore(score, highConfidenceWrong.length, tested);
+  const confidenceBuckets = buildTrainingConfidenceBuckets(rows);
+  const actionPlan = buildTrainingActionPlan({ score, rows, conflicts: clusterConflicts, summary, failureCauses });
+  return {
+    generatedAt: new Date().toISOString(),
+    title: "Algorithm Lab",
+    score,
+    readiness,
+    summary,
+    confidenceBuckets,
+    failureCauses,
+    actionPlan,
+    highConfidenceWrong: highConfidenceWrong.slice(0, 8),
+    publishPolicy: {
+      subscriber: readiness.gate,
+      owner: "Owner sees proof, conflict, and calibration detail before subscriber screens are simplified.",
+      singleChoiceRule: "Final workflow should show one best choice only when proof, part, programmer, and key-family signals agree.",
+    },
+    calibration: {
+      label: calibrationGap <= 8 ? "Well calibrated" : calibrationGap <= 18 ? "Watch calibration" : "Overconfident risk",
+      tone: calibrationGap <= 8 ? "ready" : calibrationGap <= 18 ? "warn" : "danger",
+      detail: `${averageConfidence}% average confidence vs ${judgedAccuracy}% judged backtest accuracy.`,
+    },
+  };
+}
+
 async function buildTrainingCenter(body = {}, store = { jobs: [] }) {
   const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
@@ -2383,6 +2647,8 @@ async function buildTrainingCenter(body = {}, store = { jobs: [] }) {
   const partCorrect = partRows.filter((row) => trainingTokensOverlap([row.predicted.part], row.actual.parts)).length;
   const programmerCorrect = programmerRows.filter((row) => compactToken(row.predicted.programmer) === compactToken(programmerDisplayName(row.actual.programmer) || row.actual.programmer)).length;
   const averageConfidence = tested ? Math.round(rows.reduce((sum, row) => sum + row.confidence, 0) / tested) : 0;
+  const clusterConflicts = buildTrainingClusterConflicts(rows);
+  const algorithmLab = buildTrainingAlgorithmLab(rows, clusterConflicts, store);
   return {
     generatedAt: new Date().toISOString(),
     title: "Decision Engine Training Center",
@@ -2394,12 +2660,18 @@ async function buildTrainingCenter(body = {}, store = { jobs: [] }) {
       averageConfidence,
       partAccuracy: partRows.length ? Math.round((partCorrect / partRows.length) * 100) : 0,
       programmerAccuracy: programmerRows.length ? Math.round((programmerCorrect / programmerRows.length) * 100) : 0,
+      fieldReady: algorithmLab.summary.fieldReady,
+      proofCoverage: algorithmLab.summary.proofCoverage,
+      calibrationGap: algorithmLab.summary.calibrationGap,
+      highConfidenceWrong: algorithmLab.summary.highConfidenceWrong,
+      algorithmScore: algorithmLab.score,
       aiFeedback: store.aiFeedback?.length || 0,
       shopRules: store.shopRules?.length || 0,
     },
+    algorithmLab,
     rows: rows.slice(0, 80),
     weakRecords: rows.filter((row) => row.status !== "ready" || row.confidence < 70).slice(0, 16),
-    conflicts: buildTrainingClusterConflicts(rows),
+    conflicts: clusterConflicts,
     guidance: [
       "Backtest uses saved/imported proof as the shop truth baseline.",
       "Exact VIN peers rank first, then VIN pattern, vehicle, and part-token peers.",

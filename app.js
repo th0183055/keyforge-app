@@ -4212,6 +4212,9 @@ function renderMissionIntelligence(audit = {}) {
   const weakJobs = audit.weakJobs || [];
   const conflicts = audit.conflicts || [];
   const codeDesk = audit.codeDesk || {};
+  const algorithmLab = audit.algorithmLab || {};
+  const algorithmSummary = algorithmLab.summary || {};
+  const algorithmReadiness = algorithmLab.readiness || {};
   return `
     <section class="mission-intel-section ${escapeHtml(missionToneClass(audit.tone || audit.overall))}">
       <div class="mission-intel-head">
@@ -4329,6 +4332,22 @@ function renderMissionIntelligence(audit = {}) {
               <span>${escapeHtml(`${codeDesk.records || 0} codes / ${codeDesk.systems || 0} cards`)}</span>
               <strong>${escapeHtml(`${codeDesk.worked || 0} worked / ${codeDesk.wrong || 0} flags`)}</strong>
               <p>${escapeHtml((codeDesk.gaps || []).slice(0, 3).join(" | ") || "Authorized code library looks connected.")}</p>
+            </div>
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Algorithm Lab</p>
+              <h3>${escapeHtml(`${algorithmLab.score || 0}%`)}</h3>
+            </div>
+            <button class="secondary-action small" type="button" data-mission-open="training-center">Open</button>
+          </div>
+          <div class="mission-intel-list">
+            <div class="${escapeHtml(missionToneClass(algorithmReadiness.tone || algorithmLab.score))}">
+              <span>${escapeHtml(algorithmReadiness.label || "Backtest")}</span>
+              <strong>${escapeHtml(algorithmReadiness.gate || "Owner review")}</strong>
+              <p>${escapeHtml(`${algorithmSummary.fieldReady || 0}% field ready | ${algorithmSummary.highConfidenceWrong || 0} high-confidence conflicts | ${algorithmSummary.calibrationGap || 0}% calibration gap`)}</p>
             </div>
           </div>
         </article>
@@ -4558,9 +4577,9 @@ function trainingToneClass(status, confidence = 0) {
 
 function renderTrainingSummaryCards(summary = {}) {
   const cards = [
-    ["Tested", summary.testedJobs || 0, "Saved/imported jobs"],
-    ["Ready", summary.ready || 0, "Can support decisions"],
-    ["Needs proof", summary.needsProof || 0, "Missing peer evidence"],
+    ["Algorithm", `${summary.algorithmScore || 0}%`, "Publish readiness"],
+    ["Field ready", `${summary.fieldReady || 0}%`, "Single-choice candidates"],
+    ["Proof base", `${summary.proofCoverage || 0}%`, "Backtest coverage"],
     ["Conflicts", summary.conflicts || 0, "Review before trusting"],
     ["Parts", `${summary.partAccuracy || 0}%`, "Backtest match"],
     ["Programmers", `${summary.programmerAccuracy || 0}%`, "Backtest match"],
@@ -4578,6 +4597,130 @@ function renderTrainingSummaryCards(summary = {}) {
           `,
         )
         .join("")}
+    </section>
+  `;
+}
+
+function renderAlgorithmLab(lab = {}) {
+  if (!lab || !lab.summary) return "";
+  const summary = lab.summary || {};
+  const readiness = lab.readiness || {};
+  const calibration = lab.calibration || {};
+  const tone = missionToneClass(readiness.tone || lab.score || 0);
+  return `
+    <section class="algorithm-lab-panel ${escapeHtml(tone)}">
+      <div class="algorithm-lab-hero">
+        <div class="mission-score compact">
+          <strong>${escapeHtml(lab.score || 0)}</strong>
+          <span>Grade</span>
+        </div>
+        <div>
+          <p class="eyebrow">${escapeHtml(lab.title || "Algorithm Lab")}</p>
+          <h3>${escapeHtml(readiness.label || "Calibration loaded")}</h3>
+          <p>${escapeHtml(readiness.summary || "Saved proof is being measured against the recommendation engine.")}</p>
+        </div>
+        <div class="algorithm-policy">
+          <span>Gate</span>
+          <strong>${escapeHtml(readiness.gate || lab.publishPolicy?.subscriber || "Owner review")}</strong>
+          <p>${escapeHtml(calibration.detail || "")}</p>
+        </div>
+      </div>
+      <div class="algorithm-lab-grid">
+        <article class="${escapeHtml(missionToneClass(summary.partAccuracy || 0))}">
+          <span>Part accuracy</span>
+          <strong>${escapeHtml(`${summary.partAccuracy || 0}%`)}</strong>
+          <p>${escapeHtml(`${summary.highConfidenceWrong || 0} high-confidence conflict${summary.highConfidenceWrong === 1 ? "" : "s"}`)}</p>
+        </article>
+        <article class="${escapeHtml(missionToneClass(summary.programmerAccuracy || 0))}">
+          <span>Programmer</span>
+          <strong>${escapeHtml(`${summary.programmerAccuracy || 0}%`)}</strong>
+          <p>${escapeHtml(`${summary.aiFeedback || 0} AI feedback marks`)}</p>
+        </article>
+        <article class="${escapeHtml(missionToneClass(summary.familyAccuracy || 0))}">
+          <span>Key family</span>
+          <strong>${escapeHtml(`${summary.familyAccuracy || 0}%`)}</strong>
+          <p>${escapeHtml(`${summary.shopRules || 0} shop rules`)}</p>
+        </article>
+        <article class="${escapeHtml(missionToneClass(calibration.tone || 0))}">
+          <span>Calibration</span>
+          <strong>${escapeHtml(calibration.label || "Measured")}</strong>
+          <p>${escapeHtml(`${summary.calibrationGap || 0}% confidence gap`)}</p>
+        </article>
+      </div>
+      <div class="algorithm-lab-columns">
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Confidence bands</p>
+              <h3>What the engine earns</h3>
+            </div>
+          </div>
+          <div class="algorithm-bucket-list">
+            ${(lab.confidenceBuckets || [])
+              .map(
+                (bucket) => `
+                  <div class="${escapeHtml(missionToneClass(bucket.tone || bucket.accuracy))}">
+                    <span>${escapeHtml(bucket.label)}</span>
+                    <strong>${escapeHtml(`${bucket.accuracy || 0}% hit rate`)}</strong>
+                    <p>${escapeHtml(`${bucket.ready || 0} ready | ${bucket.conflict || 0} conflict | ${bucket.needsProof || 0} need proof`)}</p>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Failure causes</p>
+              <h3>Fix these first</h3>
+            </div>
+          </div>
+          <div class="algorithm-cause-list">
+            ${
+              (lab.failureCauses || []).length
+                ? lab.failureCauses
+                    .slice(0, 5)
+                    .map(
+                      (cause) => `
+                        <div>
+                          <span>${escapeHtml(`${cause.count || 0} rows`)}</span>
+                          <strong>${escapeHtml(cause.label)}</strong>
+                          <p>${escapeHtml((cause.examples || []).join(" | "))}</p>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<p class="muted-copy">No failure causes surfaced.</p>`
+            }
+          </div>
+        </article>
+        <article>
+          <div class="panel-header tight">
+            <div>
+              <p class="eyebrow">Training moves</p>
+              <h3>Next best upgrades</h3>
+            </div>
+          </div>
+          <div class="algorithm-action-list">
+            ${
+              (lab.actionPlan || []).length
+                ? lab.actionPlan
+                    .slice(0, 5)
+                    .map(
+                      (action) => `
+                        <button class="secondary-action small" type="button" data-mission-open="${escapeHtml(action.target || "training-center")}">
+                          <strong>${escapeHtml(action.title)}</strong>
+                          <span>${escapeHtml(action.detail || "")}</span>
+                        </button>
+                      `,
+                    )
+                    .join("")
+                : `<p class="muted-copy">No algorithm training moves are pending.</p>`
+            }
+          </div>
+        </article>
+      </div>
     </section>
   `;
 }
@@ -4713,19 +4856,22 @@ function renderTrainingCenter(payload = latestTrainingCenter) {
     return;
   }
   const summary = payload.summary || {};
-  const tone = missionToneClass(summary.averageConfidence || 0);
+  const lab = payload.algorithmLab || {};
+  const readiness = lab.readiness || {};
+  const tone = missionToneClass(readiness.tone || summary.algorithmScore || summary.averageConfidence || 0);
   trainingCenterResult.innerHTML = `
     <section class="training-hero ${escapeHtml(tone)}">
       <div class="training-score">
-        <strong>${escapeHtml(summary.averageConfidence || 0)}</strong>
-        <span>Avg confidence</span>
+        <strong>${escapeHtml(summary.algorithmScore || lab.score || summary.averageConfidence || 0)}</strong>
+        <span>Algorithm</span>
       </div>
       <div>
         <p class="eyebrow">${escapeHtml(payload.title || "Decision Engine Training Center")}</p>
-        <h3>${escapeHtml(`${summary.ready || 0} ready / ${summary.conflicts || 0} conflicts / ${summary.needsProof || 0} need proof`)}</h3>
-        <p>${escapeHtml((payload.guidance || [])[0] || "Backtest saved proof against the current Decision Engine.")}</p>
+        <h3>${escapeHtml(readiness.label || `${summary.ready || 0} ready / ${summary.conflicts || 0} conflicts / ${summary.needsProof || 0} need proof`)}</h3>
+        <p>${escapeHtml(readiness.summary || (payload.guidance || [])[0] || "Backtest saved proof against the current Decision Engine.")}</p>
       </div>
     </section>
+    ${renderAlgorithmLab(lab)}
     ${renderTrainingSummaryCards(summary)}
     ${renderTrainingWeakRecords(payload.weakRecords || [])}
     ${renderTrainingConflicts(payload.conflicts || [])}
