@@ -2813,6 +2813,17 @@ function compactToolToken(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
+function lishiComparableToken(value) {
+  return extractKeywayTokens(value)[0] || compactToolToken(value);
+}
+
+function lishiClientTokensAgree(left, right) {
+  const a = lishiComparableToken(left);
+  const b = lishiComparableToken(right);
+  if (!a || !b) return false;
+  return a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a)));
+}
+
 function importedLishiToolsForProfile(profile, lishi = lishiReferenceForProfile(profile)) {
   const tools = profile?.lishiLookup?.tools || [];
   const vehicleConfirmed = tools.filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
@@ -2831,8 +2842,12 @@ function buildDispatchPack(profile) {
   const snapshot = selectedPartSnapshot(profile);
   const programmer = selectedProgrammerOption(profile);
   const lishi = lishiReferenceForProfile(profile, snapshot);
+  const decode = decodeDecision(profile, snapshot);
   const reference = profile?.vehicleReference || {};
-  const importedLishiTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
+  const importedLishiTools = importedLishiToolsForProfile(profile, lishi)
+    .filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed")
+    .map((tool) => tool.canonical || tool.tool)
+    .filter(Boolean);
   const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle lookup";
   const supplier = profile?.liveSupplierLookup || {};
   const supplierCount = supplier.products?.length || 0;
@@ -2851,14 +2866,14 @@ function buildDispatchPack(profile) {
     ["Key choice", snapshot ? [snapshot.typeLabel, snapshot.title].filter(Boolean).join(" | ") : selectedPackageOption()?.title || "Choose key type"],
     ["Part clue", snapshot?.identifier || profile?.supplierCandidates?.[0]?.hlPartNumber || "Pick key picture"],
     ["Keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Verify from lock"],
-    ["Lishi match", importedLishiTools.length ? importedLishiTools.slice(0, 4).join(" / ") : lishi.primary || "Verify by keyway"],
+    ["Lishi match", decode.value || importedLishiTools.slice(0, 4).join(" / ") || lishi.primary || "Verify by keyway"],
     ["Programmer", programmer ? `${programmer.name} (${programmerPercent(programmer)}%)` : "Choose programmer path"],
     ["Proof history", matchedJobCount ? `${matchedJobCount} related saved job${matchedJobCount === 1 ? "" : "s"}` : "No saved job proof yet"],
   ].filter(([, value]) => value);
   const checklist = [
     "Verify ownership/authorization and attach proof before code/PIN work",
     snapshot ? "Compare FCC, buttons, chip, frequency, blade, and emergency insert before cutting" : "Choose the visible key/button layout before quoting parts",
-    importedLishiTools.length ? `Verify ${importedLishiTools.slice(0, 3).join(" / ")} against the lock before use` : lishi.primary ? `Confirm ${lishi.primary} from the lock or insert before decode` : "Confirm keyway from the lock or insert",
+    decode.value ? `${decode.value.startsWith("Verify") ? decode.value : `Verify ${decode.value}`} against the lock before use` : importedLishiTools.length ? `Verify ${importedLishiTools.slice(0, 3).join(" / ")} against the lock before use` : lishi.primary ? `Confirm ${lishi.primary} from the lock or insert before decode` : "Confirm keyway from the lock or insert",
     programmer ? `Use ${programmer.name}; verify add-key/all-keys-lost coverage before starting` : "Choose programmer path before final rundown",
     ...(reference.partVerification || []).slice(0, 3),
     "Save worked-job proof after the job to improve coverage percentages",
@@ -3126,19 +3141,59 @@ function partDecision(profile, snapshot) {
 function decodeDecision(profile, snapshot) {
   const reference = profile?.vehicleReference || {};
   const lishi = lishiReferenceForProfile(profile, snapshot);
-  const importedTools = importedLishiToolsForProfile(profile, lishi).map((tool) => tool.canonical || tool.tool).filter(Boolean);
-  const keyway = lishi.keyways?.[0] || reference.keyway?.primary || "";
-  const value = firstCleanValue([importedTools[0], keyway, lishi.primary]) || "Verify keyway";
+  const shop = profile?.lishiEvidence || {};
+  const importedToolRecords = importedLishiToolsForProfile(profile, lishi);
+  const confirmedImportedTools = importedToolRecords.filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
+  const shortlistImportedTools = importedToolRecords.filter((tool) => tool.matchStatus === "keyway-shortlist");
+  const importedTools = importedToolRecords.map((tool) => tool.canonical || tool.tool).filter(Boolean);
+  const confirmedTools = confirmedImportedTools.map((tool) => tool.canonical || tool.tool).filter(Boolean);
+  const shortlistTools = shortlistImportedTools.map((tool) => tool.canonical || tool.tool).filter(Boolean);
+  const keyway = firstCleanValue([shop.primary, lishi.keyways?.[0], reference.keyway?.primary, reference.lishi?.primary]);
   const referenceScore = confidencePercentFromText(reference.keyway?.confidence || reference.lishi?.confidence, 52);
-  const score = importedTools.length ? 90 : lishi.keyways?.length ? 78 : referenceScore;
+  const shopAgreesWithConfirmed = Boolean(shop.primary && confirmedTools[0] && lishiClientTokensAgree(shop.primary, confirmedTools[0]));
+  const clientLishiConflict = Boolean(shop.primary && confirmedTools[0] && !shopAgreesWithConfirmed);
+  const lishiConflict = shop.status === "conflict" || clientLishiConflict;
+  const score = lishiConflict
+    ? Math.min(Number(shop.confidencePercent || 62), 68)
+    : confirmedTools.length
+      ? shopAgreesWithConfirmed ? 96 : 90
+      : shop.primary
+        ? Number(shop.confidencePercent || 78)
+        : shortlistTools.length
+          ? 58
+          : keyway
+            ? Math.max(referenceScore, 62)
+            : referenceScore;
+  const value = lishiConflict && shop.primary
+    ? `Verify ${shop.primary}`
+    : confirmedTools[0]
+      ? confirmedTools[0]
+      : shop.primary
+        ? shop.primary
+        : shortlistTools[0]
+          ? `Verify ${shortlistTools[0]}`
+          : keyway
+            ? `Verify ${keyway}`
+            : "Verify keyway";
   return {
     id: "decode",
     label: "Decode",
     value,
     confidence: clampPercent(score, 52),
-    lines: decisionLines([keyway && importedTools[0] ? `Keyway ${keyway}` : "", lishi.candidates?.[0]?.sources?.[0]]),
+    lines: decisionLines([
+      lishiConflict ? "Conflict: verify at lock" : "",
+      confirmedTools[0] ? "Vehicle-confirmed Lishi" : "",
+      !confirmedTools[0] && shop.primary ? shop.decision : "",
+      shortlistTools[0] ? "Keyway shortlist only" : "",
+      keyway ? `Keyway ${keyway}` : "",
+      lishi.candidates?.[0]?.sources?.[0],
+    ]),
     lishi,
     importedTools,
+    confirmedTools,
+    shortlistTools,
+    shopEvidence: shop,
+    conflict: lishiConflict,
   };
 }
 
@@ -3309,9 +3364,11 @@ function renderLishiDecodeScreen(profile) {
   }
   const reference = profile.vehicleReference || {};
   const lishi = lishiReferenceForProfile(profile, snapshot);
+  const decode = decodeDecision(profile, snapshot);
+  const shop = decode.shopEvidence || {};
   const importedTools = importedLishiToolsForProfile(profile, lishi);
   const confirmedImportedTools = importedTools.filter((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
-  const topImportedTool = confirmedImportedTools[0] || importedTools[0] || null;
+  const topImportedTool = confirmedImportedTools[0] || (!shop.primary ? importedTools[0] : null);
   const toolToGrab = topImportedTool?.canonical || topImportedTool?.tool || "";
   const codeSources = [
     "NASTF SDRM / Vehicle Security Professional account for OEM security access where supported",
@@ -3321,8 +3378,11 @@ function renderLishiDecodeScreen(profile) {
   ];
   const rows = [
     ["Lishi / keyway", lishi.keyways.length ? lishi.keyways.join(" / ") : reference.keyway?.primary || "Confirm from lock or emergency insert"],
-    ["Tool to grab", confirmedImportedTools.length ? toolToGrab : toolToGrab ? `Verify ${toolToGrab}` : "Verify keyway at lock"],
-    ["Match status", profile.lishiLookup?.decision || ""],
+    ["Tool to grab", decode.value || (confirmedImportedTools.length ? toolToGrab : toolToGrab ? `Verify ${toolToGrab}` : "Verify keyway at lock")],
+    ["Confidence", `${decode.confidence}%`],
+    ["Shop proof", shop.primary ? `${shop.primary}${shop.count ? ` (${shop.count})` : ""}` : ""],
+    ["Match status", decode.conflict ? shop.decision || "Shop proof and imported Lishi evidence disagree. Verify at the lock before using." : profile.lishiLookup?.decision || shop.decision || ""],
+    ["Conflict", (shop.conflicts || []).join(" | ")],
     ["Alternates", [...new Set([...(reference.lishi?.alternates || []), ...(reference.keyway?.alternates || [])])].join(" | ")],
     ["Decode plan", (reference.decodePlan || []).slice(0, 3).join(" | ")],
     ["Cut path", (reference.cutting || []).slice(0, 3).join(" | ")],
@@ -3356,8 +3416,13 @@ function renderLishiDecodeScreen(profile) {
       <section class="lishi-candidate-list">
         <div>
           <span>Lishi shortlist</span>
-          <strong>${escapeHtml(lishi.candidates.length ? `${lishi.candidates.length} candidate${lishi.candidates.length === 1 ? "" : "s"}` : "Verify by keyway")}</strong>
+          <strong>${escapeHtml(decode.conflict ? "Conflict - verify" : confirmedImportedTools.length ? "Vehicle confirmed" : lishi.candidates.length ? `${lishi.candidates.length} candidate${lishi.candidates.length === 1 ? "" : "s"}` : "Verify by keyway")}</strong>
         </div>
+        ${
+          shop.primary
+            ? `<article><strong>${escapeHtml(decode.conflict ? `Verify ${shop.primary}` : shop.primary)}</strong><p>${escapeHtml(shop.decision || (decode.conflict ? "Shop proof and imported Lishi evidence disagree. Verify at the lock before using." : "Shop proof supports this keyway; still verify at the lock before decode."))}</p></article>`
+            : ""
+        }
         ${
           lishi.candidates.length
             ? lishi.candidates
@@ -7145,6 +7210,7 @@ function currentWorkbenchProfile(query = workbenchQueryFromForm()) {
     verifiedProfile: profile.verifiedProfile || null,
     shopEvidence: profile.shopEvidence || null,
     proofPatterns: profile.proofPatterns || null,
+    lishiEvidence: profile.lishiEvidence || null,
     referenceVault: profile.referenceVault || [],
     vehicleReference: profile.vehicleReference || null,
     keyRequirements: profile.keyRequirements || null,
@@ -7234,6 +7300,7 @@ function renderWorkbenchPartHistory(payload = {}) {
 
 function renderWorkbenchLishi(payload = {}) {
   const lookup = payload.lishi || {};
+  const shop = payload.lishiEvidence || {};
   const tools = lookup.tools || [];
   const confirmed = lookup.confirmedTools || tools.filter((tool) => tool.vehicleConfirmed).length;
   return `
@@ -7241,10 +7308,15 @@ function renderWorkbenchLishi(payload = {}) {
       <div class="panel-header tight">
         <div>
           <p class="eyebrow">Lishi / decode</p>
-          <h3>${escapeHtml(confirmed ? "Vehicle-confirmed tools" : tools.length ? "Verify keyway shortlist" : "Confirm keyway")}</h3>
+          <h3>${escapeHtml(shop.status === "conflict" ? "Resolve conflict" : confirmed ? "Vehicle-confirmed tools" : shop.primary ? "Shop-confirmed keyway" : tools.length ? "Verify keyway shortlist" : "Confirm keyway")}</h3>
         </div>
         <button class="secondary-action small" type="button" data-workbench-open="lishi">Open Lishi Lookup</button>
       </div>
+      ${
+        shop.primary
+          ? `<article class="assistant-card compact ${shop.status === "conflict" ? "warning" : ""}"><strong>${escapeHtml(shop.status === "conflict" ? `Verify ${shop.primary}` : shop.primary)}</strong><p>${escapeHtml(shop.decision || `${shop.count || 0} shop proof record${shop.count === 1 ? "" : "s"}`)}</p></article>`
+          : ""
+      }
       ${lookup.decision ? `<p class="muted-copy">${escapeHtml(lookup.decision)}</p>` : ""}
       <div class="lishi-tool-list compact">
         ${tools.length ? tools.slice(0, 5).map(renderLishiToolCard).join("") : `<article class="assistant-card"><strong>No Lishi match yet</strong><p>Use the keyway from the lock/insert or a broader make/model search.</p></article>`}

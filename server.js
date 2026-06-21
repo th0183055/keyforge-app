@@ -5374,6 +5374,38 @@ function jobReferenceTokens(job) {
   for (const match of text.matchAll(/\b(?:[A-Z]{2,5}\d{3,5}|\d{3}-R\d{4}R?|[A-Z0-9]{3,}-[A-Z0-9]{3,})\b/gi)) {
     tokens.add(match[0].toUpperCase());
   }
+  lishiKeywayTokensFromText(text).forEach((token) => tokens.add(token));
+  return Array.from(tokens);
+}
+
+function normalizeLishiKeywayToken(value) {
+  const text = cleanString(value).toUpperCase();
+  if (!text) return "";
+  const cleaned = text
+    .replace(/\b(?:LISHI|DECODER|PICK|READER|KEYWAY|VERIFY|CONFIRM|GENUINE|CLASSIC)\b/g, " ")
+    .replace(/\bV\s*\.\s*(\d)\b/g, "V$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const compact = cleaned.replace(/[^A-Z0-9]+/g, "");
+  if (/^(?:HU|FO|CY|TOY|TR|DAT|NSN|NIS|NI|MIT|MZ|MAZ|HON|HO|HD|HY|KIA|SUB|VA|VAG|SIP|GM|BW|BMW|B|H|Y|KK)\d{2,4}[A-Z]?(?:V\d|GEN\d|SINGLE|TWIN)?$/.test(compact)) {
+    return compact;
+  }
+  return "";
+}
+
+function lishiKeywayTokensFromText(value) {
+  const text = normalizeVehicleText(value);
+  const tokens = new Set();
+  const patterns = [
+    /\b(?:HU|FO|CY|TOY|TR|DAT|NSN|NIS|NI|MIT|MZ|MAZ|HON|HO|HD|HY|KIA|SUB|VA|VAG|SIP|GM|BW|BMW)\s*[- ]?\s*\d{2,4}[A-Z]?(?:\s*(?:V\.?\s*\d|GEN(?:ERATION)?\s*\d|SINGLE|TWIN))?\b/g,
+    /\b(?:B|H|Y|KK)\s*[- ]?\s*\d{2,4}[A-Z]?(?:PT|P)?\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const token = normalizeLishiKeywayToken(match[0]);
+      if (token) tokens.add(token);
+    }
+  }
   return Array.from(tokens);
 }
 
@@ -5463,6 +5495,11 @@ function proofPatternJobRecord(job, partsReference = {}) {
     tokens,
     referenceTokens,
   ]).filter((token) => !normalizeVinCandidate(token));
+  const lishiKeyways = uniqueCleanValues(
+    [job.title, job.vehicle, job.service, job.programmer, job.sequence, job.keyCode, job.tags || [], job.notes || [], partTokens, referenceTokens]
+      .flat(Infinity)
+      .flatMap(lishiKeywayTokensFromText),
+  );
   const family = proofIgnitionFamilyFromText(
     [job.title, job.vehicle, job.service, job.programmer, job.sequence, job.tags || [], job.notes || [], partTokens, referenceTokens].flat(Infinity).join(" "),
   );
@@ -5475,6 +5512,7 @@ function proofPatternJobRecord(job, partsReference = {}) {
     patterns,
     vehicleKey: proofVehiclePatternKey(vehicle),
     partTokens,
+    lishiKeyways,
     references,
     ignitionFamily: family,
     programmer: programmerDisplayName(job.programmer) || cleanString(job.programmer),
@@ -5485,6 +5523,7 @@ function proofPatternJobRecord(job, partsReference = {}) {
 
 function summarizeProofPatternGroup(kind, label, records = [], partsReference = {}) {
   const partCounts = new Map();
+  const lishiCounts = new Map();
   const familyCounts = new Map();
   const programmerCounts = new Map();
   const vehicleCounts = new Map();
@@ -5495,6 +5534,7 @@ function summarizeProofPatternGroup(kind, label, records = [], partsReference = 
 
   for (const record of records) {
     (record.partTokens || []).forEach((token) => countProofValue(partCounts, token, record));
+    (record.lishiKeyways || []).forEach((token) => countProofValue(lishiCounts, token, record));
     countProofValue(familyCounts, record.ignitionFamily?.label || "Unknown", record);
     countProofValue(programmerCounts, record.programmer || "Programmer not recorded", record);
     countProofValue(vehicleCounts, record.vehicle?.label || "Unknown vehicle", record);
@@ -5547,6 +5587,7 @@ function summarizeProofPatternGroup(kind, label, records = [], partsReference = 
       count: topFamilies[0]?.count || 0,
     },
     topParts,
+    lishiKeyways: sortedValues(lishiCounts).slice(0, 6),
     programmers: sortedValues(programmerCounts).slice(0, 6),
     vehicles: sortedValues(vehicleCounts).slice(0, 6),
     vins: Array.from(vins).slice(0, 8),
@@ -5556,6 +5597,7 @@ function summarizeProofPatternGroup(kind, label, records = [], partsReference = 
       vehicle: record.vehicle?.label || "",
       programmer: record.programmer || "",
       ignitionFamily: record.ignitionFamily?.label || "Unknown",
+      lishiKeyways: (record.lishiKeyways || []).slice(0, 4),
       partTokens: (record.partTokens || []).slice(0, 8),
       outcome: record.outcome,
       schedule: record.schedule,
@@ -5630,7 +5672,8 @@ function buildShopEvidence(vehicle, vin, jobs) {
     ...new Set(tokenOutcomes.filter((item) => item.outcome && item.outcome !== "worked" && item.outcome !== "ordered-alternate").map((item) => item.token)),
   ];
   const programmers = [...new Set(evidenceJobs.map((job) => job.programmer).filter(Boolean))];
-  const tools = [...new Set(tokens.filter((token) => /[A-Z]{2,5}\d{3,5}/.test(token)))];
+  const lishiKeyways = uniqueCleanValues(evidenceJobs.flatMap((job) => lishiKeywayTokensFromText(partHistoryJobText(job))));
+  const tools = [...new Set([...tokens.filter((token) => /[A-Z]{2,5}\d{3,5}/.test(token)), ...lishiKeyways])];
   const keyCodes = [...new Set(evidenceJobs.map((job) => job.keyCode).filter(Boolean))];
   const prices = evidenceJobs.map((job) => Number(job.price)).filter((price) => Number.isFinite(price) && price > 0);
   const confidence = exactVinJobs.length ? "high" : exactVehicleJobs.length ? "medium-high" : makeModelJobs.length ? "medium" : "none";
@@ -5643,6 +5686,7 @@ function buildShopEvidence(vehicle, vin, jobs) {
     totalMatches: evidenceJobs.length,
     programmers,
     tools,
+    lishiKeyways,
     keyCodes,
     tokens,
     positiveTokens,
@@ -6113,7 +6157,7 @@ function coveragePercent(successes, warnings) {
 }
 
 function coverageVehicleForJob(job = {}) {
-  const source = [job.vehicle, job.title].filter(Boolean).join(" ");
+  const source = job.vehicle || job.title || "";
   const text = normalizeVehicleText(source);
   const year = text.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
   const alias = coverageMakeAliases.find(([needle]) => text.includes(needle));
@@ -7687,6 +7731,7 @@ function compactProofPatternGroup(group = {}) {
     confidencePercent: group.confidencePercent || 0,
     ignitionFamily: group.ignitionFamily || {},
     topParts: (group.topParts || []).slice(0, 8),
+    lishiKeyways: (group.lishiKeyways || []).slice(0, 6),
     programmers: (group.programmers || []).slice(0, 6),
     vehicles: (group.vehicles || []).slice(0, 6),
     vins: (group.vins || []).slice(0, 8),
@@ -7702,6 +7747,84 @@ function compactProofPatterns(payload = {}) {
     best: compactProofPatternGroup(payload.best || {}),
     groups: (payload.groups || []).map(compactProofPatternGroup),
     proofNote: payload.proofNote || "",
+  };
+}
+
+function lishiTokensAgree(left, right) {
+  const a = normalizeLishiKeywayToken(left) || compactToken(left);
+  const b = normalizeLishiKeywayToken(right) || compactToken(right);
+  if (!a || !b) return false;
+  return a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a)));
+}
+
+function buildShopLishiEvidence({ profile = {}, verifiedProfile = null, shopEvidence = null, proofPatterns = null, lishiLookup = null } = {}) {
+  const counts = new Map();
+  const add = (value, count = 1, source = "", confidenceBase = 72) => {
+    const token = normalizeLishiKeywayToken(value);
+    if (!token) return;
+    const current = counts.get(token) || { value: token, count: 0, sources: new Set(), confidenceBase: 0 };
+    current.count = Math.max(current.count || 0, Math.max(1, Number(count) || 1));
+    current.confidenceBase = Math.max(current.confidenceBase || 0, confidenceBase);
+    if (source) current.sources.add(source);
+    counts.set(token, current);
+  };
+
+  const vehicleProfile = verifiedProfile || profile.verifiedProfile || null;
+  for (const item of vehicleProfile?.lishiOutcomes || []) {
+    add(item.value, item.count || 1, item.source || "worked vehicle profile", item.count >= 3 ? 90 : 82);
+  }
+  if (vehicleProfile?.preferredLishi?.value) {
+    add(vehicleProfile.preferredLishi.value, vehicleProfile.preferredLishi.count || 1, "preferred vehicle profile", vehicleProfile.preferredLishi.count >= 3 ? 94 : 86);
+  }
+
+  const bestPattern = proofPatterns?.best || profile.proofPatterns?.best || {};
+  const patternBase = bestPattern.kind === "exact-vin" ? 88 : bestPattern.kind === "vin-pattern" ? 80 : bestPattern.records ? 72 : 0;
+  for (const item of bestPattern.lishiKeyways || []) {
+    add(item.value, item.count || 1, `${bestPattern.kind || "proof"} proof pattern`, patternBase);
+  }
+  for (const group of proofPatterns?.groups || profile.proofPatterns?.groups || []) {
+    for (const item of group.lishiKeyways || []) {
+      add(item.value, item.count || 1, `${group.kind || "proof"} evidence`, group.kind === "exact-vin" ? 84 : 68);
+    }
+  }
+  for (const token of shopEvidence?.lishiKeyways || profile.shopEvidence?.lishiKeyways || []) {
+    add(token, 1, "matched saved job", 70);
+  }
+
+  const ranked = Array.from(counts.values())
+    .map((item) => ({
+      value: item.value,
+      count: item.count,
+      sources: Array.from(item.sources).slice(0, 5),
+      confidencePercent: Math.min(98, Math.max(item.confidenceBase || 0, 68) + Math.min(item.count * 3, 12)),
+    }))
+    .sort((a, b) => b.confidencePercent - a.confidencePercent || b.count - a.count || a.value.localeCompare(b.value));
+
+  const primary = ranked[0] || null;
+  const importedConfirmed = (lishiLookup?.tools || []).find((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
+  const importedToken = normalizeLishiKeywayToken(importedConfirmed?.canonical || importedConfirmed?.tool || "");
+  const importedAgrees = primary && importedToken ? lishiTokensAgree(primary.value, importedToken) : null;
+  const conflicts = uniqueCleanValues([
+    ...ranked.slice(1).filter((item) => primary && !lishiTokensAgree(item.value, primary.value)).map((item) => `${item.value} (${item.count})`),
+    importedAgrees === false ? `Imported vehicle row: ${importedToken}` : "",
+  ]).slice(0, 6);
+  const status = conflicts.length ? "conflict" : primary ? "shop-confirmed" : "none";
+
+  return {
+    status,
+    primary: primary?.value || "",
+    count: primary?.count || 0,
+    confidencePercent: primary ? (conflicts.length ? Math.min(primary.confidencePercent, 68) : primary.confidencePercent) : 0,
+    sources: primary?.sources || [],
+    alternates: ranked.slice(1, 6),
+    conflicts,
+    importedConfirmed: importedToken,
+    importedAgrees,
+    decision: conflicts.length
+      ? `Shop proof and imported Lishi evidence disagree. Verify ${primary?.value || "shop keyway"} against the lock before using.`
+      : primary
+        ? `Shop proof supports ${primary.value} from ${primary.count} observed record${primary.count === 1 ? "" : "s"}.`
+        : "",
   };
 }
 
@@ -7769,7 +7892,9 @@ function bestProgrammerDecisionValue(partHistory, proofPatterns, coverage) {
   return coverageProgrammer?.name || "";
 }
 
-function bestDecodeDecisionValue(lishiLookup, profile) {
+function bestDecodeDecisionValue(lishiLookup, profile, lishiEvidence = {}) {
+  if (lishiEvidence.status === "conflict" && lishiEvidence.primary) return `Verify ${lishiEvidence.primary}`;
+  if (lishiEvidence.primary && lishiEvidence.confidencePercent >= 78) return lishiEvidence.primary;
   const vehicleConfirmed = (lishiLookup?.tools || []).find((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
   if (vehicleConfirmed?.canonical || vehicleConfirmed?.tool) return vehicleConfirmed.canonical || vehicleConfirmed.tool;
   const shortlist = (lishiLookup?.tools || []).find((tool) => tool.matchStatus === "keyway-shortlist");
@@ -7778,7 +7903,7 @@ function bestDecodeDecisionValue(lishiLookup, profile) {
   return reference.keyway?.primary || reference.lishi?.primary || "";
 }
 
-function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, proofPatterns, warnings = [] }) {
+function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, warnings = [] }) {
   const title = workbenchVehicleLabel(profile, body.q);
   const bestPattern = proofPatterns?.best || {};
   const patternRecords = Number(bestPattern.records || 0);
@@ -7795,7 +7920,7 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
   const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
   const partValue = bestPartDecisionValue(partHistory, proofPatterns, partQuery);
   const programmerValue = bestProgrammerDecisionValue(partHistory, proofPatterns, coverage);
-  const decodeValue = bestDecodeDecisionValue(lishiLookup, profile);
+  const decodeValue = bestDecodeDecisionValue(lishiLookup, profile, lishiEvidence);
   const proofValue = proofPatternGroupLabel(bestPattern);
   const keyTypeValue = proofFamilyDisplay(bestPattern.ignitionFamily);
   const partOnlySearch = Boolean(partQuery && !hasVehicle && !hasVin);
@@ -7847,14 +7972,32 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
       "decode",
       "Decode",
       decodeValue || "Verify keyway",
-      lishiConfirmedTools ? 90 + Math.min(lishiConfirmedTools * 2, 8) : lishiShortlistTools ? 58 : autoRows ? 54 : 42,
-      lishiConfirmedTools ? "Vehicle-confirmed Lishi" : lishiShortlistTools ? "Keyway shortlist" : "Manual verify",
-      lishiConfirmedTools
+      lishiEvidence?.status === "conflict"
+        ? Math.min(Number(lishiEvidence.confidencePercent || 62), 68)
+        : lishiConfirmedTools && lishiEvidence?.importedAgrees
+          ? 96
+          : lishiConfirmedTools
+            ? 90 + Math.min(lishiConfirmedTools * 2, 8)
+            : lishiEvidence?.primary
+              ? Number(lishiEvidence.confidencePercent || 78)
+              : lishiShortlistTools ? 58 : autoRows ? 54 : 42,
+      lishiEvidence?.status === "conflict"
+        ? "Lishi conflict"
+        : lishiConfirmedTools
+          ? "Vehicle-confirmed Lishi"
+          : lishiEvidence?.primary
+            ? "Shop-confirmed Lishi"
+            : lishiShortlistTools ? "Keyway shortlist" : "Manual verify",
+      lishiEvidence?.status === "conflict"
+        ? lishiEvidence.decision
+        : lishiConfirmedTools
         ? `${lishiConfirmedTools} vehicle-confirmed tool${lishiConfirmedTools === 1 ? "" : "s"}`
+        : lishiEvidence?.primary
+          ? `${lishiEvidence.count} shop proof record${lishiEvidence.count === 1 ? "" : "s"}`
         : lishiShortlistTools
           ? `${lishiShortlistTools} keyway candidate${lishiShortlistTools === 1 ? "" : "s"}`
           : "",
-      [lishiLookup?.decision, profile.vehicleReference?.keyway?.primary, profile.vehicleReference?.lishi?.primary],
+      [lishiEvidence?.decision, lishiLookup?.decision, profile.vehicleReference?.keyway?.primary, profile.vehicleReference?.lishi?.primary],
     ),
     workbenchChoice(
       "proof",
@@ -7920,8 +8063,20 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     vin: profile.vin || requestedVin,
     vehicle,
   });
+  const computedShopEvidence = buildShopEvidence(vehicle, profile.vin || requestedVin, cleanJobs);
+  const shopEvidence = profile.shopEvidence
+    ? {
+        ...computedShopEvidence,
+        ...profile.shopEvidence,
+        lishiKeyways: uniqueCleanValues([computedShopEvidence.lishiKeyways || [], profile.shopEvidence.lishiKeyways || []]),
+        tools: uniqueCleanValues([computedShopEvidence.tools || [], profile.shopEvidence.tools || []]),
+        jobs: uniqueById([computedShopEvidence.jobs || [], profile.shopEvidence.jobs || []].flat(), (job) => job.id || `${job.vehicle}|${job.vin}|${job.title}`),
+        totalMatches: Math.max(Number(computedShopEvidence.totalMatches || 0), Number(profile.shopEvidence.totalMatches || 0)),
+      }
+    : computedShopEvidence;
   profile.proofPatterns = proofPatterns;
-  if (profile.shopEvidence) profile.shopEvidence.proofPatterns = proofPatterns;
+  profile.shopEvidence = shopEvidence;
+  profile.shopEvidence.proofPatterns = proofPatterns;
   const partQuery = workbenchPrimaryPartQuery(profile, body);
   const lishiQuery = workbenchLishiQuery(profile, body);
   const autoQuery = workbenchAutoQuery(profile, body);
@@ -7944,6 +8099,14 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       limit: 80,
     }),
   ]);
+  const lishiEvidence = buildShopLishiEvidence({
+    profile,
+    verifiedProfile: profile.verifiedProfile,
+    shopEvidence,
+    proofPatterns,
+    lishiLookup,
+  });
+  profile.lishiEvidence = lishiEvidence;
   const coverage = buildCoverageDashboard(cleanJobs, partsReference);
   const matchedJobs = uniqueCleanValues([
     partHistory?.jobs?.map((job) => job.id),
@@ -7956,6 +8119,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     ...(profile.vehicleReference?.warnings || []),
     profile.confidence && /verify|partial|inconclusive/i.test(profile.confidence) ? profile.confidence : "",
     !partHistory?.jobs?.length && partQuery ? "No saved job proof matched this part yet." : "",
+    lishiEvidence.status === "conflict" ? lishiEvidence.decision : "",
     !lishiLookup?.confirmedTools ? lishiLookup?.decision || "No vehicle-confirmed Lishi tool matched the current vehicle/keyway query." : "",
   ]).slice(0, 8);
   const aiBrief = buildWorkbenchAiBrief({
@@ -7966,6 +8130,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     partHistory,
     proofVault,
     lishiLookup,
+    lishiEvidence,
     autoBaseline,
     coverage,
     proofPatterns,
@@ -7979,6 +8144,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     partHistory,
     proofVault,
     lishiLookup,
+    lishiEvidence,
     autoBaseline,
     coverage,
     proofPatterns,
@@ -8010,17 +8176,22 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       observedCoveragePercent: coverage.summary?.observedCoveragePercent,
     },
     decisionEngine,
+    lishiEvidence,
     nextActions: [
       { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
       { label: partQuery ? `Check part history for ${partQuery}` : "Search LR/MW/TI/OE part history", target: "part-history", tone: partHistory?.jobs?.length ? "ready" : "verify" },
       {
-        label: lishiLookup?.confirmedTools
-          ? "Open vehicle-confirmed Lishi tools"
-          : lishiLookup?.keywayShortlistTools
-            ? "Verify Lishi keyway shortlist"
-            : "Confirm keyway before Lishi use",
+        label: lishiEvidence.status === "conflict"
+          ? "Resolve Lishi conflict at lock"
+          : lishiLookup?.confirmedTools
+            ? "Open vehicle-confirmed Lishi tools"
+            : lishiEvidence.primary
+              ? `Verify shop-confirmed ${lishiEvidence.primary}`
+              : lishiLookup?.keywayShortlistTools
+                ? "Verify Lishi keyway shortlist"
+                : "Confirm keyway before Lishi use",
         target: "lishi",
-        tone: lishiLookup?.confirmedTools ? "ready" : "verify",
+        tone: lishiEvidence.status === "conflict" ? "required" : lishiLookup?.confirmedTools || lishiEvidence.primary ? "ready" : "verify",
       },
       { label: "Review auto code/programming baseline", target: "code-desk", tone: autoBaseline.rows?.length ? "ready" : "verify" },
       { label: "Save worked job when complete", target: "learn", tone: "required" },
@@ -8078,7 +8249,7 @@ function globalGroup(id, label, target, results = [], note = "") {
   };
 }
 
-function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, autoBaseline, coverage, proofPatterns, warnings = [] }) {
+function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, warnings = [] }) {
   const directProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0));
   const relatedProof = Number(profile.matchedJobs?.length || 0);
   const matchedProof = Math.max(directProof, relatedProof);
@@ -8088,6 +8259,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
   const lishiTools = Number(lishiLookup?.tools?.length || 0);
   const lishiConfirmedTools = Number(lishiLookup?.confirmedTools || (lishiLookup?.tools || []).filter((tool) => tool.vehicleConfirmed).length || 0);
+  const shopLishiConfidence = Number(lishiEvidence?.confidencePercent || 0);
   const autoRows = Number(autoBaseline?.rows?.length || 0);
   const observedCoverage = Number(coverage?.summary?.observedCoveragePercent);
   const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
@@ -8102,6 +8274,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
         Math.min(directProof * 8 + relatedProof * 4, 28) +
         Math.min(Math.round(patternConfidence / 8), 12) +
         Math.min(partRows * 5, 12) +
+        (lishiEvidence?.status === "conflict" ? -4 : lishiEvidence?.primary ? Math.min(Math.round(shopLishiConfidence / 14), 7) : 0) +
         (lishiConfirmedTools ? 6 : lishiTools ? 2 : 0) +
         (autoRows ? 4 : 0) +
         (Number.isFinite(observedCoverage) ? Math.min(observedCoverage / 10, 8) : 0),
@@ -8131,7 +8304,9 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
     partRows ? `${partRows} part cross-reference row${partRows === 1 ? "" : "s"} matched ${partQuery || body.q || "the search"}.` : "",
     lishiConfirmedTools
       ? `${lishiConfirmedTools} vehicle-confirmed Lishi tool match${lishiConfirmedTools === 1 ? "" : "es"} are available from the imported master reference.`
-      : lishiTools
+      : lishiEvidence?.primary && lishiEvidence?.status !== "conflict"
+        ? lishiEvidence.decision
+        : lishiTools
         ? `${lishiTools} Lishi keyway candidate${lishiTools === 1 ? "" : "s"} need lock/insert verification.`
         : "",
     autoRows ? `${autoRows} automotive code/programming baseline row${autoRows === 1 ? "" : "s"} matched.` : "",
@@ -8141,14 +8316,19 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
     !matchedProof ? "No saved worked-job proof matched yet." : "",
     !patternProof ? "No proof-pattern baseline matched this VIN/vehicle yet." : "",
     !partRows && partQuery ? "No cross-reference row matched the part query." : "",
-    !lishiConfirmedTools ? "No vehicle-confirmed Lishi/keyway match is confirmed from the current query." : "",
+    lishiEvidence?.status === "conflict" ? lishiEvidence.decision : "",
+    !lishiConfirmedTools && !lishiEvidence?.primary ? "No vehicle-confirmed Lishi/keyway match is confirmed from the current query." : "",
     !hasVin ? "VIN-level identity is not attached to this packet yet." : "",
     ...(warnings || []),
   ]).slice(0, 5);
   const nextSteps = uniqueCleanValues([
     "Confirm authorization and attach proof before sensitive work.",
     partQuery ? `Review part history for ${partQuery}.` : "Search the part number family if a key is selected.",
-    lishiConfirmedTools ? "Open vehicle-confirmed Lishi tools and verify against the lock/keyway." : "Confirm keyway from the lock, insert, or decoded source.",
+    lishiEvidence?.status === "conflict"
+      ? "Resolve the Lishi conflict at the lock before decode."
+      : lishiConfirmedTools || lishiEvidence?.primary
+        ? "Open the Lishi match and verify against the lock/keyway."
+        : "Confirm keyway from the lock, insert, or decoded source.",
     autoRows ? "Review Code Desk auto baseline before importing/using authorized code data." : "Use Code Desk only after the correct system/depth-space card is verified.",
     "Save the worked job outcome after completion so coverage percentages improve.",
   ]).slice(0, 5);
@@ -10272,6 +10452,12 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     applyReferenceVault(vehicleReferenceFor(vehicle, programmingReference, shopEvidence), referenceVaultEntries),
     verifiedProfile,
   );
+  const lishiEvidence = buildShopLishiEvidence({
+    profile: { verifiedProfile, shopEvidence, proofPatterns },
+    verifiedProfile,
+    shopEvidence,
+    proofPatterns,
+  });
   const selected = record
     ? {
         keys: record.keyOptions,
@@ -10308,6 +10494,7 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
     verifiedProfile,
     shopEvidence,
     proofPatterns,
+    lishiEvidence,
     liveSupplierLookup,
     referenceVault: referenceVaultEntries.map((entry) => ({
       id: entry.id,
