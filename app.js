@@ -49,6 +49,15 @@ let latestStorageDiagnostics = null;
 let latestAuthStatus = null;
 let authRoleSelection = "owner";
 let appMode = "owner";
+const apiTelemetry = {
+  inflight: 0,
+  total: 0,
+  ok: 0,
+  failed: 0,
+  last: null,
+  slow: [],
+  errors: [],
+};
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
@@ -229,6 +238,7 @@ const aiRouteEyebrow = document.querySelector("#aiRouteEyebrow");
 const aiRouteTitle = document.querySelector("#aiRouteTitle");
 const aiRouteSummary = document.querySelector("#aiRouteSummary");
 const aiRouteActions = document.querySelector("#aiRouteActions");
+const fieldOsPanel = document.querySelector("#fieldOsPanel");
 const aiContextChips = document.querySelector("#aiContextChips");
 const aiOpportunityPanel = document.querySelector("#aiOpportunityPanel");
 const aiQuickPrompts = document.querySelector("#aiQuickPrompts");
@@ -414,17 +424,21 @@ function updateConnectionStatus() {
   const online = navigator.onLine !== false;
   if (!online) {
     setAppStatus("Offline field mode", "offline", "Cached lookups and saved jobs remain available on this device.");
+    renderFieldOsPanel();
     return;
   }
   if (latestApiHealth?.status === "ok") {
     setAppStatus("Field ready", "online", `Server healthy. ${latestApiHealth?.summary || ""}`.trim());
+    renderFieldOsPanel();
     return;
   }
   if (latestApiHealth?.status === "degraded") {
     setAppStatus("Server waking", "degraded", latestApiHealth.error || "The cloud app is slow, but local field cache stays available.");
+    renderFieldOsPanel();
     return;
   }
   setAppStatus("Checking server", "busy", "Confirming the API is awake.");
+  renderFieldOsPanel();
 }
 
 function renderAuthStatus() {
@@ -450,6 +464,7 @@ function renderAuthStatus() {
   if (authStatus && locked && !authStatus.textContent) {
     authStatus.textContent = status.roles?.owner ? "Owner password required." : "Auth is enabled but no owner login is configured.";
   }
+  renderFieldOsPanel();
 }
 
 async function loadAuthStatus() {
@@ -4543,6 +4558,7 @@ function renderMissionControl(payload = latestMissionControl) {
   if (missionControlStatus) {
     missionControlStatus.textContent = `Mission Control updated ${new Date(payload.generatedAt || Date.now()).toLocaleString()}.`;
   }
+  renderFieldOsPanel();
 }
 
 async function loadMissionControl({ quiet = false } = {}) {
@@ -4880,6 +4896,7 @@ function renderTrainingCenter(payload = latestTrainingCenter) {
   if (trainingCenterStatus) {
     trainingCenterStatus.textContent = `Training Center updated ${new Date(payload.generatedAt || Date.now()).toLocaleString()}.`;
   }
+  renderFieldOsPanel();
 }
 
 async function loadTrainingCenter({ quiet = false } = {}) {
@@ -9412,6 +9429,201 @@ function aiRouteQuickActions(context = buildAiClientContext()) {
   ];
 }
 
+function apiTelemetryLabel(entry = apiTelemetry.last) {
+  if (!entry) return "No API calls yet";
+  const seconds = Math.max(0.1, Number(entry.elapsed || 0) / 1000);
+  const label = entry.path?.replace(/^\/api\//, "") || "request";
+  return `${label} ${entry.ok ? "ok" : "failed"} in ${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`;
+}
+
+function recordApiTelemetry(path, url, elapsed, ok, message = "") {
+  apiTelemetry.total += 1;
+  if (ok) apiTelemetry.ok += 1;
+  else apiTelemetry.failed += 1;
+  const entry = {
+    path,
+    url,
+    elapsed: Math.round(Number(elapsed) || 0),
+    ok: Boolean(ok),
+    message: cleanInput(message),
+    at: Date.now(),
+    fallback: url.startsWith("http") && new URL(url).origin !== window.location.origin,
+  };
+  apiTelemetry.last = entry;
+  if (entry.elapsed >= 12000) {
+    apiTelemetry.slow.unshift(entry);
+    apiTelemetry.slow = apiTelemetry.slow.slice(0, 5);
+  }
+  if (!ok) {
+    apiTelemetry.errors.unshift(entry);
+    apiTelemetry.errors = apiTelemetry.errors.slice(0, 5);
+  }
+  renderFieldOsPanel();
+}
+
+function fieldOsScoreTone(score = 0) {
+  return Number(score) >= 82 ? "ready" : Number(score) >= 58 ? "warn" : "danger";
+}
+
+function fieldOsMetric(label, value, detail = "", tone = "") {
+  return {
+    label: cleanInput(label),
+    value: cleanInput(value),
+    detail: cleanInput(detail),
+    tone: tone || fieldOsScoreTone(Number(String(value).replace(/[^0-9.-]/g, ""))),
+  };
+}
+
+function fieldOsSubject(context = buildAiClientContext()) {
+  return (
+    context.query ||
+    context.currentProfile?.title ||
+    context.workbench?.title ||
+    vehicleTitleFromVehicle(context.workbench?.vehicle || {}) ||
+    context.globalSearch?.query ||
+    routeDisplayLabel(context.activeView)
+  );
+}
+
+function buildFieldOsSnapshot(context = buildAiClientContext()) {
+  const mission = latestMissionControl || {};
+  const algorithm = latestTrainingCenter?.algorithmLab || mission.intelligenceAudit?.algorithmLab || {};
+  const coverageSummary = latestCoverageDashboard?.summary || mission.coverageSnapshot?.summary || {};
+  const storage = latestStorageStatus?.storage || latestStorageStatus || {};
+  const healthScore = latestApiHealth?.status === "ok" ? 100 : latestApiHealth?.status === "degraded" ? 52 : apiTelemetry.inflight ? 72 : 60;
+  const missionScore = Number(mission.readinessScore || 0);
+  const algorithmScore = Number(algorithm.score || 0);
+  const aiScore = Number(latestAiAdvisor?.readinessScore ?? latestAiCommander?.readinessScore ?? 0);
+  const proofScore = Number(
+    coverageSummary.observedCoveragePercent ??
+      coverageSummary.programmerProofPercent ??
+      mission.coverageSnapshot?.summary?.observedCoveragePercent ??
+      0,
+  );
+  const storageScore =
+    latestStorageStatus?.status === "durable" || storage.dataDirMode === "external-data-dir" || storage.attachmentMode === "cloudflare-r2"
+      ? 100
+      : latestStorageStatus?.status === "needs-attention"
+        ? 58
+        : latestStorageStatus
+          ? 72
+          : 60;
+  const baseScores = [healthScore, aiScore || 60, storageScore];
+  if (missionScore) baseScores.push(missionScore);
+  if (algorithmScore) baseScores.push(algorithmScore);
+  if (proofScore) baseScores.push(proofScore);
+  const score = Math.round(baseScores.reduce((sum, value) => sum + value, 0) / Math.max(1, baseScores.length));
+  const tone = fieldOsScoreTone(score);
+  const subject = fieldOsSubject(context);
+  const algorithmLabel = algorithm.readiness?.label || (algorithmScore ? "Algorithm measured" : "Algorithm pending");
+  const auth = latestAuthStatus?.enabled
+    ? latestAuthStatus.authenticated
+      ? `${latestAuthStatus.role || "session"}`
+      : "locked"
+    : "open";
+  const topAction = latestAiAdvisor?.topAction || mission.actionStack?.[0] || null;
+  const nextMove = topAction
+    ? {
+        label: topAction.label || topAction.title || "Do Next",
+        detail: topAction.detail || topAction.prompt || "Open the next best tool.",
+        target: topAction.target || "ai",
+        prompt: topAction.prompt || "",
+      }
+    : context.activeView === "command"
+      ? { label: "Run Search", detail: "Search a VIN, part, vehicle, keyway, or programmer.", target: "command" }
+      : { label: "AI Audit", detail: `Audit ${subject}.`, target: "ai", prompt: `Run a complete locksmith field audit for ${subject}.` };
+  const warnings = [
+    apiTelemetry.inflight ? `${apiTelemetry.inflight} request${apiTelemetry.inflight === 1 ? "" : "s"} running` : "",
+    apiTelemetry.errors[0]?.message ? `Last issue: ${apiTelemetry.errors[0].message}` : "",
+    algorithm.summary?.highConfidenceWrong ? `${algorithm.summary.highConfidenceWrong} high-confidence algorithm conflict${algorithm.summary.highConfidenceWrong === 1 ? "" : "s"}` : "",
+    latestStorageStatus?.warnings?.[0] || "",
+  ].filter(Boolean);
+  return {
+    score,
+    tone,
+    label: score >= 86 ? "Field-ready OS" : score >= 68 ? "Field OS review" : "Training / repair mode",
+    subject,
+    summary: [
+      `${routeDisplayLabel(context.activeView)} active`,
+      subject && subject !== routeDisplayLabel(context.activeView) ? subject : "",
+      algorithmLabel,
+      latestApiHealth?.status === "ok" ? "server healthy" : latestApiHealth?.error || "server checking",
+    ].filter(Boolean).join(" | "),
+    nextMove,
+    warnings,
+    metrics: [
+      fieldOsMetric("Server", latestApiHealth?.status === "ok" ? "Ready" : apiTelemetry.inflight ? "Busy" : "Watch", apiTelemetryLabel(), latestApiHealth?.status === "ok" ? "ready" : "warn"),
+      fieldOsMetric("AI", `${aiScore || 0}%`, latestAiAdvisor?.headline || latestAiCommander?.headline || "AI memory loading", fieldOsScoreTone(aiScore || 0)),
+      fieldOsMetric("Algorithm", `${algorithmScore || 0}%`, algorithm.readiness?.gate || algorithmLabel, fieldOsScoreTone(algorithmScore || 0)),
+      fieldOsMetric("Proof", `${proofScore || 0}%`, `${coverageSummary.automotiveJobs || 0} automotive jobs`, fieldOsScoreTone(proofScore || 0)),
+      fieldOsMetric("Storage", storageScore >= 90 ? "Safe" : "Check", storage.attachmentMode || storage.dataDirMode || "storage loading", fieldOsScoreTone(storageScore)),
+      fieldOsMetric("Mode", appMode === "owner" ? "Owner" : "Field", auth, appMode === "owner" ? "ready" : "warn"),
+    ],
+    actions: [
+      nextMove,
+      { label: "Workbench", target: "workbench", detail: "Build one job packet." },
+      { label: "AI Audit", target: "ai", prompt: `Run a complete locksmith field audit for ${subject}.`, detail: "Ask the copilot." },
+      appMode === "owner"
+        ? { label: "Mission", target: "mission-control", detail: "Owner health dashboard." }
+        : { label: "Proof", target: "proof-vault", detail: "Open saved evidence." },
+    ].filter(Boolean),
+  };
+}
+
+function renderFieldOsPanel() {
+  if (!fieldOsPanel) return;
+  const snapshot = buildFieldOsSnapshot();
+  fieldOsPanel.className = `field-os-panel ${snapshot.tone}`;
+  fieldOsPanel.innerHTML = `
+    <div class="field-os-hero">
+      <div class="field-os-score">
+        <strong>${escapeHtml(snapshot.score)}</strong>
+        <span>OS</span>
+      </div>
+      <div class="field-os-copy">
+        <p class="eyebrow">TimLock Field OS</p>
+        <h3>${escapeHtml(snapshot.label)}</h3>
+        <p>${escapeHtml(snapshot.summary || "Waiting for app context.")}</p>
+      </div>
+      <div class="field-os-next">
+        <span>Next</span>
+        <strong>${escapeHtml(snapshot.nextMove?.label || "AI Audit")}</strong>
+        <p>${escapeHtml(snapshot.nextMove?.detail || "Open the best next tool.")}</p>
+      </div>
+    </div>
+    <div class="field-os-metrics">
+      ${snapshot.metrics
+        .map(
+          (metric) => `
+            <article class="${escapeHtml(metric.tone)}">
+              <span>${escapeHtml(metric.label)}</span>
+              <strong>${escapeHtml(metric.value)}</strong>
+              <p>${escapeHtml(metric.detail)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+    ${
+      snapshot.warnings.length
+        ? `<div class="field-os-warnings">${snapshot.warnings.slice(0, 3).map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>`
+        : ""
+    }
+    <div class="field-os-actions">
+      ${snapshot.actions
+        .slice(0, 4)
+        .map(
+          (action) => `
+            <button class="secondary-action small" type="button" data-field-os-open="${escapeHtml(action.target || "ai")}" data-field-os-prompt="${escapeHtml(action.prompt || "")}">
+              ${escapeHtml(action.label || "Open")}
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderAiContextChips(context = buildAiClientContext()) {
   const chips = [
     context.screen,
@@ -10104,6 +10316,7 @@ function updateAiContextUi() {
     aiQuickPrompts.innerHTML = prompts.map((prompt) => `<button type="button" data-ai-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`).join("");
   }
   if (aiContextPanel) aiContextPanel.innerHTML = renderAiContextPanel(context);
+  renderFieldOsPanel();
   renderAiCommanderPanel();
   renderAiAdvisorPanel();
   renderAiResponsePanel();
@@ -10261,69 +10474,80 @@ async function api(path, options = {}) {
           ? 25000
           : 12000;
   const requestTimeout = Number(timeoutMs) || defaultTimeout;
+  apiTelemetry.inflight += 1;
+  renderFieldOsPanel();
 
-  for (const [index, url] of urls.entries()) {
-    const attempts = retryOnTimeout && url.startsWith("http") ? 2 : 1;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      try {
-        const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http") && shouldFastFailRelativeApi(path);
-        const attemptTimeout = attempt ? Math.max(requestTimeout, 65000) : requestTimeout;
-        const response = await fetchWithTimeout(url, {
-          headers: { "Content-Type": "application/json", ...headers },
-          ...fetchOptions,
-        }, shouldFastFail ? Math.min(2500, attemptTimeout) : attemptTimeout);
-
-        let payload = null;
+  try {
+    for (const [index, url] of urls.entries()) {
+      const attempts = retryOnTimeout && url.startsWith("http") ? 2 : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const attemptStartedAt = performance.now();
         try {
-          payload = await response.json();
-        } catch {
-          throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
-        }
-        if (!response.ok) {
-          const requestError = new Error(payload.error || `Request failed with ${response.status}`);
-          requestError.code = payload.code || "";
-          requestError.auth = payload.auth || null;
-          requestError.status = response.status;
-          throw requestError;
-        }
-        if (!noStatus && path !== "/api/health" && navigator.onLine !== false) {
-          if (latestApiHealth?.status === "degraded") latestApiHealth = null;
-          updateConnectionStatus();
-        }
-        return payload;
-      } catch (error) {
-        if (error?.auth) {
-          latestAuthStatus = error.auth;
-          renderAuthStatus();
-        }
-        if (["AUTH_REQUIRED", "OWNER_REQUIRED", "BAD_LOGIN", "ROLE_NOT_CONFIGURED"].includes(error?.code)) {
-          throw error;
-        }
-        const message =
-          error?.name === "AbortError"
-            ? `The app server took longer than ${Math.round((attempt ? Math.max(requestTimeout, 65000) : requestTimeout) / 1000)} seconds for ${path}.`
-            : error.message;
-        lastError = new Error(message);
-        if (error?.code) lastError.code = error.code;
-        if (error?.name === "AbortError" && attempt + 1 < attempts) {
-          if (!noStatus && path !== "/api/health") {
-            setAppStatus("Server waking", "busy", "Render is waking the app server. Retrying this request automatically.");
+          const shouldFastFail = index === 0 && urls.length > 1 && !url.startsWith("http") && shouldFastFailRelativeApi(path);
+          const attemptTimeout = attempt ? Math.max(requestTimeout, 65000) : requestTimeout;
+          const response = await fetchWithTimeout(url, {
+            headers: { "Content-Type": "application/json", ...headers },
+            ...fetchOptions,
+          }, shouldFastFail ? Math.min(2500, attemptTimeout) : attemptTimeout);
+
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch {
+            throw new Error(`The app server returned ${response.status || "a non-JSON response"} for ${path}.`);
           }
-          continue;
+          if (!response.ok) {
+            const requestError = new Error(payload.error || `Request failed with ${response.status}`);
+            requestError.code = payload.code || "";
+            requestError.auth = payload.auth || null;
+            requestError.status = response.status;
+            throw requestError;
+          }
+          if (!noStatus && path !== "/api/health") {
+            if (latestApiHealth?.status === "degraded") latestApiHealth = null;
+            updateConnectionStatus();
+          }
+          recordApiTelemetry(path, url, performance.now() - attemptStartedAt, true);
+          return payload;
+        } catch (error) {
+          if (error?.auth) {
+            latestAuthStatus = error.auth;
+            renderAuthStatus();
+          }
+          if (["AUTH_REQUIRED", "OWNER_REQUIRED", "BAD_LOGIN", "ROLE_NOT_CONFIGURED"].includes(error?.code)) {
+            recordApiTelemetry(path, url, performance.now() - attemptStartedAt, false, error.message);
+            throw error;
+          }
+          const message =
+            error?.name === "AbortError"
+              ? `The app server took longer than ${Math.round((attempt ? Math.max(requestTimeout, 65000) : requestTimeout) / 1000)} seconds for ${path}.`
+              : error.message;
+          lastError = new Error(message);
+          if (error?.code) lastError.code = error.code;
+          if (error?.name === "AbortError" && attempt + 1 < attempts) {
+            if (!noStatus && path !== "/api/health") {
+              setAppStatus("Server waking", "busy", "Render is waking the app server. Retrying this request automatically.");
+            }
+            continue;
+          }
+          recordApiTelemetry(path, url, performance.now() - attemptStartedAt, false, message);
+          if (!noStatus && path !== "/api/health") {
+            setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
+          }
+          if (noFallback) throw lastError;
+          if (!url.startsWith("http")) continue;
+          throw lastError;
         }
-        if (!noStatus && path !== "/api/health") {
-          setAppStatus(url.startsWith("http") ? "Server slow" : "Trying cloud server", url.startsWith("http") ? "degraded" : "busy", message);
-        }
-        if (noFallback) throw lastError;
-        if (!url.startsWith("http")) continue;
-        throw lastError;
       }
     }
-  }
 
-  throw new Error(
-    `${lastError?.message || "Request failed"} If this happens only on one device, refresh the page or use the Render Node web-service URL, not a static site URL.`,
-  );
+    throw new Error(
+      `${lastError?.message || "Request failed"} If this happens only on one device, refresh the page or use the Render Node web-service URL, not a static site URL.`,
+    );
+  } finally {
+    apiTelemetry.inflight = Math.max(0, apiTelemetry.inflight - 1);
+    renderFieldOsPanel();
+  }
 }
 
 async function refreshApiHealth({ quiet = false } = {}) {
@@ -10673,6 +10897,19 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const fieldOsButton = event.target.closest("[data-field-os-open]");
+  if (fieldOsButton) {
+    const target = fieldOsButton.dataset.fieldOsOpen || "ai";
+    const prompt = cleanInput(fieldOsButton.dataset.fieldOsPrompt || "");
+    if (target && target !== "ai") {
+      showView(target);
+      return;
+    }
+    showView("ai");
+    if (prompt) askAi(prompt, { open: false });
+    return;
+  }
+
   const codeDeskLearnButton = event.target.closest("[data-code-desk-learn]");
   if (codeDeskLearnButton) {
     learnCodeDeskOutcome(codeDeskLearnButton.dataset.codeDeskLearn, codeDeskLearnButton);
