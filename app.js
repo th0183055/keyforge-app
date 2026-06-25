@@ -299,6 +299,10 @@ const routeMeta = {
     eyebrow: "Parts setup",
     title: "Connect suppliers and app data sources.",
   },
+  launch: {
+    eyebrow: "Sell TimLock",
+    title: "Launch TimLock Field OS as a paid locksmith product.",
+  },
   about: {
     eyebrow: "TimLock-App",
     title: "Professional locksmith intelligence, built around verified work.",
@@ -395,6 +399,30 @@ function goBackInApp() {
   }
   showView("command", { push: false });
   replaceRouteHash("command");
+}
+
+function configuredLaunchUrl(plan) {
+  const storageKey = plan === "shop" ? "timlockStripeShopUrl" : "timlockStripeFoundingUrl";
+  try {
+    const url = cleanInput(window.localStorage?.getItem(storageKey) || "");
+    return /^https?:\/\//i.test(url) ? url : "";
+  } catch {
+    return "";
+  }
+}
+
+function handleLaunchCta(plan) {
+  const label = plan === "shop" ? "Shop Pro" : "Founding Locksmith";
+  const status = document.querySelector("#launchStatus");
+  const url = configuredLaunchUrl(plan);
+  if (url) {
+    window.open(url, "_blank", "noopener");
+    if (status) status.textContent = `${label} payment link opened.`;
+    return;
+  }
+  const message = `Stripe Payment Link for ${label} is not configured yet. Add timlockStripe${plan === "shop" ? "Shop" : "Founding"}Url to local storage or wire this button to your Stripe link before public launch.`;
+  if (status) status.textContent = message;
+  setAppStatus("Stripe slot ready", "degraded", message);
 }
 
 function setMobileMenu(open) {
@@ -10897,6 +10925,12 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const launchCtaButton = event.target.closest("[data-launch-cta]");
+  if (launchCtaButton) {
+    handleLaunchCta(launchCtaButton.dataset.launchCta);
+    return;
+  }
+
   const fieldOsButton = event.target.closest("[data-field-os-open]");
   if (fieldOsButton) {
     const target = fieldOsButton.dataset.fieldOsOpen || "ai";
