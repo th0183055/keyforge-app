@@ -75,6 +75,25 @@ const supplierRegistry = [
   },
 ];
 
+const metkaBridgeEmpty = {
+  version: 1,
+  importedAt: "",
+  source: "",
+  sheetStats: [],
+  sheets: {},
+  normalized: {
+    jobs: [],
+    inventory: [],
+    parts: [],
+    quotes: [],
+    costs: [],
+    programmers: [],
+    services: [],
+    pricing: [],
+    locations: [],
+  },
+};
+
 function supplierDefaults(definition) {
   return {
     id: definition.id,
@@ -109,6 +128,7 @@ const emptyStore = {
   auditLog: [],
   aiFeedback: [],
   shopRules: [],
+  metkaBridge: metkaBridgeEmpty,
   codeDeskRecords: [],
   codeDeskSystems: [],
   codeDeskLessons: [],
@@ -141,6 +161,7 @@ function normalizeStore(store = {}) {
     inventoryItems: Array.isArray(store.inventoryItems) ? store.inventoryItems : [],
     inventoryLedger: Array.isArray(store.inventoryLedger) ? store.inventoryLedger : [],
     inventoryLocations: Array.isArray(store.inventoryLocations) ? store.inventoryLocations : [],
+    metkaBridge: normalizeMetkaBridgeStore(store.metkaBridge),
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
     codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
@@ -1608,6 +1629,10 @@ async function buildStorageStatus() {
 
   const counts = {
     jobs: store.jobs.length,
+    fieldJobs: storeFieldJobs(store).length,
+    metkaWorkLogJobs: metkaBridgeCounts(store.metkaBridge).workLogJobs,
+    metkaInventoryRows: metkaBridgeCounts(store.metkaBridge).inventoryRows,
+    metkaPartMaps: metkaBridgeCounts(store.metkaBridge).partMaps,
     vehicles: store.vehicles.length,
     auditLog: store.auditLog.length,
     aiFeedback: store.aiFeedback.length,
@@ -1967,7 +1992,7 @@ function buildMissionIntelligenceAudit({ jobs = [], partsReference = {}, proofAt
 }
 
 async function buildMissionControl(body = {}, store = { jobs: [] }) {
-  const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const jobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
   const [
     health,
     storage,
@@ -2631,7 +2656,7 @@ function buildTrainingAlgorithmLab(rows = [], clusterConflicts = [], store = {})
 }
 
 async function buildTrainingCenter(body = {}, store = { jobs: [] }) {
-  const jobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const jobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
   const index = buildJobEvidenceIndex(jobs, partsReference);
   const rows = index.records
@@ -3324,7 +3349,7 @@ function mergeSyncedJobs(store, incomingJobs = []) {
   let imported = 0;
   let updated = 0;
 
-  for (const raw of incomingJobs.slice(0, 1000)) {
+  for (const raw of incomingJobs.slice(0, 10000)) {
     const job = cleanSyncedJob(raw);
     if (!job) continue;
     const existingJob = existing.get(job.id);
@@ -3867,6 +3892,465 @@ async function importWorkedJobsFromText(text, store) {
 
 function cleanString(value) {
   return String(value ?? "").trim();
+}
+
+function metkaBridgeCloneEmpty() {
+  return JSON.parse(JSON.stringify(metkaBridgeEmpty));
+}
+
+function normalizeMetkaBridgeStore(bridge = {}) {
+  const empty = metkaBridgeCloneEmpty();
+  if (!bridge || typeof bridge !== "object") return empty;
+  const normalized = bridge.normalized && typeof bridge.normalized === "object" ? bridge.normalized : {};
+  return {
+    ...empty,
+    ...bridge,
+    sheetStats: Array.isArray(bridge.sheetStats) ? bridge.sheetStats : [],
+    sheets: bridge.sheets && typeof bridge.sheets === "object" ? bridge.sheets : {},
+    normalized: {
+      ...empty.normalized,
+      ...normalized,
+      jobs: Array.isArray(normalized.jobs) ? normalized.jobs : [],
+      inventory: Array.isArray(normalized.inventory) ? normalized.inventory : [],
+      parts: Array.isArray(normalized.parts) ? normalized.parts : [],
+      quotes: Array.isArray(normalized.quotes) ? normalized.quotes : [],
+      costs: Array.isArray(normalized.costs) ? normalized.costs : [],
+      programmers: Array.isArray(normalized.programmers) ? normalized.programmers : [],
+      services: Array.isArray(normalized.services) ? normalized.services : [],
+      pricing: Array.isArray(normalized.pricing) ? normalized.pricing : [],
+      locations: Array.isArray(normalized.locations) ? normalized.locations : [],
+    },
+  };
+}
+
+const metkaCanonicalSheetNames = [
+  "WorkLog",
+  "QuotesLog",
+  "InventoryLedger",
+  "CostHistory",
+  "ProductAliasLog",
+  "wkst",
+  "Log",
+  "tbl_Products",
+  "PartReference",
+  "Programmers",
+  "ServiceSKUs",
+  "PricingMatrix",
+  "tbl_Locations",
+  "InvLoc",
+  "CmRsLog",
+  "CmRsServices",
+  "AddOnCharges",
+  "Manufacturers",
+  "KeyConfigs",
+  "ButtonFeatures",
+  "ButtonMaps",
+];
+
+function metkaSheetKey(value) {
+  return cleanString(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function metkaCanonicalSheetName(name) {
+  const key = metkaSheetKey(name);
+  return metkaCanonicalSheetNames.find((sheet) => metkaSheetKey(sheet) === key) || cleanString(name);
+}
+
+function metkaHeaderKey(value) {
+  return cleanString(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function metkaCleanCell(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return value.map(cleanString).filter(Boolean).join(", ");
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return cleanString(value);
+}
+
+function metkaCleanRow(row = {}) {
+  if (!row || typeof row !== "object") return null;
+  const entries = Object.entries(row)
+    .map(([key, value]) => [cleanString(key), metkaCleanCell(value)])
+    .filter(([key, value]) => key && value !== "");
+  if (!entries.length) return null;
+  return Object.fromEntries(entries);
+}
+
+function metkaRowsFromPayload(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    if (!value.length) return [];
+    if (Array.isArray(value[0])) {
+      const headers = value[0].map(cleanString);
+      return value
+        .slice(1)
+        .map((row) => metkaCleanRow(Object.fromEntries(headers.map((header, index) => [header || `Column ${index + 1}`, row?.[index]]))))
+        .filter(Boolean);
+    }
+    return value.map(metkaCleanRow).filter(Boolean);
+  }
+  if (value && typeof value === "object") {
+    const rows = Array.isArray(value.rows) ? value.rows : Array.isArray(value.values) ? value.values : [];
+    if (!rows.length) return [];
+    if (Array.isArray(rows[0])) {
+      const headers = (Array.isArray(value.headers) ? value.headers : rows[0]).map(cleanString);
+      const bodyRows = Array.isArray(value.headers) ? rows : rows.slice(1);
+      return bodyRows
+        .map((row) => metkaCleanRow(Object.fromEntries(headers.map((header, index) => [header || `Column ${index + 1}`, row?.[index]]))))
+        .filter(Boolean);
+    }
+    return rows.map(metkaCleanRow).filter(Boolean);
+  }
+  return [];
+}
+
+function metkaSheetInputsFromPayload(payload = {}) {
+  const root = payload.sheets || payload.tables || payload.data || payload;
+  const sheets = {};
+  if (!root || typeof root !== "object") return sheets;
+  for (const [rawName, value] of Object.entries(root)) {
+    const canonical = metkaCanonicalSheetName(rawName);
+    if (!canonical || ["SHEETS", "TABLES", "DATA", "SOURCE", "EXPORTEDAT", "GENERATEDAT"].includes(metkaSheetKey(canonical))) continue;
+    const rows = metkaRowsFromPayload(value);
+    if (rows.length || metkaCanonicalSheetNames.includes(canonical)) sheets[canonical] = rows.slice(0, 10000);
+  }
+  return sheets;
+}
+
+function metkaValue(row = {}, names = []) {
+  const normalized = new Map(Object.entries(row || {}).map(([key, value]) => [metkaHeaderKey(key), value]));
+  for (const name of names) {
+    const value = normalized.get(metkaHeaderKey(name));
+    if (value !== undefined && value !== null && cleanString(value) !== "") return metkaCleanCell(value);
+  }
+  return "";
+}
+
+function metkaSplitValues(value) {
+  return cleanString(value)
+    .split(/\n|,|;|\||\s+\/\s+/)
+    .map(cleanString)
+    .filter(Boolean);
+}
+
+function metkaNumber(value) {
+  const numeric = Number(cleanString(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function metkaStableId(prefix, values = []) {
+  const hash = createHash("sha1").update(JSON.stringify(values.map(cleanString))).digest("hex").slice(0, 12);
+  return `${prefix}-${hash}`;
+}
+
+function metkaPartRecord(row = {}, sourceTable = "", index = 0) {
+  const mlPn = metkaValue(row, ["ML_PN", "ML P/N", "Metro Part Number", "PartNumber", "PartNum"]);
+  const lrId = metkaValue(row, ["LR_ID", "LR#", "GSI P/N", "GSI PN", "SourceSKU", "Source SKU"]);
+  const mwId = metkaValue(row, ["MW_ID", "MW P/N / KI_SKU", "MW P/N", "MW PN", "MW Part Number"]);
+  const kiPartNumber = metkaValue(row, ["KI P/N", "KI_PN", "KI PN", "KI_SKU"]);
+  const tiPartNumber = metkaValue(row, ["TI P/N", "TI_PN", "TI PN"]);
+  const oeRaw = metkaValue(row, ["OE_PN", "OE PN", "OEM", "OEM Part", "OEM Part Number", "GSI_Primary OE#", "GSI_PRIMARY OE#", "GSI Primary OE#", "GSI Primary OE"]);
+  const aliasRaw = metkaValue(row, ["ALIASES", "VALUES", "Alias", "AliasList", "ItemNumber", "OriginalSKU", "FCC"]);
+  const oemPartNumbers = uniqueCleanValues([metkaSplitValues(oeRaw)]).slice(0, 20);
+  const aliases = uniqueCleanValues([metkaSplitValues(aliasRaw), kiPartNumber, tiPartNumber, lrId, mwId]).slice(0, 30);
+  const identifiers = uniqueCleanValues([mlPn, lrId, mwId, kiPartNumber, tiPartNumber, oemPartNumbers, aliases]).slice(0, 40);
+  if (!identifiers.length) return null;
+  return {
+    id: metkaStableId("metka-part", [sourceTable, index, identifiers]),
+    type: "Metka part map",
+    sourceTable,
+    mlPn,
+    lrId,
+    mwId,
+    kiPartNumber,
+    tiPartNumber,
+    oemPartNumbers,
+    aliases,
+    identifiers,
+  };
+}
+
+function buildMetkaAliasMap(parts = []) {
+  const map = new Map();
+  for (const part of parts) {
+    const canonical = cleanString(part.mlPn || part.lrId || part.mwId || part.identifiers?.[0]);
+    if (!canonical) continue;
+    for (const value of uniqueCleanValues([part.identifiers || [], part.aliases || [], part.oemPartNumbers || []])) {
+      const token = compactToken(value);
+      if (token) map.set(token, canonical);
+    }
+  }
+  return map;
+}
+
+function metkaResolveSku(value, aliasMap = new Map()) {
+  const text = cleanString(value);
+  if (!text) return "";
+  return aliasMap.get(compactToken(text)) || text;
+}
+
+function buildMetkaParts(sheets = {}) {
+  return [
+    ...(sheets.ProductAliasLog || []).map((row, index) => metkaPartRecord(row, "ProductAliasLog", index)),
+    ...(sheets.PartReference || []).map((row, index) => metkaPartRecord(row, "PartReference", index)),
+    ...(sheets.wkst || []).map((row, index) => metkaPartRecord(row, "wkst", index)),
+    ...(sheets.tbl_Products || []).map((row, index) => metkaPartRecord(row, "tbl_Products", index)),
+    ...(sheets.Log || []).map((row, index) => metkaPartRecord(row, "Log", index)),
+  ].filter(Boolean);
+}
+
+function buildMetkaInventory(sheets = {}, parts = []) {
+  const aliasMap = buildMetkaAliasMap(parts);
+  const rows = sheets.InventoryLedger || [];
+  const inventory = new Map();
+  rows.forEach((row, index) => {
+    const rawPart = metkaValue(row, ["ML_PN", "PartNumber", "PartNum", "OriginalSKU", "SKU", "ItemNumber"]);
+    const originalSku = metkaValue(row, ["OriginalSKU", "Original SKU", "SKU", "ItemNumber"]) || rawPart;
+    const mlPn = metkaResolveSku(rawPart, aliasMap);
+    if (!mlPn) return;
+    const location = metkaValue(row, ["Location", "TargetLocation", "FieldServiceLoc", "Truck", "Bin"]) || "Unassigned";
+    const quantity = metkaNumber(metkaValue(row, ["Quantity", "Qty", "CurrentStock", "Stock"])) ?? 0;
+    const transactionType = metkaValue(row, ["TransactionType", "Type", "Reason"]);
+    const key = `${compactToken(mlPn)}|${normalizeVehicleText(location)}`;
+    const existing = inventory.get(key) || {
+      id: metkaStableId("metka-stock", [mlPn, location]),
+      type: "Metka stock",
+      sourceTable: "InventoryLedger",
+      mlPn,
+      partNumber: mlPn,
+      originalSku,
+      identifiers: uniqueCleanValues([mlPn, rawPart, originalSku]),
+      location,
+      quantity: 0,
+      transactionCount: 0,
+      lastTransaction: "",
+      transactions: [],
+    };
+    existing.quantity += quantity;
+    existing.transactionCount += 1;
+    existing.lastTransaction = metkaValue(row, ["Timestamp", "Date", "PurchaseDate"]) || existing.lastTransaction;
+    if (existing.transactions.length < 6) {
+      existing.transactions.push({
+        index,
+        quantity,
+        transactionType,
+        timestamp: metkaValue(row, ["Timestamp", "Date", "PurchaseDate"]),
+        notes: metkaValue(row, ["Notes", "Description"]),
+      });
+    }
+    inventory.set(key, existing);
+  });
+  return Array.from(inventory.values())
+    .map((item) => ({
+      ...item,
+      currentStock: item.quantity,
+      status: item.quantity > 0 ? "in-stock" : item.quantity < 0 ? "negative" : "empty",
+    }))
+    .sort((a, b) => compactToken(a.mlPn).localeCompare(compactToken(b.mlPn)) || a.location.localeCompare(b.location));
+}
+
+function metkaWorkLogJob(row = {}, index = 0) {
+  const year = metkaValue(row, ["Year", "ModelYear"]);
+  const make = metkaValue(row, ["Make", "Manufacturer"]);
+  const model = metkaValue(row, ["Model"]);
+  const vin = normalizeVinCandidate(metkaValue(row, ["VIN", "Vin"]));
+  const partNumber = metkaValue(row, ["PartNumber", "PartNum", "Part", "ML_PN", "OE_PN", "ItemNumber"]);
+  const programmer = metkaValue(row, ["Programmer", "ProgrammerUsed", "Tool"]);
+  const service = metkaValue(row, ["ServiceType", "Service", "ServiceID"]);
+  const title = metkaValue(row, ["JobEventTitle", "Title", "EventTitle"]) || uniqueCleanValues([service, year, make, model]).join(" ");
+  const timestamp = metkaValue(row, ["Timestamp", "Date", "CreatedAt"]);
+  const vehicle = uniqueCleanValues([year, make, model]).join(" ");
+  if (!vehicle && !vin && !partNumber && !title) return null;
+  const pinSuccess = metkaValue(row, ["PinSuccess", "Outcome", "Status"]);
+  const outcomeWorked = /TRUE|YES|SUCCESS|WORKED|DONE|COMPLETE/i.test(pinSuccess || title || service);
+  return {
+    id: metkaStableId("metka-job", [index, timestamp, vin, vehicle, partNumber, programmer, title]),
+    source: "Metka WorkLog",
+    title: title || vehicle || partNumber || "Metka work log",
+    createdAt: timestamp || new Date().toISOString(),
+    schedule: timestamp,
+    year,
+    make,
+    model,
+    vehicle,
+    vin,
+    service,
+    programmer,
+    sequence: partNumber,
+    partNumber,
+    status: outcomeWorked ? "worked" : "saved",
+    notes: uniqueCleanValues([
+      metkaValue(row, ["Notes", "AddNotes"]),
+      metkaValue(row, ["Technician", "UserEmail"]),
+      "Imported from Metka bridge",
+    ]),
+    tags: uniqueCleanValues(["metka-bridge", "worklog", service]),
+  };
+}
+
+function metkaQuoteRecord(row = {}, index = 0) {
+  const year = metkaValue(row, ["Year"]);
+  const make = metkaValue(row, ["Make"]);
+  const model = metkaValue(row, ["Model"]);
+  const partNumber = metkaValue(row, ["OE_PN", "ItemNumber", "PartNumber", "ML_PN"]);
+  const service = metkaValue(row, ["ServiceType", "ServiceID", "Category"]);
+  if (!year && !make && !model && !partNumber && !service) return null;
+  return {
+    id: metkaStableId("metka-quote", [index, metkaValue(row, ["Timestamp"]), year, make, model, partNumber, service]),
+    type: "Metka quote demand",
+    sourceTable: "QuotesLog",
+    timestamp: metkaValue(row, ["Timestamp"]),
+    vehicle: uniqueCleanValues([year, make, model]).join(" "),
+    year,
+    make,
+    model,
+    partNumber,
+    service,
+    fcc: metkaValue(row, ["FCC"]),
+    mhz: metkaValue(row, ["MHz"]),
+    cost: metkaValue(row, ["Cost"]),
+    ticketPrice: metkaValue(row, ["TicketPrice"]),
+  };
+}
+
+function metkaCostRecord(row = {}, index = 0) {
+  const mlPn = metkaValue(row, ["ML_PN", "PartNumber", "PartNum"]);
+  if (!mlPn) return null;
+  return {
+    id: metkaStableId("metka-cost", [index, mlPn, metkaValue(row, ["Supplier"]), metkaValue(row, ["UnitCost"])]),
+    type: "Metka cost",
+    sourceTable: "CostHistory",
+    mlPn,
+    supplier: metkaValue(row, ["Supplier", "SRC_ID", "Source"]),
+    description: metkaValue(row, ["Description"]),
+    qty: metkaNumber(metkaValue(row, ["Qty", "Quantity"])),
+    unitCost: metkaNumber(metkaValue(row, ["UnitCost", "Cost"])),
+    purchaseDate: metkaValue(row, ["PurchaseDate", "Timestamp", "Date"]),
+    orderNumber: metkaValue(row, ["OrderNumber"]),
+  };
+}
+
+function metkaSimpleRow(row = {}, sourceTable = "", index = 0, titleFields = []) {
+  const title = uniqueCleanValues(titleFields.map((field) => metkaValue(row, [field]))).join(" ") || metkaValue(row, ["Name", "name", "SKU", "sku", "Code", "code"]) || `Row ${index + 1}`;
+  return {
+    id: metkaStableId(`metka-${slug(sourceTable) || "row"}`, [sourceTable, index, title, row]),
+    type: `Metka ${sourceTable}`,
+    sourceTable,
+    title,
+    ...row,
+  };
+}
+
+function buildMetkaNormalizedTables(sheets = {}) {
+  const parts = buildMetkaParts(sheets);
+  return {
+    jobs: (sheets.WorkLog || []).map(metkaWorkLogJob).filter(Boolean).slice(0, 10000),
+    inventory: buildMetkaInventory(sheets, parts).slice(0, 10000),
+    parts: parts.slice(0, 10000),
+    quotes: (sheets.QuotesLog || []).map(metkaQuoteRecord).filter(Boolean).slice(0, 10000),
+    costs: (sheets.CostHistory || []).map(metkaCostRecord).filter(Boolean).slice(0, 10000),
+    programmers: (sheets.Programmers || []).map((row, index) => metkaSimpleRow(row, "Programmers", index, ["name", "Name", "Programmer"])).slice(0, 5000),
+    services: [...(sheets.ServiceSKUs || []), ...(sheets.CmRsServices || [])].map((row, index) => metkaSimpleRow(row, "ServiceSKUs", index, ["sku", "service", "desc"])).slice(0, 5000),
+    pricing: [...(sheets.PricingMatrix || []), ...(sheets.AddOnCharges || [])].map((row, index) => metkaSimpleRow(row, "PricingMatrix", index, ["title", "sku", "service"])).slice(0, 5000),
+    locations: [...(sheets.tbl_Locations || []), ...(sheets.InvLoc || [])].map((row, index) => metkaSimpleRow(row, "Locations", index, ["Location", "LocationName", "name"])).slice(0, 5000),
+  };
+}
+
+function normalizeMetkaBridgePayload(payload = {}) {
+  const body = typeof payload.text === "string" && payload.text.trim() ? JSON.parse(payload.text) : payload;
+  const sheets = metkaSheetInputsFromPayload(body);
+  const normalized = buildMetkaNormalizedTables(sheets);
+  return normalizeMetkaBridgeStore({
+    version: 1,
+    importedAt: new Date().toISOString(),
+    source: cleanString(body.source || body.name || body.workbookName || "Metka export"),
+    sheetStats: Object.entries(sheets).map(([sheet, rows]) => ({
+      sheet,
+      rows: rows.length,
+      columns: uniqueCleanValues(rows.flatMap((row) => Object.keys(row))).length,
+    })),
+    sheets,
+    normalized,
+  });
+}
+
+function metkaBridgeCounts(bridge = {}) {
+  const safe = normalizeMetkaBridgeStore(bridge);
+  return {
+    sheets: safe.sheetStats.filter((item) => item.rows > 0).length,
+    workLogJobs: safe.normalized.jobs.length,
+    inventoryRows: safe.normalized.inventory.length,
+    partMaps: safe.normalized.parts.length,
+    quoteRows: safe.normalized.quotes.length,
+    costRows: safe.normalized.costs.length,
+    programmers: safe.normalized.programmers.length,
+    serviceSkus: safe.normalized.services.length,
+    pricingRows: safe.normalized.pricing.length,
+    locations: safe.normalized.locations.length,
+  };
+}
+
+function buildMetkaBridgeStatus(store = {}) {
+  const bridge = normalizeMetkaBridgeStore(store.metkaBridge);
+  const counts = metkaBridgeCounts(bridge);
+  return {
+    generatedAt: new Date().toISOString(),
+    importedAt: bridge.importedAt || "",
+    source: bridge.source || "",
+    connected: Object.values(counts).some((count) => Number(count) > 0),
+    counts,
+    sheetStats: bridge.sheetStats,
+    samples: {
+      jobs: bridge.normalized.jobs.slice(0, 8),
+      inventory: bridge.normalized.inventory.slice(0, 12),
+      parts: bridge.normalized.parts.slice(0, 12),
+      quotes: bridge.normalized.quotes.slice(0, 8),
+      costs: bridge.normalized.costs.slice(0, 8),
+      programmers: bridge.normalized.programmers.slice(0, 8),
+    },
+    sellableUse:
+      "Metka stays owner-side as the operational data bridge. Subscriber screens use its work logs, stock, aliases, and programmer/service data to produce one field-ready answer.",
+    importShape: {
+      sheets: {
+        WorkLog: ["Timestamp", "Year", "Make", "Model", "PartNumber", "Programmer", "ServiceType", "VIN"],
+        InventoryLedger: ["Timestamp", "ML_PN", "TransactionType", "Quantity", "Location", "OriginalSKU"],
+        ProductAliasLog: ["ML_PN", "LR_ID", "MW_ID", "TI P/N", "ALIASES"],
+        wkst: ["ML P/N", "GSI P/N", "MW P/N / KI_SKU", "KI P/N", "TI P/N", "GSI_Primary OE#"],
+      },
+    },
+  };
+}
+
+function metkaNormalizedRows(storeOrBridge = {}, key = "") {
+  const bridge = storeOrBridge.metkaBridge ? normalizeMetkaBridgeStore(storeOrBridge.metkaBridge) : normalizeMetkaBridgeStore(storeOrBridge);
+  return Array.isArray(bridge.normalized?.[key]) ? bridge.normalized[key] : [];
+}
+
+function metkaBridgeJobs(store = {}) {
+  return metkaNormalizedRows(store, "jobs");
+}
+
+function storeFieldJobs(store = {}, extraJobs = []) {
+  return mergedSearchJobs([...(store.jobs || []), ...metkaBridgeJobs(store)], extraJobs);
+}
+
+function metkaQueryTokens(values = []) {
+  const raw = uniqueCleanValues(values).join(" ");
+  const words = normalizeVehicleText(raw).split(/\s+/).filter((token) => token.length >= 4);
+  const compact = uniqueCleanValues(values).flatMap(partReferenceTokenVariants).filter((token) => token.length >= 4);
+  return uniqueCleanValues([words, compact]).slice(0, 24);
+}
+
+function metkaRowsMatching(rows = [], values = [], limit = 30) {
+  const tokens = metkaQueryTokens(values);
+  if (!tokens.length) return [];
+  return rows
+    .filter((row) => {
+      const text = normalizeVehicleText(JSON.stringify(row));
+      const compact = compactToken(JSON.stringify(row));
+      return tokens.some((token) => text.includes(normalizeVehicleText(token)) || compact.includes(compactToken(token)));
+    })
+    .slice(0, limit);
 }
 
 function listFromText(value) {
@@ -6630,10 +7114,12 @@ function buildCoverageDashboard(jobs = [], partsReference = {}) {
 }
 
 function fieldLoadoutInventoryRows(store = {}) {
+  const metkaInventory = metkaNormalizedRows(store, "inventory");
   const sources = [
     ["Inventory items", store.inventoryItems],
     ["Inventory ledger", store.inventoryLedger],
     ["Inventory locations", store.inventoryLocations],
+    ["Metka field stock", metkaInventory],
     ["Metka inventory", store.metkaInventory],
     ["Inventory", store.inventory],
   ];
@@ -6920,7 +7406,7 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   const query = cleanString(body.q || body.query || body.loadoutQuery || body.partQuery || body.proofQuery || "");
   const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
   const vin = normalizeVinCandidate(body.vin) || normalizeVinCandidate(query) || normalizeVinCandidate(profile.vin);
-  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const cleanJobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
   const evidenceIndex = buildJobEvidenceIndex(cleanJobs, partsReference);
   const vehicle = inferFieldLoadoutVehicle({ query, vin, profile, body, jobs: cleanJobs });
@@ -6944,6 +7430,44 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   const lishiCandidates = new Map();
   const supplyCandidates = new Map();
   const proofCandidates = new Map();
+  const metkaParts = metkaRowsMatching(metkaNormalizedRows(store, "parts"), [query, partQuery, vin, title], 30);
+  const metkaInventoryMatches = metkaRowsMatching(metkaNormalizedRows(store, "inventory"), [query, partQuery, vin, title], 30);
+  const metkaQuotes = metkaRowsMatching(metkaNormalizedRows(store, "quotes"), [query, title, vehicle.year, vehicle.make, vehicle.model], 20);
+  const metkaCosts = metkaRowsMatching(metkaNormalizedRows(store, "costs"), [query, partQuery, metkaParts.flatMap((row) => row.identifiers || [])], 20);
+
+  metkaParts.slice(0, 12).forEach((part, index) => {
+    addFieldLoadoutCandidate(partCandidates, {
+      value: part.mlPn || part.lrId || part.mwId || part.identifiers?.[0],
+      label: part.mlPn || part.lrId || part.mwId || part.identifiers?.[0],
+      score: 82 - index * 2 + Math.min(metkaInventoryMatches.length * 3, 8),
+      proofJobs: 0,
+      source: "Metka part bridge",
+      identifiers: part.identifiers || [],
+      oemSources: part.oemPartNumbers || [],
+      evidence: uniqueCleanValues([
+        part.sourceTable,
+        part.lrId ? `LR ${part.lrId}` : "",
+        part.mwId ? `MW ${part.mwId}` : "",
+        part.tiPartNumber ? `TI ${part.tiPartNumber}` : "",
+      ]),
+    }, partsReference, store);
+  });
+
+  metkaInventoryMatches.slice(0, 10).forEach((item, index) => {
+    addFieldLoadoutCandidate(partCandidates, {
+      value: item.mlPn || item.partNumber || item.originalSku,
+      label: item.mlPn || item.partNumber || item.originalSku,
+      score: Math.min(92, 78 + (Number(item.quantity || 0) > 0 ? 8 : 0) - index),
+      proofJobs: 0,
+      source: "Metka inventory",
+      identifiers: [item.mlPn, item.partNumber, item.originalSku],
+      evidence: uniqueCleanValues([
+        item.location ? `${item.location}: ${item.quantity}` : "",
+        item.status,
+        `${item.transactionCount || 0} ledger row${item.transactionCount === 1 ? "" : "s"}`,
+      ]),
+    }, partsReference, store);
+  });
 
   (partHistory?.crossReferences || []).slice(0, 8).forEach((reference, index) => {
     addFieldLoadoutCandidate(partCandidates, {
@@ -7002,6 +7526,9 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
     proofPatterns.best?.programmers?.map((item) => item.value),
     shopEvidence.programmers || [],
     (partHistory?.programmerEvidence?.programmers || []).map((item) => item.name),
+    metkaBridgeJobs(store)
+      .filter((job) => metkaRowsMatching([job], [query, vin, title], 1).length)
+      .map((job) => job.programmer),
   ]).slice(0, 8).forEach((programmer, index) => {
     const proofCount = (proofPatterns.best?.programmers || []).find((item) => item.value === programmer)?.count || (partHistory?.programmerEvidence?.programmers || []).find((item) => item.name === programmer)?.jobs || 0;
     addFieldLoadoutCandidate(programmerCandidates, {
@@ -7090,6 +7617,9 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
       relatedProof,
       partCandidates: partList.length,
       inventoryRows: fieldLoadoutInventoryRows(store).length,
+      metkaParts: metkaParts.length,
+      metkaInventoryMatches: metkaInventoryMatches.length,
+      metkaQuoteDemand: metkaQuotes.length,
       lishiCandidates: lishiList.length,
       serviceFamily,
     },
@@ -7107,6 +7637,13 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
       note: fieldLoadoutInventoryRows(store).length
         ? "Inventory rows are matched by part aliases and normalized identifiers."
         : "Inventory import is not connected yet, so stock status is proof-based only.",
+      metka: {
+        connected: metkaBridgeCounts(store.metkaBridge).inventoryRows > 0,
+        matchedInventoryRows: metkaInventoryMatches.length,
+        matchedPartRows: metkaParts.length,
+        matchedCostRows: metkaCosts.length,
+        matchedQuoteRows: metkaQuotes.length,
+      },
     },
   };
 }
@@ -8077,7 +8614,7 @@ async function buildAutoCodeBaseline(options = {}) {
     readJsonCached(vpicCatalogPath, { rows: [] }),
     readStore().catch(() => ({ jobs: [] })),
   ]);
-  const jobVehicleCounts = autoJobVehicleCounts(store.jobs || []);
+  const jobVehicleCounts = autoJobVehicleCounts(storeFieldJobs(store));
   const vpicMap = new Map(
     (vpic.rows || []).map((row) => [`${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`, row]),
   );
@@ -8227,6 +8764,16 @@ function referenceListSources() {
     { id: "key-innovations", label: "Key Innovations labels", note: "Imported supplier label/SKU extraction." },
     { id: "reference-vault", label: "Reference Vault", note: "Owner-created vehicle/keyway/programmer notes." },
     { id: "jobs", label: "Saved jobs", note: "Server saved and imported worked-job records." },
+    { id: "field-jobs", label: "Field jobs", note: "Saved jobs plus Metka WorkLog jobs used by subscriber decisions." },
+    { id: "metka-parts", label: "Metka part bridge", note: "ProductAliasLog, wkst, PartReference, Log, and tbl_Products normalized into field aliases." },
+    { id: "metka-inventory", label: "Metka inventory", note: "InventoryLedger rolled up by master part and location." },
+    { id: "metka-worklog", label: "Metka WorkLog", note: "WorkLog rows normalized into proof jobs." },
+    { id: "metka-quotes", label: "Metka quote demand", note: "QuotesLog demand clues for vehicles, services, FCC, and part interest." },
+    { id: "metka-costs", label: "Metka costs", note: "CostHistory rows for owner-side cost awareness." },
+    { id: "metka-programmers", label: "Metka programmers", note: "Programmer reference rows from the operational workbook." },
+    { id: "metka-services", label: "Metka services", note: "Service SKU and commercial/residential service rows." },
+    { id: "metka-pricing", label: "Metka pricing", note: "Pricing matrix and add-on rows for owner reference." },
+    { id: "metka-locations", label: "Metka locations", note: "Inventory location rows for owner audit." },
     { id: "vehicle-profiles", label: "Vehicle profiles", note: "Shop-confirmed per-vehicle profile upgrades." },
     { id: "public-sources", label: "Public sources", note: "Synced public reference source summaries." },
   ];
@@ -8292,6 +8839,37 @@ async function buildReferenceList(options = {}, store = { jobs: [] }) {
   } else if (source === "jobs") {
     rows = store.jobs || [];
     sourceNote = "Server saved jobs and imported worked jobs.";
+  } else if (source === "field-jobs") {
+    rows = storeFieldJobs(store);
+    const counts = metkaBridgeCounts(store.metkaBridge);
+    sourceNote = `${store.jobs?.length || 0} saved jobs + ${counts.workLogJobs} Metka WorkLog jobs.`;
+  } else if (source === "metka-parts") {
+    rows = metkaNormalizedRows(store, "parts");
+    sourceNote = "Owner-side Metka part bridge rows powering alias and field-kit decisions.";
+  } else if (source === "metka-inventory") {
+    rows = metkaNormalizedRows(store, "inventory");
+    sourceNote = "Owner-side Metka InventoryLedger rows rolled up by part and location.";
+  } else if (source === "metka-worklog") {
+    rows = metkaNormalizedRows(store, "jobs");
+    sourceNote = "Metka WorkLog rows normalized into the shop-truth layer.";
+  } else if (source === "metka-quotes") {
+    rows = metkaNormalizedRows(store, "quotes");
+    sourceNote = "Metka QuotesLog demand clues.";
+  } else if (source === "metka-costs") {
+    rows = metkaNormalizedRows(store, "costs");
+    sourceNote = "Metka CostHistory rows. Visible only to owner tools.";
+  } else if (source === "metka-programmers") {
+    rows = metkaNormalizedRows(store, "programmers");
+    sourceNote = "Metka programmer rows.";
+  } else if (source === "metka-services") {
+    rows = metkaNormalizedRows(store, "services");
+    sourceNote = "Metka service SKU and service reference rows.";
+  } else if (source === "metka-pricing") {
+    rows = metkaNormalizedRows(store, "pricing");
+    sourceNote = "Metka pricing and add-on rows.";
+  } else if (source === "metka-locations") {
+    rows = metkaNormalizedRows(store, "locations");
+    sourceNote = "Metka inventory location rows.";
   } else if (source === "vehicle-profiles") {
     const profiles = await readVehicleProfiles();
     rows = profiles.profiles || [];
@@ -8809,7 +9387,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   const requestedVin = explicitWorkbenchVin(body);
   const profile = await resolveWorkbenchProfile(body, store);
   const vehicle = profile.vehicle || body.vehicle || {};
-  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const cleanJobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
   const lishiReference = await readLishiMasterReference();
   const referenceVault = await readReferenceVault();
@@ -9169,7 +9747,7 @@ async function buildGlobalSearch(body = {}, store = { jobs: [] }) {
   const query = cleanString(body.q || body.query || "");
   if (!query) return { generatedAt: new Date().toISOString(), query, mode: body.mode === "subscriber" ? "subscriber" : "owner", groups: [] };
   const mode = body.mode === "subscriber" ? "subscriber" : "owner";
-  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const cleanJobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
   const partsReference = await readPartsCrossReference();
   const evidenceIndex = buildJobEvidenceIndex(cleanJobs, partsReference);
   const lishiReference = await readLishiMasterReference();
@@ -9238,11 +9816,13 @@ async function buildGlobalSearch(body = {}, store = { jobs: [] }) {
   if (autoResults.length) groups.push(globalGroup("auto", "Auto Code Desk", "code-desk", autoResults, `${autoBaseline.totalRows || 0} automotive baseline rows matched.`));
 
   if (mode === "owner") {
+    const metkaCounts = metkaBridgeCounts(store.metkaBridge);
     groups.push(
       globalGroup("owner-lists", "Owner reference lists", "reference-lists", [
         { id: "parts-list", title: "Search parts cross-reference list", subtitle: `${partsReference.totalRows || partsReference.rows?.length || 0} rows`, detail: "Raw ML/LR/MW/TI/OE aliases.", badge: "Owner", target: "reference-lists", source: "parts", query },
         { id: "lishi-list", title: "Search Lishi tools list", subtitle: `${lishiReference.stats?.tools || lishiReference.tools?.length || 0} tools`, detail: "Raw Lishi master import.", badge: "Owner", target: "reference-lists", source: "lishi-tools", query },
         { id: "programming-list", title: "Search programming reference", subtitle: "Year/make/model baseline", detail: "Raw programming and source rows.", badge: "Owner", target: "reference-lists", source: "programming", query },
+        { id: "metka-bridge", title: "Search Field Data Bridge", subtitle: `${metkaCounts.workLogJobs + metkaCounts.inventoryRows + metkaCounts.partMaps} Metka field rows`, detail: "Owner-side WorkLog, inventory, alias, cost, service, and programmer data.", badge: "Owner", target: "metka-bridge", query },
       ]),
     );
   }
@@ -11207,10 +11787,11 @@ async function buildVehicleProfile(vehicle, store, options = {}) {
   const intelligence = await readKeyIntelligence();
   const record = findIntelligenceRecord(vehicle, intelligence);
   const partsReference = await readPartsCrossReference();
-  const shopEvidence = buildShopEvidence(vehicle, options.vin || "", store.jobs);
-  const proofPatterns = buildProofPatternBaseline(store.jobs, partsReference, { vin: options.vin || "", vehicle });
+  const fieldJobs = storeFieldJobs(store);
+  const shopEvidence = buildShopEvidence(vehicle, options.vin || "", fieldJobs);
+  const proofPatterns = buildProofPatternBaseline(fieldJobs, partsReference, { vin: options.vin || "", vehicle });
   shopEvidence.proofPatterns = proofPatterns;
-  const matchedJobsByRecord = summarizeMatchedJobs(record, store.jobs);
+  const matchedJobsByRecord = summarizeMatchedJobs(record, fieldJobs);
   const matchedJobs = matchedJobsByRecord.length ? matchedJobsByRecord : shopEvidence.jobs;
   const referenceVaultEntries = await findReferenceVaultEntries(vehicle);
   const publicSources = await readPublicReferenceSources();
@@ -11291,6 +11872,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/reference-lists",
     "/api/reference-vault",
     "/api/public-reference-sources",
+    "/api/metka-bridge",
     "/api/supplier-accounts",
     "/api/audit-log",
   ];
@@ -11429,14 +12011,14 @@ async function handleApi(request, response, pathname) {
       return;
     }
     const partsReference = await readPartsCrossReference();
-    sendJson(response, 200, buildPartHistory(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    sendJson(response, 200, buildPartHistory(query, storeFieldJobs(store, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 
   if ((request.method === "GET" || request.method === "POST") && pathname === "/api/coverage-dashboard") {
     const body = request.method === "POST" ? await readJsonBody(request) : {};
     const partsReference = await readPartsCrossReference();
-    sendJson(response, 200, buildCoverageDashboard(mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    sendJson(response, 200, buildCoverageDashboard(storeFieldJobs(store, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 
@@ -11445,7 +12027,7 @@ async function handleApi(request, response, pathname) {
     const body = request.method === "POST" ? await readJsonBody(request) : {};
     const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
     const partsReference = await readPartsCrossReference();
-    sendJson(response, 200, buildProofVault(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    sendJson(response, 200, buildProofVault(query, storeFieldJobs(store, body.jobs || body.localJobs || []), partsReference));
     return;
   }
 
@@ -11481,6 +12063,30 @@ async function handleApi(request, response, pathname) {
         store,
       ),
     );
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/metka-bridge") {
+    sendJson(response, 200, buildMetkaBridgeStatus(store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/metka-bridge/import") {
+    try {
+      const bridge = normalizeMetkaBridgePayload(await readJsonBody(request));
+      store.metkaBridge = bridge;
+      await writeStore(store);
+      sendJson(response, 201, buildMetkaBridgeStatus(store));
+    } catch (error) {
+      sendError(response, 400, `Metka Bridge import failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "DELETE" && pathname === "/api/metka-bridge") {
+    store.metkaBridge = metkaBridgeCloneEmpty();
+    await writeStore(store);
+    sendJson(response, 200, buildMetkaBridgeStatus(store));
     return;
   }
 
@@ -11640,7 +12246,7 @@ async function handleApi(request, response, pathname) {
     const body = await readJsonBody(request);
     const partsReference = await readPartsCrossReference();
     const proofAttachmentVault = await readProofAttachments();
-    const jobs = mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []);
+    const jobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
     sendJson(
       response,
       200,
@@ -11661,7 +12267,7 @@ async function handleApi(request, response, pathname) {
     const body = await readJsonBody(request);
     const partsReference = await readPartsCrossReference();
     const proofAttachmentVault = await readProofAttachments();
-    const jobs = mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []);
+    const jobs = storeFieldJobs(store, body.jobs || body.localJobs || []);
     sendJson(
       response,
       200,
@@ -12152,7 +12758,7 @@ async function handleApi(request, response, pathname) {
     vehicle.make = vehicle.make.toUpperCase();
     const programmingReference = await findProgrammingReference(vehicle);
     const verifiedProfile = await findVerifiedVehicleProfile(vehicle);
-    const shopEvidence = buildShopEvidence(vehicle, vin, store.jobs);
+    const shopEvidence = buildShopEvidence(vehicle, vin, storeFieldJobs(store));
     sendJson(response, 200, await buildProfileSupplierLookup(vehicle, store, { vin }, programmingReference, verifiedProfile, shopEvidence));
     return;
   }

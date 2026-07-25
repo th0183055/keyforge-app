@@ -8880,3 +8880,359 @@ textarea:focus {
     flex-basis: auto;
   }
 }
+
+/* 2026 field-product reboot: calmer owner rooms, tighter subscriber flow */
+body {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.82), rgba(234, 238, 242, 0.78) 46%, rgba(154, 164, 174, 0.74)),
+    #d9dee4;
+}
+
+.sidebar {
+  gap: 14px;
+  padding: 20px 16px;
+  background: linear-gradient(180deg, #121820 0%, #1f2934 100%);
+}
+
+.brand {
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.brand-mark {
+  width: 48px;
+  height: 48px;
+  background: #10151c;
+}
+
+.nav-list {
+  gap: 10px;
+}
+
+.nav-section-label {
+  padding: 4px 10px 0;
+}
+
+.nav-group {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.nav-item,
+.nav-group summary {
+  border-radius: 8px;
+}
+
+.nav-item {
+  min-height: 44px;
+  padding: 9px 12px;
+}
+
+.nav-item.active {
+  background: #080b10;
+  box-shadow: inset 4px 0 0 #d7b46d;
+}
+
+.operator-panel {
+  display: none;
+}
+
+body.mode-owner .operator-panel {
+  display: block;
+}
+
+main {
+  background: transparent;
+}
+
+.topbar {
+  gap: 16px;
+  padding-top: 24px;
+}
+
+.topbar h2 {
+  max-width: 940px;
+  font-size: clamp(1.55rem, 2.2vw, 2.6rem);
+  line-height: 1.04;
+}
+
+.view {
+  gap: 14px;
+}
+
+.panel {
+  border-color: rgba(113, 124, 136, 0.28);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 12px 28px rgba(18, 24, 31, 0.1);
+}
+
+.panel-header {
+  gap: 12px;
+  align-items: center;
+}
+
+.panel-header h3 {
+  font-size: clamp(1.05rem, 1.2vw, 1.28rem);
+}
+
+.assistant-card,
+.global-result-card,
+.reference-row-card,
+.loadout-card,
+.history-job-card,
+.metric,
+.source-card-row {
+  border-radius: 8px;
+}
+
+.primary-action,
+.secondary-action {
+  border-radius: 7px;
+}
+
+.primary-action {
+  background: #0d1117;
+}
+
+.secondary-action {
+  background: #eef2f6;
+}
+
+.danger-action {
+  border-color: #7c3538;
+  color: #7c3538;
+}
+
+.mode-panel {
+  padding: 12px;
+  border-radius: 8px;
+}
+
+body.mode-subscriber .nav-section-label small,
+body.mode-subscriber .nav-item small,
+body.mode-subscriber .nav-group summary small,
+body.mode-subscriber .mode-panel {
+  display: none;
+}
+
+body.mode-subscriber .sidebar {
+  gap: 10px;
+}
+
+body.mode-subscriber .nav-item {
+  min-height: 40px;
+}
+
+body.mode-subscriber .topbar h2 {
+  max-width: 760px;
+}
+
+body.mode-subscriber .topbar {
+  gap: 10px;
+}
+
+body.mode-subscriber .panel {
+  box-shadow: 0 8px 20px rgba(18, 24, 31, 0.08);
+}
+
+body.mode-subscriber #loadout .panel-header,
+body.mode-subscriber #workbench .panel-header,
+body.mode-subscriber #part-history .panel-header,
+body.mode-subscriber #proof-vault .panel-header {
+  align-items: flex-start;
+}
+
+body.mode-subscriber .loadout-summary-grid,
+body.mode-subscriber .loadout-alternates,
+body.mode-subscriber .loadout-card-meta,
+body.mode-subscriber .loadout-evidence {
+  display: none;
+}
+
+body.mode-subscriber .loadout-hero {
+  min-height: 132px;
+}
+
+body.mode-subscriber .loadout-hero p {
+  max-width: 720px;
+}
+
+body.mode-subscriber .loadout-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mode-subscriber .loadout-card {
+  min-height: 132px;
+  align-content: space-between;
+}
+
+body.mode-subscriber .loadout-card-head {
+  align-items: flex-start;
+}
+
+body.mode-subscriber .loadout-card-head span {
+  font-size: 0.68rem;
+}
+
+body.mode-subscriber .loadout-card-head strong {
+  font-size: clamp(1.05rem, 1.8vw, 1.32rem);
+  line-height: 1.08;
+}
+
+body.mode-subscriber .loadout-actions .workbench-action-buttons {
+  justify-content: flex-start;
+}
+
+body.mode-subscriber #workbench .workbench-card-grid,
+body.mode-subscriber #proof-vault .proof-vault-grid,
+body.mode-subscriber #part-history .history-grid {
+  gap: 10px;
+}
+
+body.mode-subscriber .global-result-card,
+body.mode-subscriber .reference-row-card,
+body.mode-subscriber .history-job-card {
+  padding: 12px;
+}
+
+.metka-bridge-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.bridge-hero,
+.bridge-status-card {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(113, 124, 136, 0.28);
+  border-radius: 8px;
+  padding: 16px;
+  background: linear-gradient(135deg, #ffffff, #eef3f7);
+}
+
+.bridge-hero h3,
+.bridge-status-card h3 {
+  margin: 0;
+  line-height: 1.08;
+}
+
+.bridge-hero p,
+.bridge-status-card p,
+.bridge-flow-grid span {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.42;
+}
+
+.bridge-status-card.ready {
+  border-left: 5px solid #4b8a68;
+}
+
+.bridge-status-card.empty {
+  border-left: 5px solid #a1844b;
+}
+
+.bridge-status-card > strong {
+  display: grid;
+  min-width: 112px;
+  border-radius: 8px;
+  padding: 12px;
+  background: #0d1117;
+  color: white;
+  text-align: right;
+}
+
+.bridge-status-card > strong small {
+  color: #d7b46d;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.bridge-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bridge-metric {
+  min-height: 96px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.bridge-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bridge-flow-grid article {
+  border: 1px solid rgba(113, 124, 136, 0.24);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.bridge-flow-grid strong {
+  display: block;
+}
+
+.bridge-samples-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bridge-sample-section {
+  min-width: 0;
+  border: 1px solid rgba(113, 124, 136, 0.24);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.reference-list-cards.compact {
+  gap: 8px;
+}
+
+.compact-card {
+  min-height: 80px;
+}
+
+@media (max-width: 980px) {
+  .bridge-metric-grid,
+  .bridge-samples-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .bridge-hero,
+  .bridge-status-card,
+  .bridge-flow-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-metric-grid,
+  .bridge-samples-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    padding-top: 18px;
+  }
+
+  .topbar h2 {
+    font-size: 1.55rem;
+  }
+
+  body.mode-subscriber .loadout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.mode-subscriber .loadout-hero {
+    min-height: auto;
+  }
+}

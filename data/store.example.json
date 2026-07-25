@@ -4,6 +4,24 @@
   "auditLog": [],
   "aiFeedback": [],
   "shopRules": [],
+  "metkaBridge": {
+    "version": 1,
+    "importedAt": "",
+    "source": "",
+    "sheetStats": [],
+    "sheets": {},
+    "normalized": {
+      "jobs": [],
+      "inventory": [],
+      "parts": [],
+      "quotes": [],
+      "costs": [],
+      "programmers": [],
+      "services": [],
+      "pricing": [],
+      "locations": []
+    }
+  },
   "inventoryItems": [],
   "inventoryLedger": [],
   "inventoryLocations": [],

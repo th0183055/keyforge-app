@@ -137,6 +137,10 @@
                 <span>Training Center</span>
                 <small>Backtest decisions</small>
               </button>
+              <button class="nav-item" data-view="metka-bridge" data-owner-only>
+                <span>Field Data Bridge</span>
+                <small>Metka import brain</small>
+              </button>
               <button class="nav-item" data-view="settings" data-owner-only>
                 <span>Settings</span>
                 <small>Sources and storage</small>
@@ -597,6 +601,16 @@
                   <option value="key-innovations">Key Innovations labels</option>
                   <option value="reference-vault">Reference Vault</option>
                   <option value="jobs">Saved jobs</option>
+                  <option value="field-jobs">Field jobs</option>
+                  <option value="metka-parts">Metka part bridge</option>
+                  <option value="metka-inventory">Metka inventory</option>
+                  <option value="metka-worklog">Metka WorkLog</option>
+                  <option value="metka-quotes">Metka quotes</option>
+                  <option value="metka-costs">Metka costs</option>
+                  <option value="metka-programmers">Metka programmers</option>
+                  <option value="metka-services">Metka services</option>
+                  <option value="metka-pricing">Metka pricing</option>
+                  <option value="metka-locations">Metka locations</option>
                   <option value="vehicle-profiles">Vehicle profiles</option>
                   <option value="public-sources">Public sources</option>
                 </select>
@@ -1129,6 +1143,38 @@
               <article class="assistant-card">
                 <strong>Storage status loading</strong>
                 <p>Checking job memory, Proof Vault metadata, attachment storage, and AI memory.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="metka-bridge">
+          <section class="panel wide metka-bridge-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Owner data room</p>
+                <h3>Field Data Bridge</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="refreshMetkaBridge">Refresh</button>
+                <button class="secondary-action small" type="button" id="importMetkaBridge">Import JSON</button>
+                <button class="secondary-action small danger-action" type="button" id="clearMetkaBridge">Clear Bridge</button>
+                <input id="metkaBridgeImportInput" type="file" accept="application/json,.json" hidden />
+              </div>
+            </div>
+            <section class="bridge-hero">
+              <div>
+                <p class="eyebrow">What this does</p>
+                <h3>Turn Metka operations into a subscriber-ready field answer.</h3>
+                <p>WorkLog becomes proof. InventoryLedger becomes stock. ProductAliasLog, wkst, and PartReference become aliases. Costs, service rows, programmers, locations, and pricing stay owner-only.</p>
+              </div>
+              <button class="primary-action" type="button" data-view-target="loadout">Open Job Loadout</button>
+            </section>
+            <div class="form-status" id="metkaBridgeStatus"></div>
+            <div class="metka-bridge-result" id="metkaBridgeResult">
+              <article class="assistant-card">
+                <strong>Bridge waiting for data</strong>
+                <p>Import a JSON export with sheet keys such as WorkLog, InventoryLedger, ProductAliasLog, wkst, PartReference, QuotesLog, CostHistory, Programmers, ServiceSKUs, PricingMatrix, and tbl_Locations.</p>
               </article>
             </div>
           </section>

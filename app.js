@@ -45,6 +45,7 @@ let latestAiMemory = null;
 let latestAiCommander = null;
 let latestMissionControl = null;
 let latestTrainingCenter = null;
+let latestMetkaBridge = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestAuthStatus = null;
@@ -229,6 +230,12 @@ const loadoutUseCurrentButton = document.querySelector("#loadoutUseCurrent");
 const referenceListForm = document.querySelector("#referenceListForm");
 const referenceListStatus = document.querySelector("#referenceListStatus");
 const referenceListResult = document.querySelector("#referenceListResult");
+const metkaBridgeStatus = document.querySelector("#metkaBridgeStatus");
+const metkaBridgeResult = document.querySelector("#metkaBridgeResult");
+const refreshMetkaBridgeButton = document.querySelector("#refreshMetkaBridge");
+const importMetkaBridgeButton = document.querySelector("#importMetkaBridge");
+const clearMetkaBridgeButton = document.querySelector("#clearMetkaBridge");
+const metkaBridgeImportInput = document.querySelector("#metkaBridgeImportInput");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const scanButton = document.querySelector(".scan-action");
@@ -296,6 +303,10 @@ const routeMeta = {
   "reference-lists": {
     eyebrow: "Owner reference shelf",
     title: "Inspect the raw lists that power the app.",
+  },
+  "metka-bridge": {
+    eyebrow: "Owner data room",
+    title: "Bridge Metka operations into TimLock field decisions.",
   },
   coverage: {
     eyebrow: "Observed proof",
@@ -389,6 +400,7 @@ function showView(id, options = {}) {
   }
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
+  if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
   if (id === "settings") loadStorageStatus({ quiet: true });
   updateAiContextUi();
 }
@@ -8084,6 +8096,138 @@ async function loadReferenceList() {
   }
 }
 
+function renderMetkaMetric(label, value, note = "") {
+  return `
+    <article class="metric bridge-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value ?? 0)}</strong>
+      <p>${escapeHtml(note)}</p>
+    </article>
+  `;
+}
+
+function renderMetkaSampleSection(title, rows = [], source = "") {
+  return `
+    <section class="bridge-sample-section">
+      <div class="panel-header tight">
+        <div>
+          <p class="eyebrow">${escapeHtml(rows.length)} shown</p>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+        <button class="secondary-action small" type="button" data-bridge-list="${escapeHtml(source)}">Open List</button>
+      </div>
+      <div class="reference-list-cards compact">
+        ${rows.length ? rows.slice(0, 4).map(renderReferenceListRow).join("") : `<article class="assistant-card compact-card"><strong>No rows yet</strong><p>Import this table to feed the bridge.</p></article>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderMetkaBridge(payload = {}) {
+  if (!metkaBridgeResult) return;
+  latestMetkaBridge = payload;
+  const counts = payload.counts || {};
+  const connected = Boolean(payload.connected);
+  metkaBridgeResult.innerHTML = `
+    <section class="bridge-status-card ${connected ? "ready" : "empty"}">
+      <div>
+        <p class="eyebrow">${escapeHtml(connected ? "Bridge active" : "Bridge empty")}</p>
+        <h3>${escapeHtml(connected ? "Metka data is feeding TimLock decisions." : "Import a Metka JSON export to activate the bridge.")}</h3>
+        <p>${escapeHtml(connected ? payload.sellableUse : "The subscriber app will remain clean while owner-only rows stay here.")}</p>
+      </div>
+      <strong>${escapeHtml(counts.workLogJobs || 0)}<small>proof jobs</small></strong>
+    </section>
+    <section class="bridge-metric-grid">
+      ${renderMetkaMetric("WorkLog", counts.workLogJobs, "proof baseline")}
+      ${renderMetkaMetric("Stock", counts.inventoryRows, "field inventory")}
+      ${renderMetkaMetric("Part Maps", counts.partMaps, "aliases")}
+      ${renderMetkaMetric("Quotes", counts.quoteRows, "demand clues")}
+      ${renderMetkaMetric("Costs", counts.costRows, "owner only")}
+      ${renderMetkaMetric("Programmers", counts.programmers, "tool rows")}
+      ${renderMetkaMetric("Services", counts.serviceSkus, "service SKUs")}
+      ${renderMetkaMetric("Locations", counts.locations, "stock rooms")}
+    </section>
+    <section class="bridge-flow-grid">
+      <article>
+        <p class="eyebrow">Owner side</p>
+        <strong>Raw operations stay inspectable.</strong>
+        <span>Work logs, stock, costs, pricing, services, and part maps are visible here and in Reference Lists.</span>
+      </article>
+      <article>
+        <p class="eyebrow">Subscriber side</p>
+        <strong>Only field decisions are shown.</strong>
+        <span>Job Loadout, Workbench, Proof Vault, Part History, and Coverage use the bridge without exposing raw owner data.</span>
+      </article>
+    </section>
+    <section class="bridge-samples-grid">
+      ${renderMetkaSampleSection("Inventory", payload.samples?.inventory || [], "metka-inventory")}
+      ${renderMetkaSampleSection("Part Bridge", payload.samples?.parts || [], "metka-parts")}
+      ${renderMetkaSampleSection("WorkLog Proof", payload.samples?.jobs || [], "metka-worklog")}
+      ${renderMetkaSampleSection("Programmers", payload.samples?.programmers || [], "metka-programmers")}
+    </section>
+  `;
+}
+
+async function loadMetkaBridge() {
+  if (!metkaBridgeResult) return;
+  try {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = "Loading Field Data Bridge...";
+    const payload = await api("/api/metka-bridge", { timeoutMs: 18000 });
+    renderMetkaBridge(payload);
+    if (metkaBridgeStatus) {
+      const counts = payload.counts || {};
+      metkaBridgeStatus.textContent = payload.connected
+        ? `Bridge active: ${counts.workLogJobs || 0} jobs, ${counts.inventoryRows || 0} stock rows, ${counts.partMaps || 0} part maps.`
+        : "Bridge is empty. Import a Metka JSON export to activate it.";
+    }
+  } catch (error) {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = error.message;
+    metkaBridgeResult.innerHTML = `<article class="assistant-card"><strong>Field Data Bridge unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+async function importMetkaBridgeFile(file) {
+  if (!file) return;
+  try {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = "Importing Field Data Bridge...";
+    const payload = JSON.parse(await file.text());
+    const result = await api("/api/metka-bridge/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 40000,
+      noStatus: true,
+    });
+    renderMetkaBridge(result);
+    latestJobLoadout = null;
+    latestWorkbench = null;
+    latestCoverageDashboard = null;
+    latestProofVault = null;
+    latestReferenceList = null;
+    await Promise.allSettled([loadCoverageDashboard(), loadJobLoadout(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
+    if (metkaBridgeStatus) {
+      const counts = result.counts || {};
+      metkaBridgeStatus.textContent = `Bridge imported: ${counts.workLogJobs || 0} jobs, ${counts.inventoryRows || 0} stock rows, ${counts.partMaps || 0} part maps.`;
+    }
+  } catch (error) {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = `Import failed: ${error.message}`;
+  }
+}
+
+async function clearMetkaBridge() {
+  if (!window.confirm("Clear the Field Data Bridge import? This does not delete saved TimLock jobs.")) return;
+  try {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = "Clearing Field Data Bridge...";
+    const payload = await api("/api/metka-bridge", { method: "DELETE", timeoutMs: 18000, noStatus: true });
+    renderMetkaBridge(payload);
+    latestReferenceList = null;
+    latestJobLoadout = null;
+    latestWorkbench = null;
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = "Field Data Bridge cleared.";
+  } catch (error) {
+    if (metkaBridgeStatus) metkaBridgeStatus.textContent = `Clear failed: ${error.message}`;
+  }
+}
+
 function openWorkbenchTarget(target) {
   const payload = latestWorkbench || {};
   const queries = payload.activeQueries || {};
@@ -8138,6 +8282,11 @@ function openWorkbenchTarget(target) {
       referenceListForm.elements.referenceQuery.value = queries.part || queries.lishi || payload.query || "";
     }
     loadReferenceList();
+    return;
+  }
+  if (target === "metka-bridge") {
+    showView("metka-bridge");
+    loadMetkaBridge();
     return;
   }
   showView(target);
@@ -8283,6 +8432,11 @@ function openGlobalSearchTarget(target, query, source = "") {
       referenceListForm.elements.referenceQuery.value = cleanQuery;
     }
     loadReferenceList();
+    return;
+  }
+  if (target === "metka-bridge") {
+    showView("metka-bridge");
+    loadMetkaBridge();
     return;
   }
   showView(target);
@@ -9448,6 +9602,7 @@ function activeScreenQuery() {
     "code-desk": cleanInput(codeDeskAutoForm?.elements.autoQuery?.value || codeDeskForm?.elements.query?.value || ""),
     lishi: cleanInput(lishiLookupForm?.elements.lishiQuery?.value || latestLishiLookup?.query || ""),
     coverage: latestCoverageDashboard ? "programmer coverage" : "",
+    "metka-bridge": latestMetkaBridge?.connected ? "field data bridge" : "",
     vin: latestVinProfile?.vin || vehicleTitleFromVehicle(latestVinProfile?.vehicle || {}),
   }[activeViewId] || "";
 }
@@ -9575,6 +9730,17 @@ function compactGlobalSearchForAi(payload = latestGlobalSearch) {
   };
 }
 
+function compactMetkaBridgeForAi(payload = latestMetkaBridge) {
+  if (!payload) return null;
+  return {
+    connected: Boolean(payload.connected),
+    importedAt: payload.importedAt || "",
+    source: payload.source || "",
+    counts: payload.counts || {},
+    use: payload.sellableUse || "",
+  };
+}
+
 function compactRecentJobsForAi() {
   return jobs.slice(0, 8).map((job) => ({
     id: job.id,
@@ -9634,6 +9800,7 @@ function buildAiClientContext() {
     lishi: compactLishiForAi(),
     coverage: compactCoverageForAi(),
     globalSearch: compactGlobalSearchForAi(),
+    fieldDataBridge: compactMetkaBridgeForAi(),
     jobs: compactRecentJobsForAi(),
   };
 }
@@ -9665,6 +9832,7 @@ function aiPromptSuggestions(context = buildAiClientContext()) {
     "code-desk": [`What do I need before using code data?`, `Explain this bitting/code result safely`, `What should I verify before cutting?`, `Build a code-use authorization checklist`],
     lishi: [`Which Lishi result should I verify first?`, `Build a Lishi verification checklist`, `What should I confirm at the lock?`, `Turn this into a decode workflow`],
     coverage: [`Where are my biggest coverage gaps?`, `Which programmer evidence is strongest?`, `What should I log on the next job?`, `Build my next coverage cleanup list`],
+    "metka-bridge": [`What Metka data is feeding subscriber decisions?`, `What import gaps should I fix first?`, `How do I turn this into a clean subscriber product?`, `Audit the field data bridge`],
     learn: [`Check this worked-job entry before saving`, `What fields matter most for proof?`, `How should I describe the outcome?`, `Make this saved job useful for future AI`],
     ai: [`Run a complete locksmith field audit`, `Create a technician checklist`, `Create a customer-facing note`, `Build a save-back checklist`],
   };
@@ -11139,6 +11307,14 @@ referenceListForm?.addEventListener("submit", (event) => {
   loadReferenceList();
 });
 
+refreshMetkaBridgeButton?.addEventListener("click", () => loadMetkaBridge());
+importMetkaBridgeButton?.addEventListener("click", () => metkaBridgeImportInput?.click());
+metkaBridgeImportInput?.addEventListener("change", async () => {
+  await importMetkaBridgeFile(metkaBridgeImportInput.files?.[0]);
+  metkaBridgeImportInput.value = "";
+});
+clearMetkaBridgeButton?.addEventListener("click", clearMetkaBridge);
+
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
     selectedSupplierId = supplierSelect.value;
@@ -11359,6 +11535,17 @@ document.addEventListener("click", (event) => {
       globalOpenButton.dataset.globalQuery,
       globalOpenButton.dataset.globalSource,
     );
+    return;
+  }
+
+  const bridgeListButton = event.target.closest("[data-bridge-list]");
+  if (bridgeListButton) {
+    showView("reference-lists");
+    if (referenceListForm) {
+      referenceListForm.elements.referenceSource.value = bridgeListButton.dataset.bridgeList || "metka-inventory";
+      referenceListForm.elements.referenceQuery.value = globalSearchQuery();
+    }
+    loadReferenceList();
     return;
   }
 
