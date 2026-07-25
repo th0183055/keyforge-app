@@ -36,6 +36,7 @@ let latestLishiLookup = null;
 let lishiLookupRequestId = 0;
 let vinLishiLookupRequestId = 0;
 let latestWorkbench = null;
+let latestJobLoadout = null;
 let latestReferenceList = null;
 let latestGlobalSearch = null;
 let latestAiResponse = null;
@@ -220,6 +221,11 @@ const workbenchStatus = document.querySelector("#workbenchStatus");
 const workbenchResult = document.querySelector("#workbenchResult");
 const refreshWorkbenchButton = document.querySelector("#refreshWorkbench");
 const clearWorkbenchButton = document.querySelector("#clearWorkbench");
+const loadoutForm = document.querySelector("#loadoutForm");
+const loadoutStatus = document.querySelector("#loadoutStatus");
+const loadoutResult = document.querySelector("#loadoutResult");
+const refreshLoadoutButton = document.querySelector("#refreshLoadout");
+const loadoutUseCurrentButton = document.querySelector("#loadoutUseCurrent");
 const referenceListForm = document.querySelector("#referenceListForm");
 const referenceListStatus = document.querySelector("#referenceListStatus");
 const referenceListResult = document.querySelector("#referenceListResult");
@@ -266,6 +272,10 @@ const routeMeta = {
   workbench: {
     eyebrow: "Unified job context",
     title: "Build one packet for parts, proof, tools, and the next move.",
+  },
+  loadout: {
+    eyebrow: "Field inventory",
+    title: "Build the truck kit for this job.",
   },
   "part-history": {
     eyebrow: "Proof trail",
@@ -372,6 +382,7 @@ function showView(id, options = {}) {
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
+  if (id === "loadout" && !latestJobLoadout) loadJobLoadout();
   if (id === "code-desk") {
     renderCodeDesk();
     if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
@@ -7793,6 +7804,202 @@ async function loadJobWorkbench(query = workbenchQueryFromForm()) {
   }
 }
 
+function loadoutQueryFromForm() {
+  return cleanInput(loadoutForm?.elements.loadoutQuery?.value || workbenchQueryFromForm() || globalSearchQuery());
+}
+
+function loadoutPayload(query = loadoutQueryFromForm()) {
+  const requestedVin = normalizeVinInput(query);
+  return {
+    q: query,
+    vin: requestedVin.length === 17 ? requestedVin : "",
+    profile: currentWorkbenchProfile(query),
+    jobs: localArchivedJobs(),
+  };
+}
+
+function loadoutTone(score) {
+  const value = Number(score || 0);
+  if (value >= 88) return "high";
+  if (value >= 72) return "good";
+  if (value >= 56) return "verify";
+  return "low";
+}
+
+function loadoutActionForSection(section = {}) {
+  if (["primary", "backup", "supplies"].includes(section.id)) return { target: "part-history", label: "Proof" };
+  if (section.id === "programmer") return { target: "coverage", label: "Coverage" };
+  if (section.id === "lishi") return { target: "lishi", label: "Lishi" };
+  if (section.id === "proof") return { target: "proof-vault", label: "Vault" };
+  return { target: "workbench", label: "Open" };
+}
+
+function renderLoadoutSection(section = {}) {
+  const item = section.item || {};
+  const action = loadoutActionForSection(section);
+  const inventory = item.inventory || {};
+  const chips = [item.identifiers || [], item.oemSources || []].flat().filter(Boolean).slice(0, 6);
+  const evidence = (item.evidence || []).filter(Boolean).slice(0, 3);
+  return `
+    <article class="loadout-card ${escapeHtml(loadoutTone(item.score))}">
+      <div class="loadout-card-head">
+        <div>
+          <span>${escapeHtml(section.title || "Loadout")}</span>
+          <strong>${escapeHtml(item.label || item.value || "Verify manually")}</strong>
+        </div>
+        <em>${escapeHtml(item.score ? `${item.score}%` : "VERIFY")}</em>
+      </div>
+      <div class="loadout-card-meta">
+        <span>${escapeHtml(item.confidenceLabel || "Verify")}</span>
+        <span>${escapeHtml(item.proofJobs ? `${item.proofJobs} proof` : "No proof count")}</span>
+        <span>${escapeHtml(inventory.label || "No stock count")}</span>
+      </div>
+      ${inventory.locations?.length ? `<div class="part-chip-row compact">${renderPartChips(inventory.locations, "No location")}</div>` : ""}
+      ${chips.length ? `<div class="part-chip-row compact">${renderPartChips(chips, "No identifiers")}</div>` : ""}
+      ${evidence.length ? `<div class="loadout-evidence">${evidence.map((entry) => `<span>${escapeHtml(entry)}</span>`).join("")}</div>` : ""}
+      <button class="secondary-action small" type="button" data-loadout-open="${escapeHtml(action.target)}" data-loadout-query="${escapeHtml(item.value || item.label || latestJobLoadout?.query || "")}">${escapeHtml(action.label)}</button>
+    </article>
+  `;
+}
+
+function renderLoadoutAlternate(item = {}) {
+  const inventory = item.inventory || {};
+  return `
+    <article class="global-result-card loadout-alt-card">
+      <div>
+        <span>${escapeHtml(item.confidenceLabel || "Alternate")}</span>
+        <strong>${escapeHtml(item.label || item.value || "Alternate")}</strong>
+        <p>${escapeHtml([item.score ? `${item.score}% confidence` : "", item.proofJobs ? `${item.proofJobs} proof` : "", inventory.label || ""].filter(Boolean).join(" | "))}</p>
+      </div>
+      <button class="secondary-action small" type="button" data-loadout-open="part-history" data-loadout-query="${escapeHtml(item.value || item.label || "")}">Proof</button>
+    </article>
+  `;
+}
+
+function renderJobLoadout(payload = {}) {
+  if (!loadoutResult) return;
+  latestJobLoadout = payload;
+  const sections = payload.sections || [];
+  const summary = payload.summary || {};
+  loadoutResult.innerHTML = `
+    <section class="loadout-hero ${escapeHtml(loadoutTone(payload.confidencePercent))}">
+      <div>
+        <p class="eyebrow">Field loadout</p>
+        <h3>${escapeHtml(payload.title || payload.query || "Current job")}</h3>
+        <p>${escapeHtml([payload.vin, summary.serviceFamily, payload.inventory?.connected ? "Inventory connected" : "Proof-based stock"].filter(Boolean).join(" | "))}</p>
+      </div>
+      <strong><span>${escapeHtml(payload.confidencePercent || 0)}%</span><small>${escapeHtml(payload.confidenceLabel || "Loadout")}</small></strong>
+    </section>
+    <section class="loadout-summary-grid">
+      <article class="metric"><span>Exact</span><strong>${escapeHtml(summary.exactProof || 0)}</strong><p>VIN proof</p></article>
+      <article class="metric"><span>Related</span><strong>${escapeHtml(summary.relatedProof || 0)}</strong><p>Pattern proof</p></article>
+      <article class="metric"><span>Parts</span><strong>${escapeHtml(summary.partCandidates || 0)}</strong><p>Candidates</p></article>
+      <article class="metric"><span>Stock</span><strong>${escapeHtml(summary.inventoryRows || 0)}</strong><p>Inventory rows</p></article>
+    </section>
+    <section class="loadout-grid">
+      ${sections.map(renderLoadoutSection).join("")}
+    </section>
+    <section class="history-action-bar loadout-actions">
+      <div class="badge-row">
+        <span>${escapeHtml(payload.proof?.pattern || "Proof pattern")}</span>
+        <span>${escapeHtml(payload.proof?.matchedJobs ? `${payload.proof.matchedJobs} matched jobs` : "No exact matched jobs")}</span>
+        <span>${escapeHtml(payload.inventory?.note || "")}</span>
+      </div>
+      <div class="workbench-action-buttons">
+        <button class="secondary-action small" type="button" data-loadout-open="workbench" data-loadout-query="${escapeHtml(payload.query || payload.vin || payload.title || "")}">Workbench</button>
+        <button class="secondary-action small" type="button" data-loadout-open="proof-vault" data-loadout-query="${escapeHtml(payload.vin || payload.query || payload.title || "")}">Proof Vault</button>
+        <button class="secondary-action small" type="button" data-copy-loadout>Copy Kit</button>
+      </div>
+    </section>
+    ${
+      (payload.alternates || []).length
+        ? `<details class="loadout-alternates"><summary>Backup candidates</summary><div class="global-result-list">${payload.alternates.map(renderLoadoutAlternate).join("")}</div></details>`
+        : ""
+    }
+  `;
+  updateAiContextUi();
+}
+
+async function loadJobLoadout(query = loadoutQueryFromForm()) {
+  if (!loadoutResult) return;
+  try {
+    if (loadoutStatus) loadoutStatus.textContent = "Building field loadout from proof, parts, tools, and inventory hooks...";
+    const payload = await api("/api/job-loadout", {
+      method: "POST",
+      body: JSON.stringify(loadoutPayload(query)),
+      timeoutMs: 22000,
+      retryOnTimeout: true,
+    });
+    renderJobLoadout(payload);
+    if (loadoutStatus) {
+      loadoutStatus.textContent = `Loadout ready: ${payload.summary?.partCandidates || 0} part candidate${payload.summary?.partCandidates === 1 ? "" : "s"}, ${payload.summary?.exactProof || 0} exact proof match${payload.summary?.exactProof === 1 ? "" : "es"}.`;
+    }
+  } catch (error) {
+    if (loadoutStatus) loadoutStatus.textContent = error.message;
+    loadoutResult.innerHTML = `<article class="assistant-card"><strong>Loadout unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function copyJobLoadout() {
+  if (!latestJobLoadout) return;
+  const lines = [
+    `Loadout: ${latestJobLoadout.title || latestJobLoadout.query || "Current job"}`,
+    `Confidence: ${latestJobLoadout.confidencePercent || 0}% ${latestJobLoadout.confidenceLabel || ""}`,
+    ...(latestJobLoadout.sections || []).map((section) => `${section.title}: ${section.item?.label || section.item?.value || "Verify"}`),
+  ];
+  navigator.clipboard?.writeText(lines.join("\n")).then(() => {
+    if (loadoutStatus) loadoutStatus.textContent = "Loadout copied.";
+  });
+}
+
+function openLoadoutTarget(target, query = "") {
+  const cleanQuery = cleanInput(query || latestJobLoadout?.query || latestJobLoadout?.vin || loadoutQueryFromForm());
+  if (target === "loadout") {
+    showView("loadout");
+    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = cleanQuery;
+    loadJobLoadout(cleanQuery);
+    return;
+  }
+  if (target === "workbench") {
+    showView("workbench");
+    if (workbenchForm) workbenchForm.elements.workbenchQuery.value = cleanQuery;
+    loadJobWorkbench(cleanQuery);
+    return;
+  }
+  if (target === "loadout") {
+    showView("loadout");
+    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = cleanQuery;
+    loadJobLoadout(cleanQuery);
+    return;
+  }
+  if (target === "part-history") {
+    showView("part-history");
+    if (partHistoryForm) {
+      partHistoryForm.elements.partNumber.value = cleanQuery;
+      partHistoryForm.requestSubmit();
+    }
+    return;
+  }
+  if (target === "proof-vault") {
+    showView("proof-vault");
+    if (proofVaultForm) proofVaultForm.elements.proofQuery.value = cleanQuery;
+    loadProofVault(cleanQuery);
+    return;
+  }
+  if (target === "lishi") {
+    showView("lishi");
+    if (lishiLookupForm) lishiLookupForm.elements.lishiQuery.value = cleanQuery;
+    loadLishiLookup(lishiLookupParamsFromForm());
+    return;
+  }
+  if (target === "coverage") {
+    showView("coverage");
+    loadCoverageDashboard();
+    return;
+  }
+  showView(target || "workbench");
+}
+
 function referenceValueText(value) {
   if (Array.isArray(value)) return value.map(referenceValueText).filter(Boolean).join(" | ");
   if (value && typeof value === "object") return Object.entries(value).map(([key, item]) => `${key}: ${referenceValueText(item)}`).join(" | ");
@@ -7915,6 +8122,13 @@ function openWorkbenchTarget(target) {
     showView("proof-vault");
     if (proofVaultForm) proofVaultForm.elements.proofQuery.value = queries.proof || queries.part || payload.query || "";
     loadProofVault(proofVaultForm?.elements.proofQuery?.value || "");
+    return;
+  }
+  if (target === "loadout") {
+    showView("loadout");
+    const query = payload.vin || queries.part || queries.proof || payload.query || workbenchQueryFromForm();
+    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query;
+    loadJobLoadout(query);
     return;
   }
   if (target === "reference-lists") {
@@ -9228,6 +9442,7 @@ function activeScreenQuery() {
   return {
     command: globalSearchQuery(),
     workbench: workbenchQueryFromForm(),
+    loadout: cleanInput(loadoutForm?.elements.loadoutQuery?.value || latestJobLoadout?.query || latestJobLoadout?.vin || ""),
     "part-history": cleanInput(partHistoryForm?.elements.partNumber?.value || latestPartHistory?.query || ""),
     "proof-vault": cleanInput(proofVaultForm?.elements.proofQuery?.value || latestProofVault?.query || ""),
     "code-desk": cleanInput(codeDeskAutoForm?.elements.autoQuery?.value || codeDeskForm?.elements.query?.value || ""),
@@ -9399,6 +9614,20 @@ function buildAiClientContext() {
           vehicle: latestWorkbench.vehicle,
         }
       : null,
+    loadout: latestJobLoadout
+      ? {
+          title: latestJobLoadout.title,
+          query: latestJobLoadout.query,
+          confidencePercent: latestJobLoadout.confidencePercent,
+          confidenceLabel: latestJobLoadout.confidenceLabel,
+          summary: latestJobLoadout.summary,
+          sections: (latestJobLoadout.sections || []).map((section) => ({
+            title: section.title,
+            item: section.item?.label || section.item?.value || "",
+            score: section.item?.score || 0,
+          })),
+        }
+      : null,
     partHistory: compactPartHistoryForAi(),
     proofVault: compactProofVaultForAi(),
     codeDesk: compactCodeDeskForAi(),
@@ -9417,6 +9646,7 @@ function aiContextSummaryText(context = buildAiClientContext()) {
     vehicle ? `vehicle ${vehicle}` : "",
     query ? `query ${query}` : "",
     context.workbench?.aiBrief?.confidencePercent ? `${context.workbench.aiBrief.confidencePercent}% packet confidence` : "",
+    context.loadout?.confidencePercent ? `${context.loadout.confidencePercent}% loadout confidence` : "",
     context.partHistory?.matchedJobs ? `${context.partHistory.matchedJobs} part-history jobs` : "",
     context.proofVault?.matchingJobs ? `${context.proofVault.matchingJobs} proof records` : "",
   ].filter(Boolean);
@@ -9429,6 +9659,7 @@ function aiPromptSuggestions(context = buildAiClientContext()) {
     command: [`Run a complete locksmith field audit for this search`, `Where should I open this search next?`, `Build a job plan from the current search`, `What proof should I look for first?`],
     vin: [`Run a VIN-to-key readiness audit`, `Build the next-step checklist for this VIN`, `What should I verify before ordering?`, `Summarize this job for the customer`],
     workbench: [`Run a complete field audit from this packet`, `What proof is missing?`, `Create a technician checklist`, `Build a dispatch plan`],
+    loadout: [`Tighten this loadout`, `What should I bring first?`, `What inventory proof is missing?`, `Create a tech truck checklist`],
     "part-history": [`Is ${q} proven enough to trust?`, `What programmer proof exists for ${q}?`, `What should I save after this job?`, `Build the best part verification path`],
     "proof-vault": [`What proof is missing for ${q}?`, `Write a customer-safe proof summary`, `What would improve coverage percentage?`, `Build the attachment checklist`],
     "code-desk": [`What do I need before using code data?`, `Explain this bitting/code result safely`, `What should I verify before cutting?`, `Build a code-use authorization checklist`],
@@ -10474,7 +10705,7 @@ function apiUrls(path) {
 function shouldFastFailRelativeApi(path) {
   const host = window.location.hostname.toLowerCase();
   if (["localhost", "127.0.0.1", "::1"].includes(host)) return false;
-  if (path.startsWith("/api/supplier-lookup") || path.startsWith("/api/job-workbench")) return false;
+  if (path.startsWith("/api/supplier-lookup") || path.startsWith("/api/job-workbench") || path.startsWith("/api/job-loadout")) return false;
   return true;
 }
 
@@ -10494,7 +10725,7 @@ async function api(path, options = {}) {
   const urls = apiUrls(path);
   const { timeoutMs, retryOnTimeout = false, noStatus, noFallback = false, headers = {}, ...fetchOptions } = options;
   const defaultTimeout =
-    path.startsWith("/api/job-workbench")
+    path.startsWith("/api/job-workbench") || path.startsWith("/api/job-loadout")
       ? 45000
       : path.startsWith("/api/vin/") || path.startsWith("/api/vehicle-lookup")
         ? 22000
@@ -10890,6 +11121,19 @@ clearWorkbenchButton?.addEventListener("click", () => {
   updateAiContextUi();
 });
 
+loadoutForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadJobLoadout(loadoutQueryFromForm());
+});
+
+refreshLoadoutButton?.addEventListener("click", () => loadJobLoadout(loadoutQueryFromForm()));
+
+loadoutUseCurrentButton?.addEventListener("click", () => {
+  const query = latestVinProfile?.vin || latestWorkbench?.vin || latestWorkbench?.activeQueries?.part || workbenchQueryFromForm() || globalSearchQuery();
+  if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query || "";
+  loadJobLoadout(query || "");
+});
+
 referenceListForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   loadReferenceList();
@@ -10947,6 +11191,22 @@ document.addEventListener("click", (event) => {
   const codeDeskLearnButton = event.target.closest("[data-code-desk-learn]");
   if (codeDeskLearnButton) {
     learnCodeDeskOutcome(codeDeskLearnButton.dataset.codeDeskLearn, codeDeskLearnButton);
+    return;
+  }
+
+  const loadoutOpenButton = event.target.closest("[data-loadout-open]");
+  if (loadoutOpenButton) {
+    openLoadoutTarget(loadoutOpenButton.dataset.loadoutOpen, loadoutOpenButton.dataset.loadoutQuery);
+    return;
+  }
+
+  const copyLoadoutButton = event.target.closest("[data-copy-loadout]");
+  if (copyLoadoutButton) {
+    copyJobLoadout();
+    copyLoadoutButton.textContent = "Copied";
+    window.setTimeout(() => {
+      copyLoadoutButton.textContent = "Copy Kit";
+    }, 1200);
     return;
   }
 

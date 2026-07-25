@@ -138,6 +138,9 @@ function normalizeStore(store = {}) {
     auditLog: Array.isArray(store.auditLog) ? store.auditLog : [],
     aiFeedback: Array.isArray(store.aiFeedback) ? store.aiFeedback : [],
     shopRules: Array.isArray(store.shopRules) ? store.shopRules : [],
+    inventoryItems: Array.isArray(store.inventoryItems) ? store.inventoryItems : [],
+    inventoryLedger: Array.isArray(store.inventoryLedger) ? store.inventoryLedger : [],
+    inventoryLocations: Array.isArray(store.inventoryLocations) ? store.inventoryLocations : [],
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
     codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
@@ -6626,6 +6629,488 @@ function buildCoverageDashboard(jobs = [], partsReference = {}) {
   };
 }
 
+function fieldLoadoutInventoryRows(store = {}) {
+  const sources = [
+    ["Inventory items", store.inventoryItems],
+    ["Inventory ledger", store.inventoryLedger],
+    ["Inventory locations", store.inventoryLocations],
+    ["Metka inventory", store.metkaInventory],
+    ["Inventory", store.inventory],
+  ];
+  return sources.flatMap(([source, rows]) =>
+    (Array.isArray(rows) ? rows : []).filter((row) => row && typeof row === "object").map((row) => ({ source, row })),
+  );
+}
+
+function fieldLoadoutRowText(row = {}) {
+  return flattenSearchValues(row).join(" ");
+}
+
+function fieldLoadoutRowQuantity(row = {}) {
+  const candidates = [
+    row.qty,
+    row.quantity,
+    row.Qty,
+    row.Quantity,
+    row.onHand,
+    row.OnHand,
+    row.currentStock,
+    row.CurrentStock,
+    row.Stock,
+    row.stock,
+    row.Balance,
+    row.balance,
+  ];
+  for (const value of candidates) {
+    const number = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function fieldLoadoutRowLocation(row = {}) {
+  return cleanString(
+    row.location ||
+      row.Location ||
+      row.locationName ||
+      row.LocationName ||
+      row.TargetLocation ||
+      row.targetLocation ||
+      row.bin ||
+      row.Bin ||
+      row.van ||
+      row.Van ||
+      row.shelf ||
+      row.Shelf,
+  );
+}
+
+function fieldLoadoutInventorySignal(store = {}, values = []) {
+  const rows = fieldLoadoutInventoryRows(store);
+  if (!rows.length) {
+    return {
+      status: "not-connected",
+      label: "Inventory not connected",
+      quantity: null,
+      locations: [],
+      matchedRows: 0,
+    };
+  }
+  const tokens = uniqueCleanValues(values)
+    .flatMap(partReferenceTokenVariants)
+    .map(compactToken)
+    .filter((token) => token.length >= 4);
+  const matches = rows.filter(({ row }) => {
+    const text = compactToken(fieldLoadoutRowText(row));
+    return tokens.some((token) => text.includes(token));
+  });
+  if (!matches.length) {
+    return {
+      status: "unseen",
+      label: "No inventory match",
+      quantity: null,
+      locations: [],
+      matchedRows: 0,
+    };
+  }
+  const quantities = matches.map(({ row }) => fieldLoadoutRowQuantity(row)).filter((value) => value !== null);
+  const quantity = quantities.length ? quantities.reduce((total, value) => total + value, 0) : null;
+  const locations = uniqueCleanValues(matches.map(({ row }) => fieldLoadoutRowLocation(row))).slice(0, 5);
+  return {
+    status: quantity === null ? "matched" : quantity > 0 ? "in-stock" : "empty",
+    label: quantity === null ? "Inventory row matched" : quantity > 0 ? `${quantity} on hand` : "Inventory empty",
+    quantity,
+    locations,
+    matchedRows: matches.length,
+  };
+}
+
+function usefulFieldLoadoutPartValue(value) {
+  const text = cleanString(value);
+  const compact = compactToken(text);
+  if (!compact || compact.length < 4) return false;
+  if (normalizeVinCandidate(text)) return false;
+  if (/^(?:ADD|AKL|ALLKEYSLOST|AUTOMOTIVE|CUSTOMER|COMPLETED|FIELD|HISTORY|IMPORTED|JOB|KEY|KEYS|LOCK|LOCKSMITH|PARTOUTCOME|OUTCOMEWORKED|PROGRAMMINGPATH|REMOTE|SAVEDJOB|SHOPPROOF|UNKNOWN|VEHICLE|VERIFIED|WORKED)$/.test(compact)) return false;
+  if (/^(?:19|20)\d{2}$/.test(compact)) return false;
+  if (!/\d/.test(compact)) return false;
+  return true;
+}
+
+function fieldLoadoutConfidenceLabel(score) {
+  const value = Number(score || 0);
+  if (value >= 88) return "High";
+  if (value >= 72) return "Good";
+  if (value >= 56) return "Verify";
+  return "Low";
+}
+
+function fieldLoadoutServiceFamily(jobOrText = {}) {
+  const text = normalizeVehicleText(
+    typeof jobOrText === "string"
+      ? jobOrText
+      : [jobOrText.title, jobOrText.service, jobOrText.sequence, jobOrText.notes || [], jobOrText.tags || []].flat(Infinity).join(" "),
+  );
+  if (/ALL KEYS|AKL|LOST/.test(text)) return "AKL";
+  if (/\bADD\b|DUP|DUPLICATE|SPARE/.test(text)) return "ADD";
+  if (/PROX|SMART|PUSH|FOB/.test(text)) return "Prox";
+  if (/REMOTE|RHK/.test(text)) return "Remote";
+  return "Key";
+}
+
+function fieldLoadoutCandidateValues(candidate = {}) {
+  return uniqueCleanValues([
+    candidate.value,
+    candidate.label,
+    candidate.identifiers || [],
+    candidate.oemSources || [],
+    candidate.crossReferences?.flatMap((reference) => [
+      reference.primary,
+      reference.primaryLabel,
+      reference.identifiers || [],
+      reference.oemPartNumbers || [],
+      reference.aliases || [],
+    ]) || [],
+  ]);
+}
+
+function addFieldLoadoutCandidate(map, raw = {}, partsReference = {}, store = {}) {
+  const value = cleanString(raw.value || raw.label || raw.name);
+  const kind = cleanString(raw.kind || "part") || "part";
+  const requiresPartToken = kind === "part";
+  if (!value || (requiresPartToken && !usefulFieldLoadoutPartValue(value))) return;
+  const crossReferences = raw.crossReferences?.length
+    ? raw.crossReferences
+    : lookupPartsCrossReferenceRows(partsReference, [value]).map(crossReferenceSummary).slice(0, 4);
+  const identifiers = uniqueCleanValues([
+    value,
+    raw.identifiers || [],
+    crossReferences.flatMap((reference) => [
+      reference.primary,
+      reference.primaryLabel,
+      reference.identifiers || [],
+      (reference.labeledIdentifiers || []).map((item) => `${item.label} ${item.value}`),
+    ]),
+  ]).slice(0, 18);
+  const key = compactToken(identifiers[0] || value);
+  if (!key) return;
+  const existing = map.get(key) || {
+    key,
+    label: crossReferences[0]?.primaryLabel || raw.label || value,
+    value,
+    score: 0,
+    proofJobs: 0,
+    warnings: 0,
+    identifiers: [],
+    oemSources: [],
+    evidence: [],
+    vehicles: [],
+    sources: [],
+    crossReferences: [],
+    kind,
+  };
+  existing.score = Math.max(existing.score, Number(raw.score || 0));
+  existing.proofJobs += Number(raw.proofJobs || raw.count || 0);
+  existing.warnings += Number(raw.warnings || 0);
+  existing.identifiers = uniqueCleanValues([existing.identifiers, identifiers]).slice(0, 18);
+  existing.oemSources = uniqueCleanValues([
+    existing.oemSources,
+    raw.oemSources || [],
+    crossReferences.flatMap((reference) => reference.oemPartNumbers || []),
+  ]).slice(0, 12);
+  existing.evidence = uniqueCleanValues([existing.evidence, raw.evidence || []]).slice(0, 6);
+  existing.vehicles = uniqueCleanValues([existing.vehicles, raw.vehicles || []]).slice(0, 6);
+  existing.sources = uniqueCleanValues([existing.sources, raw.source || raw.sources || []]).slice(0, 6);
+  existing.crossReferences = uniqueById([existing.crossReferences, crossReferences].flat(), (reference) => reference.id || reference.primary).slice(0, 4);
+  existing.kind = existing.kind || kind;
+  existing.inventory = ["part", "supply"].includes(existing.kind)
+    ? fieldLoadoutInventorySignal(store, fieldLoadoutCandidateValues(existing))
+    : { status: "not-needed", label: "No stock count", quantity: null, locations: [], matchedRows: 0 };
+  map.set(key, existing);
+}
+
+function serializeFieldLoadoutCandidate(candidate = null) {
+  if (!candidate) return null;
+  const score = Math.max(1, Math.min(99, Math.round(Number(candidate.score || 0) + Math.min(Number(candidate.proofJobs || 0) * 2, 8))));
+  return {
+    ...candidate,
+    score,
+    confidenceLabel: fieldLoadoutConfidenceLabel(score),
+    proofJobs: Number(candidate.proofJobs || 0),
+  };
+}
+
+function fieldLoadoutNoChoice(label, reason) {
+  return {
+    key: compactToken(label),
+    label,
+    value: label,
+    score: 0,
+    confidenceLabel: "Low",
+    proofJobs: 0,
+    identifiers: [],
+    oemSources: [],
+    evidence: [reason],
+    vehicles: [],
+    sources: ["Gap"],
+    crossReferences: [],
+    inventory: {
+      status: "not-connected",
+      label: "Verify manually",
+      quantity: null,
+      locations: [],
+      matchedRows: 0,
+    },
+  };
+}
+
+function buildFieldLoadoutSections({ parts = [], programmers = [], lishi = [], supplies = [], proof = [] } = {}) {
+  return [
+    {
+      id: "primary",
+      title: "Primary key / remote",
+      item: serializeFieldLoadoutCandidate(parts[0]) || fieldLoadoutNoChoice("No proven primary part", "Save a worked job or search a tighter VIN/YMM/part clue."),
+    },
+    {
+      id: "backup",
+      title: "Backup to bring",
+      item: serializeFieldLoadoutCandidate(parts[1]) || fieldLoadoutNoChoice("No proven backup part", "Bring a universal fallback only after confirming keyway/FCC."),
+    },
+    {
+      id: "programmer",
+      title: "Programmer",
+      item: serializeFieldLoadoutCandidate(programmers[0]) || fieldLoadoutNoChoice("Programmer not proven", "No matched job had a recorded programmer."),
+    },
+    {
+      id: "lishi",
+      title: "Lishi / decode tool",
+      item: serializeFieldLoadoutCandidate(lishi[0]) || fieldLoadoutNoChoice("Lishi not confirmed", "Verify keyway at the vehicle or Lishi reference before relying on it."),
+    },
+    {
+      id: "supplies",
+      title: "Small kit",
+      item: serializeFieldLoadoutCandidate(supplies[0]) || fieldLoadoutNoChoice("Standard battery / blade kit", "Inventory data has not identified a specific small kit."),
+    },
+    {
+      id: "proof",
+      title: "Proof to capture",
+      item: serializeFieldLoadoutCandidate(proof[0]) || fieldLoadoutNoChoice("Authorization photo + final working proof", "Capture authorization and the final working key outcome."),
+    },
+  ];
+}
+
+function inferFieldLoadoutVehicle({ query = "", vin = "", profile = {}, body = {}, jobs = [] } = {}) {
+  const fromProfile = profile.vehicle && typeof profile.vehicle === "object" ? profile.vehicle : {};
+  const fromBody = body.vehicle && typeof body.vehicle === "object" ? body.vehicle : {};
+  let vehicle = {
+    year: cleanString(fromProfile.year || fromBody.year),
+    make: cleanString(fromProfile.make || fromBody.make),
+    model: cleanString(fromProfile.model || fromBody.model),
+    trim: cleanString(fromProfile.trim || fromBody.trim),
+  };
+  if (vehicle.year || vehicle.make || vehicle.model) return vehicle;
+  if (vin) {
+    const exactJob = jobs.find((job) => jobVins(job).includes(vin));
+    if (exactJob) vehicle = coverageVehicleForJob(exactJob);
+  }
+  if (vehicle.year || vehicle.make || vehicle.model) return vehicle;
+  return coverageVehicleForJob({ title: query, vehicle: query, vin });
+}
+
+async function buildJobLoadout(body = {}, store = { jobs: [] }) {
+  const query = cleanString(body.q || body.query || body.loadoutQuery || body.partQuery || body.proofQuery || "");
+  const profile = body.profile && typeof body.profile === "object" ? body.profile : {};
+  const vin = normalizeVinCandidate(body.vin) || normalizeVinCandidate(query) || normalizeVinCandidate(profile.vin);
+  const cleanJobs = mergedSearchJobs(store.jobs || [], body.jobs || body.localJobs || []);
+  const partsReference = await readPartsCrossReference();
+  const evidenceIndex = buildJobEvidenceIndex(cleanJobs, partsReference);
+  const vehicle = inferFieldLoadoutVehicle({ query, vin, profile, body, jobs: cleanJobs });
+  const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].map(cleanString).filter(Boolean).join(" ") || query || vin || "Current job";
+  const proofPatterns = buildProofPatternBaseline(evidenceIndex, partsReference, { vin, vehicle });
+  const shopEvidence = buildShopEvidence(vehicle, vin, cleanJobs);
+  const partQuery = workbenchPrimaryPartQuery(profile, { ...body, q: normalizeVinCandidate(query) ? "" : query }) || query;
+  const partHistory = partQuery ? buildPartHistory(partQuery, evidenceIndex, partsReference) : null;
+  const proofVault = buildProofVault(vin || query || title, evidenceIndex, partsReference);
+  const lishiReference = await readLishiMasterReference();
+  const lishiLookup = buildLishiLookup(lishiReference, {
+    q: uniqueCleanValues([query, [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), proofPatterns.best?.lishiKeyways?.[0]?.value]).join(" "),
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    category: "Automotive",
+    limit: 16,
+  });
+  const partCandidates = new Map();
+  const programmerCandidates = new Map();
+  const lishiCandidates = new Map();
+  const supplyCandidates = new Map();
+  const proofCandidates = new Map();
+
+  (partHistory?.crossReferences || []).slice(0, 8).forEach((reference, index) => {
+    addFieldLoadoutCandidate(partCandidates, {
+      value: reference.primaryLabel || reference.primary,
+      score: 78 - index * 2 + Math.min((partHistory.jobs || []).length * 3, 12),
+      proofJobs: (partHistory.jobs || []).length,
+      source: "Part cross-reference",
+      crossReferences: [reference],
+      identifiers: reference.identifiers || [],
+      oemSources: reference.oemPartNumbers || [],
+      evidence: [
+        `${partHistory.referenceStats?.matchedReferenceRows || partHistory.crossReferences?.length || 0} cross-reference row${(partHistory.referenceStats?.matchedReferenceRows || partHistory.crossReferences?.length || 0) === 1 ? "" : "s"}`,
+        `${(partHistory.jobs || []).length} saved proof job${(partHistory.jobs || []).length === 1 ? "" : "s"}`,
+      ],
+    }, partsReference, store);
+  });
+
+  (partHistory?.jobs || []).slice(0, 12).forEach((job) => {
+    (job.partNumbers || []).filter(usefulFieldLoadoutPartValue).slice(0, 5).forEach((value) => {
+      addFieldLoadoutCandidate(partCandidates, {
+        value,
+        score: job.outcome?.key === "success" ? 74 : 58,
+        proofJobs: 1,
+        warnings: job.outcome?.key === "warning" ? 1 : 0,
+        source: "Saved worked job",
+        vehicles: [job.vehicle],
+        evidence: [job.outcome?.label || "Saved job", job.programmer || ""],
+      }, partsReference, store);
+    });
+  });
+
+  (proofPatterns.best?.topParts || []).slice(0, 8).forEach((item, index) => {
+    addFieldLoadoutCandidate(partCandidates, {
+      value: item.value,
+      score: Math.min(88, 56 + Number(proofPatterns.best?.confidencePercent || 0) / 4 + Number(item.count || 0) * 5 - index * 2),
+      proofJobs: item.count || 0,
+      source: proofPatterns.best?.kind === "exact-vin" ? "Exact VIN proof pattern" : proofPatterns.best?.label || "Proof pattern",
+      vehicles: item.vehicles || [],
+      crossReferences: item.crossReferences || [],
+      oemSources: item.oemSources || [],
+      evidence: [`${item.count || 0} proof pattern hit${Number(item.count || 0) === 1 ? "" : "s"}`],
+    }, partsReference, store);
+  });
+
+  (shopEvidence.positiveTokens || []).filter(usefulFieldLoadoutPartValue).slice(0, 10).forEach((value) => {
+    addFieldLoadoutCandidate(partCandidates, {
+      value,
+      score: shopEvidence.exactVinCount ? 84 : shopEvidence.exactVehicleCount ? 74 : 62,
+      proofJobs: shopEvidence.totalMatches || 0,
+      source: "Shop evidence",
+      evidence: [shopEvidence.summary],
+    }, partsReference, store);
+  });
+
+  uniqueCleanValues([
+    proofPatterns.best?.programmers?.map((item) => item.value),
+    shopEvidence.programmers || [],
+    (partHistory?.programmerEvidence?.programmers || []).map((item) => item.name),
+  ]).slice(0, 8).forEach((programmer, index) => {
+    const proofCount = (proofPatterns.best?.programmers || []).find((item) => item.value === programmer)?.count || (partHistory?.programmerEvidence?.programmers || []).find((item) => item.name === programmer)?.jobs || 0;
+    addFieldLoadoutCandidate(programmerCandidates, {
+      kind: "programmer",
+      value: programmer,
+      label: programmer,
+      score: Math.min(96, 70 + proofCount * 5 - index * 2),
+      proofJobs: proofCount,
+      source: "Programmer proof",
+      evidence: [`${proofCount || shopEvidence.totalMatches || 0} matched proof job${(proofCount || shopEvidence.totalMatches || 0) === 1 ? "" : "s"}`],
+    }, partsReference, store);
+  });
+
+  uniqueCleanValues([
+    proofPatterns.best?.lishiKeyways?.map((item) => item.value),
+    shopEvidence.lishiKeyways || [],
+    (lishiLookup.tools || []).map((tool) => tool.canonical || tool.tool),
+  ]).slice(0, 10).forEach((tool, index) => {
+    const lishiTool = (lishiLookup.tools || []).find((item) => [item.canonical, item.tool].map(compactToken).includes(compactToken(tool)));
+    const proofCount = (proofPatterns.best?.lishiKeyways || []).find((item) => item.value === tool)?.count || 0;
+    addFieldLoadoutCandidate(lishiCandidates, {
+      kind: "lishi",
+      value: tool,
+      label: tool,
+      score: Math.min(94, (lishiTool?.vehicleConfirmed ? 78 : 58) + proofCount * 5 - index * 2),
+      proofJobs: proofCount,
+      source: lishiTool?.vehicleConfirmed ? "Vehicle-confirmed Lishi" : "Lishi/keyway proof",
+      evidence: [lishiTool?.vehicleConfirmed ? "Vehicle application matched" : `${proofCount} proof keyway hit${proofCount === 1 ? "" : "s"}`],
+    }, partsReference, store);
+  });
+
+  const serviceFamily = fieldLoadoutServiceFamily([query, title, (proofVault.records || []).map((record) => record.service)].flat().join(" "));
+  addFieldLoadoutCandidate(supplyCandidates, {
+    kind: "supply",
+    value: serviceFamily === "Prox" || serviceFamily === "Remote" ? "CR2032 battery kit" : "Common blade and battery kit",
+    label: serviceFamily === "Prox" || serviceFamily === "Remote" ? "CR2032 battery kit" : "Common blade and battery kit",
+    score: partCandidates.size ? 52 : 38,
+    proofJobs: 0,
+    source: "Standard field kit",
+    evidence: [serviceFamily, "Verify exact battery before replacement"],
+  }, partsReference, store);
+
+  addFieldLoadoutCandidate(proofCandidates, {
+    kind: "proof",
+    value: "Authorization + final working proof",
+    label: "Authorization + final working proof",
+    score: 99,
+    proofJobs: proofVault.summary?.matchingJobs || 0,
+    source: "Required proof",
+    evidence: ["Authorization photo", "Final working key/programmer outcome"],
+  }, partsReference, store);
+
+  const sortCandidates = (map) => Array.from(map.values()).sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(b.proofJobs || 0) - Number(a.proofJobs || 0) || a.label.localeCompare(b.label));
+  const partList = sortCandidates(partCandidates);
+  const programmerList = sortCandidates(programmerCandidates);
+  const lishiList = sortCandidates(lishiCandidates);
+  const supplyList = sortCandidates(supplyCandidates);
+  const proofList = sortCandidates(proofCandidates);
+  const sections = buildFieldLoadoutSections({
+    parts: partList,
+    programmers: programmerList,
+    lishi: lishiList,
+    supplies: supplyList,
+    proof: proofList,
+  });
+  const sectionWeights = { primary: 0.36, backup: 0.1, programmer: 0.2, lishi: 0.14, supplies: 0.08, proof: 0.12 };
+  const weightedConfidence = sections.reduce((total, section) => total + Number(section.item?.score || 0) * (sectionWeights[section.id] || 0), 0);
+  let confidencePercent = Math.round(Math.max(partList.length ? 56 : 0, weightedConfidence));
+  if (!partList.length) confidencePercent = Math.min(confidencePercent, 55);
+  if (!programmerList.length) confidencePercent = Math.min(confidencePercent, 74);
+  if (!lishiList.length && !partList.length) confidencePercent = Math.min(confidencePercent, 52);
+  const exactProof = Number(shopEvidence.exactVinCount || 0);
+  const relatedProof = Math.max(Number(shopEvidence.exactVehicleCount || 0), Number(proofPatterns.best?.records || 0));
+  return {
+    generatedAt: new Date().toISOString(),
+    title,
+    query,
+    vin,
+    vehicle,
+    mode: "field-loadout",
+    confidencePercent,
+    confidenceLabel: fieldLoadoutConfidenceLabel(confidencePercent),
+    summary: {
+      jobsScanned: cleanJobs.length,
+      exactProof,
+      relatedProof,
+      partCandidates: partList.length,
+      inventoryRows: fieldLoadoutInventoryRows(store).length,
+      lishiCandidates: lishiList.length,
+      serviceFamily,
+    },
+    sections,
+    alternates: partList.slice(2, 8).map(serializeFieldLoadoutCandidate),
+    proof: {
+      matchedJobs: proofVault.summary?.matchingJobs || 0,
+      pattern: proofPatterns.best?.label || "",
+      patternConfidence: proofPatterns.best?.confidencePercent || 0,
+      note: "Loadout is learned from saved TimLock proof and cross-reference data. Verify VIN, FCC, keyway, and authorization before programming.",
+    },
+    inventory: {
+      connected: fieldLoadoutInventoryRows(store).length > 0,
+      rows: fieldLoadoutInventoryRows(store).length,
+      note: fieldLoadoutInventoryRows(store).length
+        ? "Inventory rows are matched by part aliases and normalized identifiers."
+        : "Inventory import is not connected yet, so stock status is proof-based only.",
+    },
+  };
+}
+
 function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = [], options = {}) {
   const includeReferences = options.includeReferences !== false;
   const extractedTokens = extractPartHistoryJobTokens(job);
@@ -8451,6 +8936,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     lishiEvidence,
     nextActions: [
       { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
+      { label: "Build field loadout", target: "loadout", tone: partHistory?.jobs?.length || proofPatterns.best?.records ? "ready" : "verify" },
       { label: partQuery ? `Check part history for ${partQuery}` : "Search LR/MW/TI/OE part history", target: "part-history", tone: partHistory?.jobs?.length ? "ready" : "verify" },
       {
         label: lishiEvidence.status === "conflict"
@@ -8720,6 +9206,18 @@ async function buildGlobalSearch(body = {}, store = { jobs: [] }) {
       detail: "Best first stop when you are not sure which tool should own the search.",
       badge: "Unified",
       target: "workbench",
+      query,
+    },
+  ]));
+
+  groups.push(globalGroup("loadout", "Job Loadout", "loadout", [
+    {
+      id: "job-loadout",
+      title: `Build loadout for ${query}`,
+      subtitle: "What to bring: key, backup, programmer, Lishi, and proof kit",
+      detail: "Uses saved proof, part aliases, and inventory hooks without exposing raw owner data.",
+      badge: "Field kit",
+      target: "loadout",
       query,
     },
   ]));
@@ -10948,6 +11446,12 @@ async function handleApi(request, response, pathname) {
     const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
     const partsReference = await readPartsCrossReference();
     sendJson(response, 200, buildProofVault(query, mergedSearchJobs(store.jobs, body.jobs || body.localJobs || []), partsReference));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/job-loadout") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await buildJobLoadout(body, store));
     return;
   }
 

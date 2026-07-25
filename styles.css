@@ -6281,6 +6281,11 @@ textarea:focus {
   margin: 0 auto;
 }
 
+.loadout-panel {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
 .code-desk-panel,
 .lishi-panel {
   max-width: 1180px;
@@ -6298,6 +6303,7 @@ textarea:focus {
 
 .proof-vault-result,
 .proof-record-list,
+.loadout-result,
 .code-desk-result,
 .code-desk-record-list {
   display: grid;
@@ -6358,6 +6364,7 @@ textarea:focus {
 }
 
 .workbench-form,
+.loadout-form,
 .reference-list-form {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) auto;
@@ -6374,6 +6381,7 @@ textarea:focus {
 .code-desk-auto-form label,
 .lishi-lookup-form label,
 .workbench-form label,
+.loadout-form label,
 .reference-list-form label,
 .part-history-form label {
   display: grid;
@@ -6391,6 +6399,7 @@ textarea:focus {
 .lishi-lookup-form input,
 .lishi-lookup-form select,
 .workbench-form input,
+.loadout-form input,
 .reference-list-form input,
 .reference-list-form select,
 .part-history-form input {
@@ -6411,6 +6420,7 @@ textarea:focus {
 .lishi-lookup-form input:focus,
 .lishi-lookup-form select:focus,
 .workbench-form input:focus,
+.loadout-form input:focus,
 .reference-list-form input:focus,
 .reference-list-form select:focus,
 .part-history-form input:focus {
@@ -6701,6 +6711,200 @@ textarea:focus {
   font-size: 0.78rem;
   font-weight: 800;
   overflow-wrap: anywhere;
+}
+
+.loadout-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(135deg, #ffffff, rgba(246, 248, 250, 0.96));
+}
+
+.loadout-hero.good,
+.loadout-hero.high {
+  border-color: rgba(55, 122, 86, 0.36);
+  background: linear-gradient(135deg, #f4fbf6, rgba(255, 255, 255, 0.96));
+}
+
+.loadout-hero.verify {
+  border-color: rgba(174, 125, 35, 0.42);
+  background: linear-gradient(135deg, #fff8e8, rgba(255, 255, 255, 0.96));
+}
+
+.loadout-hero h3,
+.loadout-hero p,
+.loadout-card p {
+  margin: 0;
+}
+
+.loadout-hero h3 {
+  font-size: clamp(1.3rem, 3vw, 2rem);
+  line-height: 1.08;
+}
+
+.loadout-hero p {
+  margin-top: 5px;
+  color: var(--muted);
+}
+
+.loadout-hero > strong {
+  display: grid;
+  justify-items: center;
+  min-width: 86px;
+  border-radius: 10px;
+  padding: 10px;
+  background: #151b22;
+  color: white;
+}
+
+.loadout-hero > strong span {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.loadout-hero > strong small {
+  margin-top: 3px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.loadout-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.loadout-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.loadout-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #cfd5dc;
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(246, 248, 250, 0.94);
+  box-shadow: inset 4px 0 0 rgba(79, 89, 101, 0.32);
+}
+
+.loadout-card.high,
+.loadout-card.good {
+  box-shadow: inset 4px 0 0 rgba(55, 122, 86, 0.68);
+}
+
+.loadout-card.verify {
+  box-shadow: inset 4px 0 0 rgba(174, 125, 35, 0.72);
+}
+
+.loadout-card.low {
+  box-shadow: inset 4px 0 0 rgba(160, 68, 68, 0.62);
+}
+
+.loadout-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.loadout-card-head > div {
+  min-width: 0;
+}
+
+.loadout-card-head span,
+.loadout-evidence span {
+  display: block;
+  color: var(--accent-dark);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.loadout-card-head strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.loadout-card-head em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 6px 8px;
+  background: #151b22;
+  color: white;
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.loadout-card-meta,
+.loadout-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.loadout-card-meta span,
+.loadout-evidence span {
+  border: 1px solid #dce2e8;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.part-chip-row.compact {
+  gap: 5px;
+}
+
+.part-chip-row.compact span {
+  padding: 4px 7px;
+  font-size: 0.72rem;
+}
+
+.loadout-actions {
+  align-items: flex-start;
+}
+
+.loadout-alternates {
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.loadout-alternates summary {
+  cursor: pointer;
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.loadout-alternates .global-result-list {
+  margin-top: 10px;
+}
+
+.loadout-alt-card {
+  background: white;
 }
 
 .workbench-grid {
@@ -8138,6 +8342,7 @@ textarea:focus {
 
 @media (max-width: 760px) {
   .part-history-form,
+  .loadout-form,
   .code-desk-form,
   .code-desk-auto-form,
   .lishi-lookup-form,
@@ -8157,6 +8362,8 @@ textarea:focus {
   .lishi-result-grid,
   .auto-baseline-grid,
   .workbench-grid,
+  .loadout-grid,
+  .loadout-summary-grid,
   .history-summary-grid,
   .history-job-grid,
   .storage-status-details,
@@ -8182,7 +8389,8 @@ textarea:focus {
   }
 
   .history-job-head,
-  .verified-code-head {
+  .verified-code-head,
+  .loadout-card-head {
     flex-direction: column;
   }
 
@@ -8224,6 +8432,7 @@ textarea:focus {
   }
 
   .mission-hero,
+  .loadout-hero,
   .mission-intel-head,
   .algorithm-lab-hero,
   .training-hero,
@@ -8309,6 +8518,7 @@ textarea:focus {
 
   .global-search-form,
   .part-history-form,
+  .loadout-form,
   .proof-vault-form,
   .workbench-form,
   .code-desk-form,
@@ -8320,6 +8530,7 @@ textarea:focus {
 
   .global-search-form input,
   .part-history-form input,
+  .loadout-form input,
   .proof-vault-form input,
   .workbench-form input,
   .code-desk-form input,
@@ -8353,6 +8564,7 @@ textarea:focus {
   .field-os-actions,
   .proof-vault-actions,
   .proof-card-actions,
+  .loadout-actions .workbench-action-buttons,
   .workbench-action-buttons,
   .mission-control-actions,
   .training-actions,
@@ -8367,6 +8579,7 @@ textarea:focus {
   .field-os-actions > *,
   .proof-vault-actions > *,
   .proof-card-actions > *,
+  .loadout-actions .workbench-action-buttons > *,
   .workbench-action-buttons > *,
   .mission-control-actions > *,
   .training-actions > *,

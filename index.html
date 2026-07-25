@@ -68,6 +68,10 @@
             <span>Job Workbench</span>
             <small>Parts, proof, tools</small>
           </button>
+          <button class="nav-item" data-view="loadout">
+            <span>Job Loadout</span>
+            <small>What to bring</small>
+          </button>
           <button class="nav-item" data-view="ai">
             <span>AI Bench</span>
             <small>Copilot and audit</small>
@@ -333,6 +337,35 @@
               <article class="assistant-card">
                 <strong>One place for the current job</strong>
                 <p>Run a VIN/vehicle lookup or search a part number here. The workbench pulls part history, Lishi, Code Desk, Proof Vault, and coverage into one packet.</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="loadout">
+          <section class="panel wide loadout-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Field inventory</p>
+                <h3>Job Loadout</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="loadoutUseCurrent">Use Current Job</button>
+                <button class="secondary-action small" type="button" id="refreshLoadout">Refresh</button>
+              </div>
+            </div>
+            <form id="loadoutForm" class="loadout-form">
+              <label class="wide-field">
+                Job, VIN, vehicle, part, keyway, or programmer
+                <input name="loadoutQuery" placeholder="VIN, 2019 Ranger, LR# FRD068, HU101, Smart Pro" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              </label>
+              <button class="primary-action" type="submit">Build Loadout</button>
+            </form>
+            <div class="form-status" id="loadoutStatus"></div>
+            <div class="loadout-result" id="loadoutResult">
+              <article class="assistant-card">
+                <strong>What to bring, not what to order</strong>
+                <p>Search a VIN, vehicle, part number, or current job. TimLock will rank the primary key, backup, programmer, Lishi/decode tool, small kit, and proof capture.</p>
               </article>
             </div>
           </section>

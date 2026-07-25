@@ -4,6 +4,9 @@
   "auditLog": [],
   "aiFeedback": [],
   "shopRules": [],
+  "inventoryItems": [],
+  "inventoryLedger": [],
+  "inventoryLocations": [],
   "codeDeskRecords": [],
   "codeDeskSystems": [],
   "codeDeskLessons": []
