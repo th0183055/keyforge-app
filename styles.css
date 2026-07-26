@@ -11666,3 +11666,8 @@ body:not(.is-start-screen) .dispatch-packet-card.high {
     width: 100%;
   }
 }
+
+body:not(.show-global-intelligence) main > #aiRouteCard,
+body:not(.show-global-intelligence) main > #fieldOsPanel {
+  display: none !important;
+}

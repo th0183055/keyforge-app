@@ -418,6 +418,7 @@ function showView(id, options = {}) {
   });
   activeViewId = id;
   document.body.classList.toggle("is-start-screen", id === "command");
+  document.body.classList.toggle("show-global-intelligence", id === "mission-control");
   if (id !== "command") closeStartMenu();
   updateRouteChrome(id);
   if (push && previousViewId && previousViewId !== id) {
@@ -6363,7 +6364,7 @@ async function scheduleJobFromStart() {
       noStatus: true,
     });
     const eventText = result.event?.htmlLink ? "Calendar event created." : result.calendarError || "Job saved in TimLock.";
-    setStartJobStatus(`Scheduled: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, result.event ? "ready" : "warn");
+    setStartJobStatus(`Saved: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, "ready");
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
     quickScheduleJobForm.reset();
     latestWorkspaceBrief = null;

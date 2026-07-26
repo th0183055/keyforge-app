@@ -4550,6 +4550,7 @@ function buildMetkaBridgeStatus(store = {}) {
 const googleOAuthAuthorizeUrl = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleOAuthTokenUrl = "https://oauth2.googleapis.com/token";
 const googleUserInfoUrl = "https://openidconnect.googleapis.com/v1/userinfo";
+const googleCalendarWriteTimeoutMs = Math.max(2500, Math.min(Number(process.env.GOOGLE_CALENDAR_WRITE_TIMEOUT_MS) || 6500, 15000));
 const googleDefaultScopes = [
   "openid",
   "email",
@@ -4794,7 +4795,23 @@ async function exchangeGoogleCode(request, code) {
   return response.json();
 }
 
-async function refreshGoogleAccessToken(store, request) {
+function googleTimeoutSignal(ms = googleCalendarWriteTimeoutMs) {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+function googleCalendarTimeoutMessage(ms = googleCalendarWriteTimeoutMs) {
+  return `Google Calendar did not answer within ${Math.round(ms / 1000)} seconds. Job saved in TimLock; sync Calendar from Dispatch when Google catches up.`;
+}
+
+function googleBestEffortError(error, ms = googleCalendarWriteTimeoutMs) {
+  if (error?.name === "AbortError" || error?.name === "TimeoutError") return googleCalendarTimeoutMessage(ms);
+  return error?.message || "Google Calendar did not answer. Job saved in TimLock.";
+}
+
+async function refreshGoogleAccessToken(store, request, options = {}) {
   const config = googleClientConfig(request);
   if (!config.configured) throw new Error("Google Workspace OAuth is not configured on the server.");
   const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
@@ -4807,6 +4824,7 @@ async function refreshGoogleAccessToken(store, request) {
   const response = await fetch(googleOAuthTokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    signal: options.signal,
     body: new URLSearchParams({
       client_id: config.clientId,
       client_secret: config.clientSecret,
@@ -4821,23 +4839,23 @@ async function refreshGoogleAccessToken(store, request) {
   return decryptGoogleSecret(store.googleWorkspace.tokens?.accessTokenCipher);
 }
 
-async function googleAccessToken(store, request) {
+async function googleAccessToken(store, request, options = {}) {
   const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
   const expiresAt = Number(workspace.tokens?.expiryDate || 0);
   const hasUsableAccessToken = workspace.tokens?.accessTokenCipher && (!expiresAt || expiresAt > Date.now() + 60_000);
   if (hasUsableAccessToken) return decryptGoogleSecret(workspace.tokens.accessTokenCipher);
-  return refreshGoogleAccessToken(store, request);
+  return refreshGoogleAccessToken(store, request, options);
 }
 
 async function googleApiJson(store, request, url, options = {}, retry = true) {
-  const accessToken = await googleAccessToken(store, request);
+  const accessToken = await googleAccessToken(store, request, options);
   const headers = {
     ...(options.headers || {}),
     Authorization: `Bearer ${accessToken}`,
   };
   const response = await fetch(url, { ...options, headers });
   if (response.status === 401 && retry) {
-    await refreshGoogleAccessToken(store, request);
+    await refreshGoogleAccessToken(store, request, options);
     return googleApiJson(store, request, url, options, false);
   }
   if (!response.ok) throw new Error(await googleErrorMessage(response));
@@ -4935,7 +4953,7 @@ async function syncGoogleCalendarEvents(request, store, options = {}) {
   };
 }
 
-async function createGoogleCalendarEvent(request, store, body = {}) {
+async function createGoogleCalendarEvent(request, store, body = {}, options = {}) {
   const config = googleClientConfig(request);
   const event = {
     summary: cleanString(body.summary || body.title || "TimLock job"),
@@ -4952,6 +4970,7 @@ async function createGoogleCalendarEvent(request, store, body = {}) {
   const created = await googleApiJson(store, request, apiUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: options.signal,
     body: JSON.stringify(event),
   });
   return { event: googleCalendarEventPublic(created), google: googleWorkspacePublicStatus(store, request) };
@@ -5024,21 +5043,25 @@ async function createScheduledJob(request, store, input = {}) {
   const job = normalizeScheduleJobInput(input);
   let calendarEvent = null;
   let calendarError = "";
+  store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+  await writeStore(store);
   if (googleWorkspaceConnected(store.googleWorkspace)) {
     try {
-      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job));
+      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
+        signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
+      });
       calendarEvent = created.event || null;
       job.calendarEventId = calendarEvent?.id || "";
       job.calendarHtmlLink = calendarEvent?.htmlLink || "";
       job.status = job.calendarEventId ? "calendar-created" : job.status;
+      store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+      await writeStore(store);
     } catch (error) {
-      calendarError = error.message;
+      calendarError = googleBestEffortError(error, googleCalendarWriteTimeoutMs);
     }
   } else {
     calendarError = "Google Workspace is not connected yet. The job was saved in TimLock and can be sent to Calendar after setup.";
   }
-  store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
-  await writeStore(store);
   return {
     ok: true,
     job,
