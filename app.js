@@ -6749,6 +6749,7 @@ function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
         <button class="secondary-action small" type="button" data-dispatch-action="workbench" data-dispatch-id="${escapeHtml(selected.id)}">Job Packet</button>
         ${canPromote ? `<button class="secondary-action small" type="button" data-owner-only data-dispatch-action="promote" data-dispatch-id="${escapeHtml(selected.id)}">Add To Calendar</button>` : ""}
         ${canWriteCalendar ? `<button class="secondary-action small" type="button" data-owner-only data-dispatch-action="writeback" data-dispatch-id="${escapeHtml(selected.id)}">Write AI Note</button>` : ""}
+        <button class="secondary-action small" type="button" data-owner-only data-dispatch-action="complete" data-dispatch-id="${escapeHtml(selected.id)}">Complete + Learn</button>
         <button class="secondary-action small" type="button" data-owner-only data-dispatch-action="drive" data-dispatch-id="${escapeHtml(selected.id)}">Drive Folder</button>
         ${selected.calendarHtmlLink ? `<button class="secondary-action small" type="button" data-dispatch-action="calendar" data-dispatch-id="${escapeHtml(selected.id)}">Open Calendar</button>` : ""}
       </div>
@@ -6866,6 +6867,7 @@ async function dispatchAction(id = "", action = "", button = null) {
   const endpointByAction = {
     promote: "/api/dispatch-intelligence/promote",
     writeback: "/api/dispatch-intelligence/writeback",
+    complete: "/api/dispatch-intelligence/complete",
     drive: "/api/dispatch-intelligence/drive-folder",
   };
   const endpoint = endpointByAction[action];
@@ -6874,9 +6876,11 @@ async function dispatchAction(id = "", action = "", button = null) {
   try {
     if (button) {
       button.disabled = true;
-      button.textContent = action === "drive" ? "Creating..." : action === "writeback" ? "Writing..." : "Adding...";
+      button.textContent = action === "drive" ? "Creating..." : action === "writeback" ? "Writing..." : action === "complete" ? "Saving..." : "Adding...";
     }
-    if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = "Updating Google Workspace...";
+    if (dispatchIntelligenceStatus) {
+      dispatchIntelligenceStatus.textContent = action === "complete" ? "Saving worked proof and updating Calendar..." : "Updating Google Workspace...";
+    }
     const result = await api(endpoint, {
       method: "POST",
       body: JSON.stringify({ id: item.id || id }),
@@ -6884,6 +6888,10 @@ async function dispatchAction(id = "", action = "", button = null) {
       noStatus: true,
     });
     if (result.google) latestGoogleWorkspace = result.google;
+    if (result.job) {
+      jobs = mergeJobLists(jobs, [result.job]);
+      rememberJobs([result.job]);
+    }
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
     await Promise.allSettled([loadWorkspaceBrief(), loadDispatchIntelligence({ id: item.id || id, quiet: true })]);
@@ -6893,9 +6901,13 @@ async function dispatchAction(id = "", action = "", button = null) {
           ? `Drive folder ready${result.folder?.webViewLink ? "." : "."}`
           : action === "writeback"
             ? "AI packet written to Google Calendar."
-            : result.event?.htmlLink
-              ? "Calendar event created."
-              : result.message || "Dispatch item updated.";
+            : action === "complete"
+              ? result.event?.htmlLink
+                ? "Worked proof saved and Calendar completion written."
+                : "Worked proof saved to TimLock."
+              : result.event?.htmlLink
+                ? "Calendar event created."
+                : result.message || "Dispatch item updated.";
     }
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
     if (result.folder?.webViewLink) window.open(result.folder.webViewLink, "_blank", "noopener");

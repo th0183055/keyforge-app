@@ -3338,6 +3338,7 @@ function cleanPartOutcome(input) {
   const year = cleanString(vehicle.year);
   const make = cleanString(vehicle.make).toUpperCase();
   const model = cleanString(vehicle.model);
+  const trim = typeof vehicle.trim === "function" ? "" : cleanString(vehicle.trim);
   const partName = cleanString(part.name);
   const supplier = cleanString(part.supplier);
   if (!year || !make || !model || !partName) {
@@ -3364,7 +3365,7 @@ function cleanPartOutcome(input) {
     id: randomUUID(),
     title: `${outcome === "worked" ? "Verified part" : "Part feedback"} - ${year} ${make} ${model}`,
     customer: cleanString(jobInput.customer) || "Shop evidence",
-    vehicle: [year, make, model, cleanString(vehicle.trim)].filter(Boolean).join(" "),
+    vehicle: [year, make, model, trim].filter(Boolean).join(" "),
     service: outcome === "worked" ? "Verified key part" : "Part selection feedback",
     verification: "Part marked worked in TimLock-App",
     status: outcome === "worked" ? "Completed" : "Review",
@@ -4920,8 +4921,103 @@ function googleCalendarEventPublic(event = {}) {
     location: cleanString(event.location),
     status: cleanString(event.status),
     htmlLink: cleanString(event.htmlLink),
-    description: cleanString(event.description).slice(0, 500),
+    description: cleanString(event.description).slice(0, 8000),
+    timlockSignature: cleanString(event.extendedProperties?.private?.timlockSignature),
+    timlockJobId: cleanString(event.extendedProperties?.private?.timlockJobId),
+    source: cleanString(event.extendedProperties?.private?.timlockSource),
   };
+}
+
+function dispatchDateBucket(value) {
+  const date = scheduleDateTime(value);
+  return date ? date.toISOString().slice(0, 16) : "";
+}
+
+function dispatchPhoneToken(value) {
+  const digits = cleanString(value).replace(/\D/g, "");
+  return digits.length >= 7 ? digits.slice(-10) : digits;
+}
+
+function dispatchNaturalSignature(input = {}) {
+  const rawText = uniqueCleanValues([
+    input.summary,
+    input.title,
+    input.description,
+    input.notes,
+    input.vehicle,
+    input.vehicleLabel,
+    input.service,
+    input.customer,
+    input.phone,
+    input.location,
+    input.vin,
+  ]).join(" ");
+  const vin = normalizeVinCandidate(input.vin) || extractVinsFromText(rawText)[0] || "";
+  const start = dispatchDateBucket(input.start || input.scheduledAt || input.schedule);
+  const phone = dispatchPhoneToken(input.phone);
+  const customer = normalizeVehicleText(input.customer).slice(0, 32);
+  const location = normalizeVehicleText(input.location).slice(0, 48);
+  const vehicle = normalizeVehicleText(input.vehicle || input.vehicleLabel).slice(0, 48);
+  const service = normalizeVehicleText(input.service || input.summary || input.title).slice(0, 32);
+  const base = vin
+    ? uniqueCleanValues([vin, start, service || vehicle]).join("|")
+    : phone && start
+      ? uniqueCleanValues([phone, start, location || customer || service]).join("|")
+      : customer && location
+        ? uniqueCleanValues([customer, location, start, service]).join("|")
+        : uniqueCleanValues([start, vehicle, service, location]).join("|");
+  const compact = compactToken(base);
+  if (!compact || compact.length < 8) return "";
+  return createHash("sha1").update(compact).digest("hex").slice(0, 18);
+}
+
+function scheduledJobSignature(job = {}) {
+  return cleanString(job.timlockSignature || job.signature) || dispatchNaturalSignature(job);
+}
+
+function calendarEventSignature(event = {}) {
+  return cleanString(event.timlockSignature) || dispatchNaturalSignature(event);
+}
+
+function calendarEventPayload(body = {}, metadata = {}) {
+  const start = scheduleDateTime(body.start) || new Date(Date.now() + 60 * 60 * 1000);
+  const end = scheduleDateTime(body.end) || new Date(start.getTime() + 2 * 60 * 60 * 1000);
+  const privateProps = {
+    timlockSignature: cleanString(metadata.signature || body.timlockSignature || body.signature),
+    timlockJobId: cleanString(metadata.jobId || body.timlockJobId || body.jobId || body.id),
+    timlockSource: cleanString(metadata.source || body.source || "TimLock"),
+  };
+  return {
+    summary: cleanString(body.summary || body.title || "TimLock job"),
+    location: cleanString(body.location),
+    description: cleanString(body.description || body.notes),
+    start: { dateTime: start.toISOString() },
+    end: { dateTime: end.toISOString() },
+    extendedProperties: {
+      private: Object.fromEntries(Object.entries(privateProps).filter(([, value]) => value)),
+    },
+  };
+}
+
+function findMatchingCalendarEvent(store = {}, body = {}, signature = "") {
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const events = workspace.calendar.events || [];
+  const targetSignature = cleanString(signature) || dispatchNaturalSignature(body);
+  if (!targetSignature) return null;
+  return events.find((event) => calendarEventSignature(event) === targetSignature) || null;
+}
+
+function replaceCachedGoogleCalendarEvent(store = {}, event = {}) {
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const publicEvent = googleCalendarEventPublic(event);
+  workspace.calendar.events = [
+    publicEvent,
+    ...(workspace.calendar.events || []).filter((item) => cleanString(item.id) !== publicEvent.id),
+  ].filter((item) => item.id || item.summary).slice(0, 500);
+  workspace.calendar.lastSyncAt = workspace.calendar.lastSyncAt || new Date().toISOString();
+  workspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = workspace;
+  return publicEvent;
 }
 
 async function syncGoogleCalendarEvents(request, store, options = {}) {
@@ -4950,22 +5046,13 @@ async function syncGoogleCalendarEvents(request, store, options = {}) {
     google: googleWorkspacePublicStatus(store, request),
     days,
     events,
+    dispatchJobs: events.map(dispatchItemFromCalendarEvent).slice(0, 80),
   };
 }
 
 async function createGoogleCalendarEvent(request, store, body = {}, options = {}) {
   const config = googleClientConfig(request);
-  const event = {
-    summary: cleanString(body.summary || body.title || "TimLock job"),
-    location: cleanString(body.location),
-    description: cleanString(body.description || body.notes),
-    start: body.start
-      ? { dateTime: new Date(body.start).toISOString() }
-      : { dateTime: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
-    end: body.end
-      ? { dateTime: new Date(body.end).toISOString() }
-      : { dateTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
-  };
+  const event = calendarEventPayload(body, options);
   const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
   const created = await googleApiJson(store, request, apiUrl, {
     method: "POST",
@@ -4973,7 +5060,29 @@ async function createGoogleCalendarEvent(request, store, body = {}, options = {}
     signal: options.signal,
     body: JSON.stringify(event),
   });
-  return { event: googleCalendarEventPublic(created), google: googleWorkspacePublicStatus(store, request) };
+  const publicEvent = replaceCachedGoogleCalendarEvent(store, created);
+  return { event: publicEvent, google: googleWorkspacePublicStatus(store, request), action: "created" };
+}
+
+async function updateGoogleCalendarEvent(request, store, eventId, body = {}, options = {}) {
+  const config = googleClientConfig(request);
+  const event = calendarEventPayload(body, options);
+  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const updated = await googleApiJson(store, request, apiUrl, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    signal: options.signal,
+    body: JSON.stringify(event),
+  });
+  const publicEvent = replaceCachedGoogleCalendarEvent(store, updated);
+  return { event: publicEvent, google: googleWorkspacePublicStatus(store, request), action: "updated" };
+}
+
+async function upsertGoogleCalendarEvent(request, store, body = {}, options = {}) {
+  const signature = cleanString(options.signature || body.timlockSignature || body.signature) || dispatchNaturalSignature(body);
+  const existing = cleanString(options.eventId) ? { id: cleanString(options.eventId) } : findMatchingCalendarEvent(store, body, signature);
+  if (existing?.id) return updateGoogleCalendarEvent(request, store, existing.id, body, { ...options, signature });
+  return createGoogleCalendarEvent(request, store, body, { ...options, signature });
 }
 
 function scheduleDateTime(value) {
@@ -5254,6 +5363,18 @@ async function scheduleJobCalendarBodyWithPacket(job = {}, store = {}) {
   }
 }
 
+async function upsertScheduledJobCalendarEvent(request, store, job = {}, options = {}) {
+  const body = await scheduleJobCalendarBodyWithPacket(job, store);
+  const signature = scheduledJobSignature(job) || dispatchNaturalSignature(body);
+  return upsertGoogleCalendarEvent(request, store, { ...body, source: job.source || "TimLock Schedule" }, {
+    ...options,
+    eventId: cleanString(job.calendarEventId),
+    jobId: cleanString(job.id),
+    signature,
+    source: cleanString(job.source || "TimLock Schedule"),
+  });
+}
+
 function queueScheduledJobCalendarSync(request, jobId) {
   setTimeout(async () => {
     try {
@@ -5261,19 +5382,20 @@ function queueScheduledJobCalendarSync(request, jobId) {
       if (!googleWorkspaceConnected(store.googleWorkspace)) return;
       const jobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
       const job = jobs.find((item) => item.id === jobId);
-      if (!job || job.calendarEventId) return;
-      const created = await createGoogleCalendarEvent(request, store, await scheduleJobCalendarBodyWithPacket(job, store), {
+      if (!job) return;
+      const created = await upsertScheduledJobCalendarEvent(request, store, job, {
         signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
       });
       const calendarEvent = created.event || null;
       if (!calendarEvent?.id) return;
       const updatedJob = {
         ...job,
+        timlockSignature: scheduledJobSignature(job),
         calendarEventId: calendarEvent.id,
         calendarHtmlLink: calendarEvent.htmlLink || "",
-        calendarSyncStatus: "created",
+        calendarSyncStatus: created.action || "created",
         calendarError: "",
-        status: "calendar-created",
+        status: cleanString(job.status || "scheduled"),
         updatedAt: new Date().toISOString(),
       };
       store.scheduledJobs = [updatedJob, ...jobs.filter((item) => item.id !== jobId)].slice(0, 2000);
@@ -5303,6 +5425,19 @@ function scheduledJobKey(job = {}) {
   return cleanString(job.id) || metkaStableId("scheduled-job", [job.start, job.customer, job.phone, job.location, job.vin, job.service]);
 }
 
+function scheduledJobMergeKey(job = {}) {
+  return scheduledJobSignature(job) || scheduledJobKey(job);
+}
+
+function findScheduledJobMatch(jobs = [], job = {}) {
+  const id = cleanString(job.id);
+  const signature = scheduledJobSignature(job);
+  return (jobs || []).find((item) =>
+    (id && cleanString(item.id) === id) ||
+    (signature && scheduledJobSignature(item) === signature)
+  ) || null;
+}
+
 function scheduledJobSortValue(job = {}) {
   return Date.parse(job.start || job.scheduledAt || job.schedule || job.createdAt || "") || 0;
 }
@@ -5312,8 +5447,16 @@ function mergeScheduledJobs(...lists) {
   for (const job of lists.flat()) {
     if (!job || typeof job !== "object") continue;
     const normalized = normalizeScheduleJobInput(job);
-    const key = scheduledJobKey(normalized);
-    merged.set(key, { ...(merged.get(key) || {}), ...normalized, id: key });
+    const key = scheduledJobMergeKey(normalized);
+    const existing = merged.get(key) || {};
+    merged.set(key, {
+      ...existing,
+      ...normalized,
+      id: cleanString(existing.id || normalized.id || scheduledJobKey(normalized)),
+      timlockSignature: scheduledJobSignature(normalized) || scheduledJobSignature(existing),
+      calendarEventId: cleanString(normalized.calendarEventId || existing.calendarEventId),
+      calendarHtmlLink: cleanString(normalized.calendarHtmlLink || existing.calendarHtmlLink),
+    });
   }
   return Array.from(merged.values()).sort((a, b) => scheduledJobSortValue(a) - scheduledJobSortValue(b));
 }
@@ -5340,26 +5483,28 @@ async function syncScheduledJobsToCalendar(request, store, input = {}) {
     };
   }
 
+  const updateExisting = input.updateExisting !== false;
   const candidates = jobs
-    .filter((job) => !job.calendarEventId)
+    .filter((job) => updateExisting || !job.calendarEventId || /queued|delayed|pending|needs-update/i.test(job.calendarSyncStatus || ""))
     .filter((job) => !requestedId || job.id === requestedId)
     .slice(0, requestedId ? 1 : 10);
   const results = [];
 
   for (const job of candidates) {
     try {
-      const created = await createGoogleCalendarEvent(request, store, await scheduleJobCalendarBodyWithPacket(job, store), {
+      const created = await upsertScheduledJobCalendarEvent(request, store, job, {
         signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
       });
       const calendarEvent = created.event || null;
       if (!calendarEvent?.id) throw new Error("Google Calendar did not return an event id.");
       const updatedJob = {
         ...job,
+        timlockSignature: scheduledJobSignature(job),
         calendarEventId: calendarEvent.id,
         calendarHtmlLink: calendarEvent.htmlLink || "",
-        calendarSyncStatus: "created",
+        calendarSyncStatus: created.action || "created",
         calendarError: "",
-        status: "calendar-created",
+        status: cleanString(job.status || "scheduled"),
         updatedAt: new Date().toISOString(),
       };
       store.scheduledJobs = [updatedJob, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
@@ -5390,13 +5535,24 @@ async function syncScheduledJobsToCalendar(request, store, input = {}) {
 }
 
 async function createScheduledJob(request, store, input = {}) {
-  const job = normalizeScheduleJobInput(input);
+  const normalized = normalizeScheduleJobInput(input);
+  const existing = findScheduledJobMatch(store.scheduledJobs || [], normalized);
+  const job = {
+    ...(existing || {}),
+    ...normalized,
+    id: cleanString(existing?.id || normalized.id),
+    timlockSignature: scheduledJobSignature(normalized) || scheduledJobSignature(existing),
+    calendarEventId: cleanString(normalized.calendarEventId || existing?.calendarEventId),
+    calendarHtmlLink: cleanString(normalized.calendarHtmlLink || existing?.calendarHtmlLink),
+  };
   let calendarEvent = null;
   let calendarError = "";
   const calendarQueued = googleWorkspaceConnected(store.googleWorkspace);
   if (calendarQueued) {
     job.calendarSyncStatus = "queued";
-    calendarError = "Calendar sync queued. Dispatch will show the event link after Google finishes.";
+    calendarError = job.calendarEventId
+      ? "Calendar update queued. Dispatch will show the latest event link after Google finishes."
+      : "Calendar sync queued. Dispatch will show the event link after Google finishes.";
   } else {
     job.calendarSyncStatus = "not-connected";
     calendarError = "Google Workspace is not connected yet. The job was saved in TimLock and can be sent to Calendar after setup.";
@@ -5445,6 +5601,8 @@ function parseServiceDelimitedRows(text = "") {
 function serviceIntakeRowsFromPayload(payload = {}) {
   if (Array.isArray(payload.records)) return payload.records.map(metkaCleanRow).filter(Boolean);
   if (Array.isArray(payload.rows)) return metkaRowsFromPayload(payload.rows);
+  if (payload.record && typeof payload.record === "object") return [metkaCleanRow(payload.record)].filter(Boolean);
+  if (payload.job && typeof payload.job === "object") return [metkaCleanRow(payload.job)].filter(Boolean);
   if (payload.data) return metkaRowsFromPayload(payload.data);
   const rawText = cleanString(payload.rawText || payload.text || payload.csv || payload.tsv || payload.export);
   if (rawText) {
@@ -5455,24 +5613,39 @@ function serviceIntakeRowsFromPayload(payload = {}) {
     } catch {}
     return parseServiceDelimitedRows(rawText);
   }
-  return [];
+  const direct = metkaCleanRow(payload);
+  const sourceOnlyKeys = new Set(["SOURCE", "SYSTEM", "TYPE", "RAWTEXT", "TEXT", "CSV", "TSV", "EXPORT"]);
+  const directKeys = Object.keys(direct || {}).map(metkaHeaderKey).filter((key) => !sourceOnlyKeys.has(key));
+  return direct && directKeys.length ? [direct] : [];
 }
 
 function normalizeServiceIntakeRecord(row = {}, source = "Custom") {
-  const year = vehicleOptionYear(metkaValue(row, ["Year", "Vehicle Year", "Y"]));
+  const notes = metkaValue(row, ["Notes", "Details", "Memo", "Comments", "Description", "Job Notes", "Private Notes"]);
+  const parsedNotes = parseScheduleJobNotes(notes);
+  const year = vehicleOptionYear(metkaValue(row, ["Year", "Vehicle Year", "Y", "VehicleYear"]));
   const make = vehicleOptionMakeLabel(metkaValue(row, ["Make", "Vehicle Make", "Manufacturer"]));
   const model = vehicleOptionModelLabel(metkaValue(row, ["Model", "Vehicle Model"]));
-  const vin = normalizeVinCandidate(metkaValue(row, ["VIN", "Vin", "Vehicle VIN"]));
-  const customer = metkaValue(row, ["Customer", "Customer Name", "Name", "Client", "Caller"]);
-  const phone = metkaValue(row, ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone"]);
-  const location = metkaValue(row, ["Address", "Location", "Job Address", "Service Address"]);
-  const service = metkaValue(row, ["Service", "Service Type", "Job Type", "Call Type", "Description"]) || "Locksmith service";
-  const notes = metkaValue(row, ["Notes", "Details", "Memo", "Comments", "Description"]);
-  const scheduledAt = metkaValue(row, ["Scheduled", "Scheduled At", "Start", "Start Time", "Appointment", "Date"]);
-  const title = metkaValue(row, ["Title", "Summary", "Job", "Job Name"]) || uniqueCleanValues([service, year, make, model]).join(" ");
+  const vin = normalizeVinCandidate(metkaValue(row, ["VIN", "Vin", "Vehicle VIN", "VehicleVin"])) || parsedNotes.vin;
+  const customer = metkaValue(row, ["Customer", "Customer Name", "Name", "Client", "Caller", "Contact Name", "Requested By"]);
+  const phone = metkaValue(row, ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone", "Phone Number", "Contact Phone"]);
+  const location = metkaValue(row, ["Address", "Location", "Job Address", "Service Address", "Site Address", "Destination"]);
+  const service = metkaValue(row, ["Service", "Service Type", "Job Type", "Call Type", "Description", "Work Type"]) || parsedNotes.service || "Locksmith service";
+  const scheduledAt = metkaValue(row, ["Scheduled", "Scheduled At", "Start", "Start Time", "Appointment", "Date", "When", "Job Date"]);
+  const end = metkaValue(row, ["End", "End Time", "Finished", "Stop Time"]);
+  const sourceId = metkaValue(row, ["Job ID", "JobId", "ID", "Call ID", "Ticket", "Ticket ID", "Source ID", "SourceID", "Part", "PartNum", "Part Number"]) || parsedNotes.sourceId;
+  const price = metkaValue(row, ["Total", "Amount", "Price", "Subtotal", "Total Stop Amount", "Stop Amount"]) || parsedNotes.price;
+  const billing = metkaValue(row, ["Billing", "Payment Terms", "Terms", "Bill To"]) || parsedNotes.billing;
+  const payment = metkaValue(row, ["Payment", "Invoice", "Invoice #", "Square Invoice", "Sq Inv"]) || parsedNotes.payment;
+  const programmer = metkaValue(row, ["Programmer", "Tool", "Programmer Used"]) || parsedNotes.programmer;
+  const partsUsed = metkaValue(row, ["Part Used", "Parts Used", "Part(s) Used", "SKU", "Part Number"]) || parsedNotes.partsUsed;
+  const vehicleLabel = uniqueCleanValues([year, make, model]).join(" ");
+  const title = metkaValue(row, ["Title", "Summary", "Job", "Job Name"]) || uniqueCleanValues([service, vehicleLabel, customer]).join(" ");
+  const timlockSignature = dispatchNaturalSignature({ title, customer, phone, location, service, start: scheduledAt, vin, vehicle: vehicleLabel });
   return {
-    id: metkaStableId("intake", [source, title, customer, phone, location, scheduledAt, vin]),
+    id: metkaStableId("intake", [source, sourceId, title, customer, phone, location, scheduledAt, vin]),
+    timlockSignature,
     source,
+    sourceId,
     importedAt: new Date().toISOString(),
     title,
     customer,
@@ -5481,11 +5654,17 @@ function normalizeServiceIntakeRecord(row = {}, source = "Custom") {
     service,
     notes,
     scheduledAt,
+    end,
     vin,
     year,
     make,
     model,
-    vehicle: uniqueCleanValues([year, make, model]).join(" "),
+    vehicle: vehicleLabel,
+    price,
+    billing,
+    payment,
+    programmer,
+    partsUsed,
     raw: metkaCleanRow(row) || {},
   };
 }
@@ -5511,13 +5690,15 @@ function importServiceIntakePayload(store, payload = {}) {
   const source = cleanString(payload.source || payload.system || "Custom phone app");
   const rows = serviceIntakeRowsFromPayload(payload);
   const records = rows.map((row) => normalizeServiceIntakeRecord(row, source)).filter((record) => record.customer || record.phone || record.vehicle || record.vin || record.location || record.service);
-  const existing = new Map((store.serviceIntake?.records || []).map((record) => [record.id, record]));
+  const existing = new Map((store.serviceIntake?.records || []).map((record) => [record.timlockSignature || record.id, record]));
   let added = 0;
   let updated = 0;
   for (const record of records) {
-    if (existing.has(record.id)) updated += 1;
+    const key = record.timlockSignature || record.id;
+    const previous = existing.get(key) || {};
+    if (existing.has(key)) updated += 1;
     else added += 1;
-    existing.set(record.id, { ...(existing.get(record.id) || {}), ...record });
+    existing.set(key, { ...previous, ...record, id: previous.id || record.id });
   }
   const intake = normalizeServiceIntakeStore(store.serviceIntake);
   intake.records = Array.from(existing.values()).sort((a, b) => (Date.parse(b.importedAt) || 0) - (Date.parse(a.importedAt) || 0)).slice(0, 5000);
@@ -5625,11 +5806,12 @@ async function createGoogleDriveJobFolder(request, store, body = {}) {
 }
 
 function dispatchVehicleFromRecord(record = {}, text = "") {
+  const vehicle = record.vehicle && typeof record.vehicle === "object" ? record.vehicle : {};
   const direct = {
-    year: vehicleOptionYear(record.year || record.vehicle?.year),
-    make: vehicleOptionMakeLabel(record.make || record.vehicle?.make),
-    model: vehicleOptionModelLabel(record.model || record.vehicle?.model),
-    trim: cleanString(record.trim || record.vehicle?.trim),
+    year: vehicleOptionYear(record.year || vehicle.year),
+    make: vehicleOptionMakeLabel(record.make || vehicle.make),
+    model: vehicleOptionModelLabel(record.model || vehicle.model),
+    trim: cleanString(record.trim || vehicle.trim),
   };
   if (direct.year || direct.make || direct.model) return direct;
   const inferred = coverageVehicleForJob({ title: text, vehicle: text, vin: record.vin });
@@ -5642,7 +5824,8 @@ function dispatchVehicleFromRecord(record = {}, text = "") {
 }
 
 function dispatchVehicleLabel(vehicle = {}, fallback = "") {
-  return uniqueCleanValues([vehicle.year, vehicle.make, vehicle.model, vehicle.trim]).join(" ") || cleanString(fallback);
+  const trim = typeof vehicle.trim === "function" ? "" : vehicle.trim;
+  return uniqueCleanValues([vehicle.year, vehicle.make, vehicle.model, trim]).join(" ") || cleanString(fallback);
 }
 
 function dispatchItemSearchText(item = {}) {
@@ -5672,20 +5855,24 @@ function dispatchWindowIncludes(item = {}, days = 14) {
 
 function dispatchItemFromCalendarEvent(event = {}) {
   const text = uniqueCleanValues([event.summary, event.description, event.location]).join(" ");
+  const parsedNotes = parseScheduleJobNotes(event.description);
   const vin = normalizeVinCandidate(event.vin) || extractVinsFromText(text)[0] || "";
   const vehicle = dispatchVehicleFromRecord({ vin }, text);
   const title = cleanString(event.summary || dispatchVehicleLabel(vehicle, vin) || "Google Calendar job");
+  const customer = scheduleNoteField(event.description, "Name");
+  const phone = scheduleNoteField(event.description, "Call");
   return {
     id: `calendar:${cleanString(event.id) || metkaStableId("calendar", [title, event.start, event.location])}`,
     source: "google-calendar",
     sourceLabel: "Google Calendar",
     sourceId: cleanString(event.id),
+    timlockSignature: calendarEventSignature(event),
     calendarEventId: cleanString(event.id),
     calendarHtmlLink: cleanString(event.htmlLink),
     title,
-    customer: "",
-    phone: "",
-    service: cleanString(event.summary || "Calendar job"),
+    customer,
+    phone,
+    service: cleanString(parsedNotes.service || event.summary || "Calendar job"),
     location: cleanString(event.location),
     notes: cleanString(event.description),
     start: cleanString(event.start),
@@ -5694,6 +5881,12 @@ function dispatchItemFromCalendarEvent(event = {}) {
     vehicle,
     vehicleLabel: dispatchVehicleLabel(vehicle, title),
     status: cleanString(event.status || "calendar"),
+    sourceId: parsedNotes.sourceId,
+    price: parsedNotes.price,
+    billing: parsedNotes.billing,
+    payment: parsedNotes.payment,
+    programmer: parsedNotes.programmer,
+    partsUsed: parsedNotes.partsUsed,
     raw: event,
   };
 }
@@ -5736,6 +5929,7 @@ function dispatchItemFromServiceIntake(record = {}) {
     source: "service-intake",
     sourceLabel: cleanString(record.source || "QUO"),
     sourceId: cleanString(record.id),
+    timlockSignature: cleanString(record.timlockSignature),
     title,
     customer: cleanString(record.customer),
     phone: cleanString(record.phone),
@@ -5743,10 +5937,18 @@ function dispatchItemFromServiceIntake(record = {}) {
     location: cleanString(record.location),
     notes: cleanString(record.notes),
     start: cleanString(record.scheduledAt),
+    end: cleanString(record.end),
     vin,
     vehicle,
     vehicleLabel: dispatchVehicleLabel(vehicle, title),
     status: "intake",
+    externalSourceId: cleanString(record.sourceId),
+    sourcePartId: cleanString(record.sourceId),
+    price: cleanString(record.price),
+    billing: cleanString(record.billing),
+    payment: cleanString(record.payment),
+    programmer: cleanString(record.programmer),
+    partsUsed: cleanString(record.partsUsed),
     raw: record,
   };
 }
@@ -5761,7 +5963,7 @@ function dispatchItemsFromStore(store = {}, days = 14) {
   ].filter((item) => dispatchWindowIncludes(item, days));
   const deduped = new Map();
   for (const item of items) {
-    const signature = compactToken(uniqueCleanValues([item.vin, item.start, item.customer, item.phone, item.location, item.title]).join("|")) || item.id;
+    const signature = item.timlockSignature || compactToken(uniqueCleanValues([item.vin, item.start, item.customer, item.phone, item.location, item.title]).join("|")) || item.id;
     const existing = deduped.get(signature);
     if (!existing || dispatchDateValue(item.start) > dispatchDateValue(existing.start)) deduped.set(signature, item);
   }
@@ -5874,6 +6076,7 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
       vin: item.vin,
       vehicleLabel: item.vehicleLabel,
       status: item.status,
+      timlockSignature: item.timlockSignature,
       hasCalendarEvent: Boolean(item.calendarEventId || item.source === "google-calendar"),
       calendarHtmlLink: item.calendarHtmlLink,
     })),
@@ -5911,7 +6114,41 @@ async function promoteDispatchItemToCalendar(request, store, body = {}) {
     model: item.vehicle?.model,
     service: item.service,
     title: item.title,
+    sourceId: item.externalSourceId || item.sourcePartId || item.sourceId,
+    price: item.price,
+    billing: item.billing,
+    payment: item.payment,
+    programmer: item.programmer,
+    partsUsed: item.partsUsed,
+    timlockSignature: item.timlockSignature,
   });
+}
+
+function dispatchCalendarCompletionNote(item = {}, packet = {}, job = null) {
+  return [
+    "----- TimLock Completion -----",
+    `Completed: ${new Date().toLocaleString("en-US")}`,
+    item.customer ? `Customer: ${item.customer}` : "",
+    item.vin ? `VIN: ${item.vin}` : "",
+    item.vehicleLabel ? `Vehicle: ${item.vehicleLabel}` : "",
+    packet.primary ? `Part(s) Used: ${packet.primary}` : "",
+    packet.programmer ? `Programmer: ${packet.programmer}` : "",
+    packet.lishi ? `Lishi: ${packet.lishi}` : "",
+    job?.id ? `Proof ID: ${job.id}` : "",
+    "Status: worked job saved to TimLock proof history.",
+  ].filter(Boolean).join("\n");
+}
+
+async function patchCalendarDescription(request, store, eventId, description, options = {}) {
+  const config = googleClientConfig(request);
+  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const updated = await googleApiJson(store, request, apiUrl, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    signal: options.signal,
+    body: JSON.stringify({ description: cleanString(description).slice(0, 8000) }),
+  });
+  return replaceCachedGoogleCalendarEvent(store, updated);
 }
 
 async function writeDispatchPacketToCalendar(request, store, body = {}) {
@@ -5919,27 +6156,84 @@ async function writeDispatchPacketToCalendar(request, store, body = {}) {
   if (!item) throw new Error("Dispatch item not found.");
   const eventId = item.calendarEventId || (item.source === "google-calendar" ? item.sourceId : "");
   if (!eventId) throw new Error("This dispatch item is not connected to a Google Calendar event yet.");
-  const config = googleClientConfig(request);
   const loadout = await buildJobLoadout(dispatchLoadoutBody(item), store);
   const note = cleanString(body.note) || dispatchPacketNote(item, loadout);
   const existingDescription = cleanString(item.notes);
   const marker = "----- TimLock Dispatch Packet -----";
   const descriptionBase = existingDescription.split(marker)[0].trim();
   const description = uniqueCleanValues([descriptionBase, marker, note]).join("\n\n").slice(0, 8000);
-  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(eventId)}`;
-  const updated = await googleApiJson(store, request, apiUrl, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ description }),
-  });
-  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
-  workspace.calendar.events = (workspace.calendar.events || []).map((event) =>
-    cleanString(event.id) === eventId ? googleCalendarEventPublic(updated) : event,
-  );
-  workspace.updatedAt = new Date().toISOString();
-  store.googleWorkspace = workspace;
+  const event = await patchCalendarDescription(request, store, eventId, description);
   await writeStore(store);
-  return { ok: true, event: googleCalendarEventPublic(updated), note, google: googleWorkspacePublicStatus(store, request), packet: dispatchPacketSummary(item, loadout) };
+  return { ok: true, event, note, google: googleWorkspacePublicStatus(store, request), packet: dispatchPacketSummary(item, loadout) };
+}
+
+async function completeDispatchItem(request, store, body = {}) {
+  const item = dispatchItemById(store, cleanString(body.id || body.itemId || body.dispatchId));
+  if (!item) throw new Error("Dispatch item not found.");
+  const loadout = await buildJobLoadout(dispatchLoadoutBody(item), store);
+  const packet = dispatchPacketSummary(item, loadout);
+  const vehicle = item.vehicle || {};
+  const partName = cleanString(body.part || body.partsUsed || item.partsUsed || packet.primary || item.sourcePartId || item.externalSourceId);
+  const programmer = cleanString(body.programmer || item.programmer || packet.programmer);
+  const lishi = cleanString(body.lishi || packet.lishi);
+  if (!vehicle.year || !vehicle.make || !vehicle.model || !partName) {
+    throw new Error("Completion needs a year, make, model, and part. Open What To Bring or edit the intake record first.");
+  }
+  const outcomeInput = {
+    outcome: "worked",
+    vin: item.vin,
+    vehicle,
+    part: {
+      name: partName,
+      supplier: item.sourceLabel || "Dispatch Intelligence",
+      sku: partName,
+      oem: "",
+      fcc: "",
+      frequency: "",
+      chip: "",
+      buttons: "",
+      keyway: lishi,
+      lishi,
+      programmer,
+      family: /prox|smart|push/i.test(`${partName} ${item.service}`) ? "proximity" : "keyed",
+    },
+    job: {
+      customer: item.customer,
+      exactPart: partName,
+      partNumber: partName,
+      lishi,
+      programmer,
+      keyType: /prox|smart|push/i.test(`${partName} ${item.service}`) ? "proximity" : "keyed",
+      notes: cleanString(body.notes) || `Completed from ${item.sourceLabel || "Dispatch"} packet ${item.id}.`,
+    },
+  };
+  const job = cleanPartOutcome(outcomeInput);
+  job.customer = item.customer || job.customer;
+  job.service = item.service || job.service;
+  job.location = item.location || "";
+  job.price = cleanString(body.price || item.price);
+  job.payment = cleanString(body.payment || item.payment);
+  job.dispatchId = item.id;
+  job.calendarEventId = item.calendarEventId || (item.source === "google-calendar" ? item.sourceId : "");
+  store.jobs = [job, ...(store.jobs || [])].slice(0, 10000);
+  const profile = await updateVehicleProfileFromOutcome(outcomeInput);
+  let event = null;
+  const eventId = job.calendarEventId;
+  if (eventId && googleWorkspaceConnected(store.googleWorkspace)) {
+    const marker = "----- TimLock Completion -----";
+    const base = cleanString(item.notes).split(marker)[0].trim();
+    const description = uniqueCleanValues([base, dispatchCalendarCompletionNote(item, packet, job)]).join("\n\n");
+    event = await patchCalendarDescription(request, store, eventId, description);
+  }
+  if (item.source === "timlock-schedule" && item.sourceId) {
+    store.scheduledJobs = (store.scheduledJobs || []).map((scheduled) =>
+      cleanString(scheduled.id) === item.sourceId
+        ? { ...scheduled, status: "completed", completedAt: new Date().toISOString(), calendarSyncStatus: event ? "completed-written" : scheduled.calendarSyncStatus }
+        : scheduled,
+    );
+  }
+  await writeStore(store);
+  return { ok: true, job, profile, event, packet, google: googleWorkspacePublicStatus(store, request) };
 }
 
 async function createDispatchDriveFolder(request, store, body = {}) {
@@ -14488,6 +14782,15 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/dispatch-intelligence/complete") {
+    try {
+      sendJson(response, 201, await completeDispatchItem(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Dispatch completion failed: ${error.message}`);
+    }
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/dispatch-intelligence/drive-folder") {
     try {
       sendJson(response, 201, await createDispatchDriveFolder(request, store, await readJsonBody(request)));
@@ -14546,7 +14849,7 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
-  if (request.method === "POST" && pathname === "/api/service-intake/import") {
+  if (request.method === "POST" && (pathname === "/api/service-intake/import" || pathname === "/api/service-intake/ingest")) {
     try {
       const result = importServiceIntakePayload(store, await readJsonBody(request));
       await writeStore(store);
