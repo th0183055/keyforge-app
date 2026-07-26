@@ -10,7 +10,7 @@
     <title>TimLock-App</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=field-shell-20260725" />
+    <link rel="stylesheet" href="styles.css?v=start-flow-20260726" />
   </head>
   <body>
     <section class="auth-gate" id="authGate" hidden>
@@ -57,8 +57,8 @@
             <small>Daily job flow</small>
           </div>
           <button class="nav-item active" data-view="command">
-            <span>Command Center</span>
-            <small>Search everything</small>
+            <span>Start Job</span>
+            <small>VIN / YMM first</small>
           </button>
           <button class="nav-item" data-view="vin">
             <span>VIN Walkthrough</span>
@@ -176,8 +176,8 @@
       <main>
         <header class="topbar">
           <div>
-            <p class="eyebrow">VIN to key</p>
-            <h2>Scan a VIN. See the vehicle, keys, tools, and programming path.</h2>
+            <p class="eyebrow">TimLock Field OS</p>
+            <h2>Start by VIN or YMM. Get the clean field path.</h2>
           </div>
           <button class="primary-action" data-view-target="settings" data-owner-only>Parts Setup</button>
         </header>
@@ -203,19 +203,90 @@
           </div>
         </section>
         <section class="view active global-command-panel" id="command">
-          <div class="global-command-head">
-            <div>
-              <p class="eyebrow">Command center</p>
-              <strong>Search everything</strong>
+          <div class="start-job-shell">
+            <div class="start-job-head">
+              <div>
+                <p class="eyebrow">Start job</p>
+                <h3>Choose the entry point</h3>
+              </div>
+              <div class="mode-toggle inline" aria-label="App mode">
+                <button type="button" data-set-mode="subscriber">Subscriber</button>
+                <button type="button" data-set-mode="owner">Owner</button>
+              </div>
             </div>
-            <div class="mode-toggle inline" aria-label="App mode">
-              <button type="button" data-set-mode="subscriber">Subscriber</button>
-              <button type="button" data-set-mode="owner">Owner</button>
+
+            <div class="start-job-grid">
+              <form id="quickVinStartForm" class="start-job-card primary-start">
+                <div>
+                  <p class="eyebrow">VIN</p>
+                  <strong>Decode vehicle</strong>
+                </div>
+                <label>
+                  VIN number
+                  <input name="quickVin" placeholder="1FTFW3L58SKD97045" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+                </label>
+                <button class="primary-action" type="submit">Start VIN</button>
+              </form>
+
+              <form id="quickYmmStartForm" class="start-job-card">
+                <div>
+                  <p class="eyebrow">YMM</p>
+                  <strong>Search vehicle</strong>
+                </div>
+                <div class="start-ymm-fields">
+                  <label>
+                    Year
+                    <input name="quickYear" inputmode="numeric" maxlength="4" placeholder="2024" autocomplete="off" />
+                  </label>
+                  <label>
+                    Make
+                    <input name="quickMake" placeholder="Ford" autocomplete="off" />
+                  </label>
+                  <label>
+                    Model
+                    <input name="quickModel" placeholder="F-150" autocomplete="off" />
+                  </label>
+                </div>
+                <button class="primary-action" type="submit">Start YMM</button>
+              </form>
+            </div>
+
+            <div class="start-job-status" id="startJobStatus">Ready.</div>
+
+            <div class="workspace-bridge-summary" id="workspaceBridgeSummary" data-owner-only>
+              <article>
+                <p class="eyebrow">Google Workspace</p>
+                <strong>Calendar, Sheets, Drive</strong>
+                <span>Owner bridge loading.</span>
+              </article>
+              <article>
+                <p class="eyebrow">Metka</p>
+                <strong>Field data brain</strong>
+                <span>Import status loading.</span>
+              </article>
+              <div class="workspace-bridge-actions">
+                <button class="secondary-action small" type="button" data-view-target="metka-bridge">Field Data Bridge</button>
+                <button class="secondary-action small" type="button" data-view-target="reference-lists">Reference Lists</button>
+              </div>
+            </div>
+
+            <div class="subscriber-path-strip">
+              <span>Start</span>
+              <span>Verify</span>
+              <span>Loadout</span>
+              <span>Save Proof</span>
+            </div>
+          </div>
+
+          <div class="global-command-head deep-search-head">
+            <div>
+              <p class="eyebrow">Deep search</p>
+              <strong>Search proof, parts, tools, and references</strong>
             </div>
           </div>
           <form id="globalSearchForm" class="global-search-form">
             <label>
-              Global search
+              Search
               <input name="globalQuery" placeholder="VIN, part number, vehicle, HU101, TOY-239, OE number, programmer" autocomplete="off" autocapitalize="characters" spellcheck="false" />
             </label>
             <button class="primary-action" type="submit">Search All</button>

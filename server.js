@@ -4416,6 +4416,82 @@ function buildMetkaBridgeStatus(store = {}) {
   };
 }
 
+async function buildWorkspaceBrief(store = {}) {
+  const metka = buildMetkaBridgeStatus(store);
+  const metkaCounts = metka.counts || {};
+  const metkaRows = [
+    metkaCounts.workLogJobs,
+    metkaCounts.inventoryRows,
+    metkaCounts.partMaps,
+    metkaCounts.quoteRows,
+    metkaCounts.costRows,
+    metkaCounts.programmers,
+    metkaCounts.serviceSkus,
+    metkaCounts.pricingRows,
+    metkaCounts.locations,
+  ].reduce((sum, value) => sum + Number(value || 0), 0);
+  let calendar = null;
+  try {
+    calendar = JSON.parse(await readFile(path.join(dataDir, "calendar-analysis.json"), "utf8"));
+  } catch {}
+  const calendarEvents = Number(calendar?.totalEvents || 0);
+  const proofAttachmentStore = await readProofAttachments().catch(() => ({ attachments: [] }));
+  const attachmentCount = Array.isArray(proofAttachmentStore.attachments) ? proofAttachmentStore.attachments.length : 0;
+  const sheetRows = metkaRows;
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: "workspace-bridge",
+    headline: metka.connected
+      ? "Google Workspace and Metka data are available to the field engine."
+      : "Workspace bridge is ready for Google/Metka imports.",
+    sources: [
+      {
+        id: "google-calendar",
+        label: "Google Calendar",
+        status: calendarEvents ? "connected" : "setup",
+        value: calendarEvents ? `${calendarEvents} events` : "Not imported",
+        detail: calendarEvents
+          ? `${calendar?.dateRange?.start || "Calendar"} to ${calendar?.dateRange?.end || "latest"} job signals`
+          : "Use the Apps Script/calendar export to feed job demand and service timing.",
+      },
+      {
+        id: "google-sheets",
+        label: "Google Sheets",
+        status: sheetRows ? "connected" : "setup",
+        value: sheetRows ? `${sheetRows} rows` : "Waiting",
+        detail: sheetRows
+          ? `${metkaCounts.sheets || 0} imported tables powering parts, proof, inventory, and services`
+          : "Export Sheets/Metka tables as JSON and import them in Field Data Bridge.",
+      },
+      {
+        id: "google-drive",
+        label: "Google Drive",
+        status: attachmentCount ? "connected" : "setup",
+        value: attachmentCount ? `${attachmentCount} files` : "Ready",
+        detail: "Proof Vault attachments can be synced server-side for cross-device job evidence.",
+      },
+      {
+        id: "metka",
+        label: "Metka Brain",
+        status: metka.connected ? "connected" : "setup",
+        value: metka.connected ? `${metkaRows} rows` : "0 rows",
+        detail: metka.connected
+          ? `${metkaCounts.workLogJobs || 0} jobs, ${metkaCounts.inventoryRows || 0} inventory, ${metkaCounts.partMaps || 0} part maps`
+          : "Owner-only import keeps the subscriber app clean while using the operational brain.",
+      },
+    ],
+    metka,
+    calendar: calendar
+      ? {
+          connected: true,
+          totalEvents: calendarEvents,
+          dateRange: calendar.dateRange || {},
+          jobCodes: (calendar.jobCodes || []).slice(0, 8),
+        }
+      : { connected: false, totalEvents: 0, dateRange: {}, jobCodes: [] },
+  };
+}
+
 function metkaNormalizedRows(storeOrBridge = {}, key = "") {
   const bridge = storeOrBridge.metkaBridge ? normalizeMetkaBridgeStore(storeOrBridge.metkaBridge) : normalizeMetkaBridgeStore(storeOrBridge);
   return Array.isArray(bridge.normalized?.[key]) ? bridge.normalized[key] : [];
@@ -12356,6 +12432,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/reference-vault",
     "/api/public-reference-sources",
     "/api/metka-bridge",
+    "/api/workspace-brief",
     "/api/supplier-accounts",
     "/api/audit-log",
   ];
@@ -12562,6 +12639,11 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/metka-bridge") {
     sendJson(response, 200, buildMetkaBridgeStatus(store));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/workspace-brief") {
+    sendJson(response, 200, await buildWorkspaceBrief(store));
     return;
   }
 

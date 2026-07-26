@@ -46,6 +46,7 @@ let latestAiCommander = null;
 let latestMissionControl = null;
 let latestTrainingCenter = null;
 let latestMetkaBridge = null;
+let latestWorkspaceBrief = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestAuthStatus = null;
@@ -124,6 +125,9 @@ function applyAppMode(mode = loadAppMode()) {
   if (appMode === "subscriber" && isOwnerOnlyView(activeOwnerView)) {
     showView("workbench");
   }
+  if (appMode === "owner" && activeOwnerView === "command") {
+    loadWorkspaceBrief();
+  }
 }
 
 const navItems = document.querySelectorAll(".nav-item");
@@ -147,6 +151,10 @@ const authRoleButtons = document.querySelectorAll("[data-auth-role]");
 const globalSearchForm = document.querySelector("#globalSearchForm");
 const globalSearchStatus = document.querySelector("#globalSearchStatus");
 const globalSearchResult = document.querySelector("#globalSearchResult");
+const quickVinStartForm = document.querySelector("#quickVinStartForm");
+const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
+const startJobStatus = document.querySelector("#startJobStatus");
+const workspaceBridgeSummary = document.querySelector("#workspaceBridgeSummary");
 const missionControlResult = document.querySelector("#missionControlResult");
 const missionControlStatus = document.querySelector("#missionControlStatus");
 const refreshMissionControlButton = document.querySelector("#refreshMissionControl");
@@ -261,8 +269,8 @@ const aiCommanderPanel = document.querySelector("#aiCommanderPanel");
 const refreshAiCommanderButton = document.querySelector("#refreshAiCommander");
 const routeMeta = {
   command: {
-    eyebrow: "Command center",
-    title: "Search the job. Open the answer.",
+    eyebrow: "Start job",
+    title: "Start by VIN or YMM. Build the field path.",
   },
   "mission-control": {
     eyebrow: "Owner command",
@@ -402,6 +410,7 @@ function showView(id, options = {}) {
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
   if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
   if (id === "settings") loadStorageStatus({ quiet: true });
+  if (id === "command" && !latestWorkspaceBrief) loadWorkspaceBrief();
   updateAiContextUi();
 }
 
@@ -561,6 +570,42 @@ function updateInstallButton() {
   installAppButton.hidden = standalone;
   installAppButton.disabled = !deferredInstallPrompt;
   installAppButton.textContent = deferredInstallPrompt ? "Install app" : "Install ready";
+}
+
+function setStartJobStatus(message, tone = "ready") {
+  if (!startJobStatus) return;
+  startJobStatus.textContent = message;
+  startJobStatus.dataset.tone = tone;
+}
+
+function startVinWalkthroughFromValue(value) {
+  const vin = normalizeVinInput(value);
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+    setStartJobStatus("Enter a valid 17-character VIN.", "warn");
+    return;
+  }
+  if (vinForm?.elements.vin) vinForm.elements.vin.value = vin;
+  setStartJobStatus(`Starting VIN ${vin}.`, "ready");
+  showView("vin");
+  window.setTimeout(() => vinForm?.requestSubmit(), 80);
+}
+
+function startYmmWalkthroughFromValues({ year = "", make = "", model = "" } = {}) {
+  const cleanYear = cleanInput(year);
+  const cleanMake = cleanInput(make);
+  const cleanModel = cleanInput(model);
+  if (!/^(19|20)\d{2}$/.test(cleanYear) || !cleanMake || !cleanModel) {
+    setStartJobStatus("Enter year, make, and model.", "warn");
+    return;
+  }
+  if (ymmForm) {
+    ymmForm.elements.year.value = cleanYear;
+    ymmForm.elements.make.value = cleanMake;
+    ymmForm.elements.model.value = cleanModel;
+  }
+  setStartJobStatus(`Starting ${cleanYear} ${cleanMake} ${cleanModel}.`, "ready");
+  showView("vin");
+  window.setTimeout(() => ymmForm?.requestSubmit(), 80);
 }
 
 function statusClass(status) {
@@ -8237,6 +8282,71 @@ function renderMetkaMetric(label, value, note = "") {
   `;
 }
 
+function renderWorkspaceBridgeSummary(payload = {}) {
+  if (!workspaceBridgeSummary) return;
+  latestWorkspaceBrief = payload;
+  const sources = payload.sources || [];
+  const sourceById = Object.fromEntries(sources.map((source) => [source.id, source]));
+  const calendar = sourceById["google-calendar"] || {};
+  const sheets = sourceById["google-sheets"] || {};
+  const drive = sourceById["google-drive"] || {};
+  const metka = sourceById.metka || {};
+  workspaceBridgeSummary.innerHTML = `
+    <article class="${escapeHtml(calendar.status || "setup")}">
+      <p class="eyebrow">Calendar</p>
+      <strong>${escapeHtml(calendar.value || "Ready")}</strong>
+      <span>${escapeHtml(calendar.detail || "Import Google Calendar job history.")}</span>
+    </article>
+    <article class="${escapeHtml(sheets.status || "setup")}">
+      <p class="eyebrow">Sheets</p>
+      <strong>${escapeHtml(sheets.value || "Ready")}</strong>
+      <span>${escapeHtml(sheets.detail || "Metka exports feed field decisions.")}</span>
+    </article>
+    <article class="${escapeHtml(drive.status || "setup")}">
+      <p class="eyebrow">Drive</p>
+      <strong>${escapeHtml(drive.value || "Ready")}</strong>
+      <span>${escapeHtml(drive.detail || "Proof uploads attach to jobs.")}</span>
+    </article>
+    <article class="${escapeHtml(metka.status || "setup")}">
+      <p class="eyebrow">Metka</p>
+      <strong>${escapeHtml(metka.value || "0 rows")}</strong>
+      <span>${escapeHtml(metka.detail || "Owner import is waiting.")}</span>
+    </article>
+    <div class="workspace-bridge-actions">
+      <button class="secondary-action small" type="button" data-view-target="metka-bridge">Field Data Bridge</button>
+      <button class="secondary-action small" type="button" data-view-target="mission-control">Mission Control</button>
+    </div>
+  `;
+  workspaceBridgeSummary.querySelectorAll("[data-view-target]").forEach((button) => {
+    button.addEventListener("click", () => showView(button.dataset.viewTarget));
+  });
+}
+
+async function loadWorkspaceBrief() {
+  if (!workspaceBridgeSummary || appMode !== "owner") return;
+  try {
+    workspaceBridgeSummary.classList.add("loading");
+    const payload = await api("/api/workspace-brief", { timeoutMs: 12000, noStatus: true });
+    renderWorkspaceBridgeSummary(payload);
+  } catch (error) {
+    workspaceBridgeSummary.innerHTML = `
+      <article class="setup">
+        <p class="eyebrow">Workspace</p>
+        <strong>Bridge ready</strong>
+        <span>${escapeHtml(error.message || "Owner bridge will load after the server wakes.")}</span>
+      </article>
+      <div class="workspace-bridge-actions">
+        <button class="secondary-action small" type="button" data-view-target="metka-bridge">Field Data Bridge</button>
+      </div>
+    `;
+    workspaceBridgeSummary.querySelector("[data-view-target]")?.addEventListener("click", (event) => {
+      showView(event.currentTarget.dataset.viewTarget);
+    });
+  } finally {
+    workspaceBridgeSummary.classList.remove("loading");
+  }
+}
+
 function renderMetkaSampleSection(title, rows = [], source = "") {
   return `
     <section class="bridge-sample-section">
@@ -8329,6 +8439,8 @@ async function importMetkaBridgeFile(file) {
       noStatus: true,
     });
     renderMetkaBridge(result);
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
     latestJobLoadout = null;
     latestWorkbench = null;
     latestCoverageDashboard = null;
@@ -8350,6 +8462,8 @@ async function clearMetkaBridge() {
     if (metkaBridgeStatus) metkaBridgeStatus.textContent = "Clearing Field Data Bridge...";
     const payload = await api("/api/metka-bridge", { method: "DELETE", timeoutMs: 18000, noStatus: true });
     renderMetkaBridge(payload);
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
     latestReferenceList = null;
     latestJobLoadout = null;
     latestWorkbench = null;
@@ -11344,6 +11458,22 @@ resetMainScrollSoon();
 globalSearchForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   runGlobalSearch();
+});
+
+quickVinStartForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = new FormData(quickVinStartForm);
+  startVinWalkthroughFromValue(data.get("quickVin"));
+});
+
+quickYmmStartForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = new FormData(quickYmmStartForm);
+  startYmmWalkthroughFromValues({
+    year: data.get("quickYear"),
+    make: data.get("quickMake"),
+    model: data.get("quickModel"),
+  });
 });
 
 refreshMissionControlButton?.addEventListener("click", () => loadMissionControl());

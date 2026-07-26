@@ -9511,6 +9511,343 @@ body.mode-subscriber .history-job-card {
   }
 }
 
+/* 2026-07-26 product front door: subscriber/owner launch flow */
+body {
+  background:
+    linear-gradient(135deg, #eef3f7 0%, #f8fafc 45%, #d9e2ea 100%),
+    #eef3f7;
+}
+
+body.mode-owner {
+  background:
+    linear-gradient(135deg, #e7eef5 0%, #f8fafc 48%, #cdd8e2 100%),
+    #e7eef5;
+}
+
+body.mode-subscriber {
+  background:
+    linear-gradient(135deg, #edf7f2 0%, #fbfdfc 52%, #dbe9e2 100%),
+    #edf7f2;
+}
+
+.topbar {
+  min-height: 104px;
+  border-color: rgba(255, 255, 255, 0.22);
+  background:
+    linear-gradient(135deg, #111827 0%, #1e2a37 58%, #243447 100%),
+    #111827;
+}
+
+body.mode-subscriber .topbar {
+  background:
+    linear-gradient(135deg, #0c1f19 0%, #18392c 62%, #21513d 100%),
+    #0c1f19;
+}
+
+.global-command-panel {
+  gap: 16px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.start-job-shell,
+.deep-search-head,
+.global-search-form,
+.global-search-result,
+.form-status#globalSearchStatus {
+  width: 100%;
+}
+
+.start-job-shell {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(215, 222, 231, 0.96);
+  border-radius: 8px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f7fafc 100%),
+    #ffffff;
+  box-shadow: 0 18px 36px rgba(17, 24, 39, 0.11);
+}
+
+.start-job-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #d7dee7;
+  padding-bottom: 12px;
+}
+
+.start-job-head h3 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.2vw, 2rem);
+  line-height: 1.04;
+}
+
+.start-job-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+  gap: 12px;
+}
+
+.start-job-card {
+  display: grid;
+  gap: 12px;
+  align-content: space-between;
+  min-width: 0;
+  min-height: 202px;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, #ffffff, #f6f9fb),
+    #ffffff;
+}
+
+.start-job-card.primary-start {
+  border-color: rgba(47, 125, 91, 0.36);
+  background:
+    linear-gradient(135deg, #0e211a 0%, #1f4e3b 100%),
+    #0e211a;
+  color: #ffffff;
+}
+
+.start-job-card.primary-start .eyebrow,
+.start-job-card.primary-start label {
+  color: #d6f2e2;
+}
+
+.start-job-card strong {
+  display: block;
+  font-size: clamp(1.2rem, 1.7vw, 1.55rem);
+  line-height: 1.08;
+}
+
+.start-job-card label,
+.start-ymm-fields label {
+  display: grid;
+  gap: 6px;
+  color: #111827;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.start-job-card input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #cbd5df;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  color: #111827;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.start-ymm-fields {
+  display: grid;
+  grid-template-columns: 0.7fr 1fr 1.2fr;
+  gap: 10px;
+}
+
+.start-job-status {
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  color: #4b5563;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.start-job-status[data-tone="warn"] {
+  border-color: #d7aa58;
+  background: #fff7e6;
+  color: #7a4b13;
+}
+
+.workspace-bridge-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: stretch;
+  border: 1px solid rgba(56, 90, 124, 0.18);
+  border-radius: 8px;
+  padding: 10px;
+  background: #eef4f8;
+}
+
+.workspace-bridge-summary article {
+  min-width: 0;
+  border: 1px solid #d7dee7;
+  border-left: 4px solid #aeb9c6;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.workspace-bridge-summary article.connected {
+  border-left-color: #2f7d5b;
+}
+
+.workspace-bridge-summary article.setup {
+  border-left-color: #c59d50;
+}
+
+.workspace-bridge-summary strong,
+.workspace-bridge-summary span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.workspace-bridge-summary strong {
+  font-size: 0.95rem;
+  line-height: 1.14;
+}
+
+.workspace-bridge-summary span {
+  margin-top: 4px;
+  color: #5e6670;
+  font-size: 0.78rem;
+  line-height: 1.28;
+}
+
+.workspace-bridge-actions {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+}
+
+.subscriber-path-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.subscriber-path-strip span {
+  border: 1px solid rgba(47, 125, 91, 0.24);
+  border-radius: 8px;
+  padding: 9px;
+  background: #f5fbf7;
+  color: #18392c;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.deep-search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #d7dee7;
+  border-radius: 8px 8px 0 0;
+  padding: 12px 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.07);
+}
+
+.deep-search-head + .global-search-form {
+  border: 1px solid #d7dee7;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  padding: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.07);
+}
+
+body.mode-subscriber .workspace-bridge-summary,
+body.mode-subscriber .deep-search-head {
+  display: none;
+}
+
+body.mode-subscriber .global-command-panel {
+  gap: 12px;
+}
+
+body.mode-subscriber .start-job-shell {
+  border-color: rgba(47, 125, 91, 0.2);
+}
+
+body.mode-subscriber .start-job-head {
+  border-bottom-color: rgba(47, 125, 91, 0.16);
+}
+
+body.mode-subscriber .start-job-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+body.mode-subscriber .start-job-card {
+  min-height: 182px;
+}
+
+body.mode-subscriber .global-search-form {
+  border: 1px solid rgba(47, 125, 91, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+@media (max-width: 1100px) {
+  .workspace-bridge-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-bridge-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, auto));
+    justify-content: start;
+  }
+}
+
+@media (max-width: 760px) {
+  .start-job-shell {
+    padding: 12px;
+  }
+
+  .start-job-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .start-job-head .mode-toggle {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .start-job-grid,
+  body.mode-subscriber .start-job-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .start-job-card {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  .start-ymm-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .subscriber-path-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-bridge-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-bridge-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 2026 field-shell reboot: visible product-grade owner/subscriber split */
 :root {
   --shell-ink: #111827;
@@ -10140,5 +10477,70 @@ body.mode-subscriber .loadout-card {
 
   .field-packet-feedback > * {
     flex: 1 1 100%;
+  }
+}
+
+/* Final precedence for the VIN/YMM product start screen */
+#command.global-command-panel,
+body.mode-subscriber #command.global-command-panel {
+  gap: 16px;
+  border: 0;
+  padding: 0 !important;
+  background: transparent;
+  box-shadow: none;
+}
+
+#command .start-job-shell {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(215, 222, 231, 0.96);
+  border-radius: 8px;
+  padding: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
+  box-shadow: 0 18px 36px rgba(17, 24, 39, 0.11);
+}
+
+#command .start-job-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+  gap: 12px;
+}
+
+#command .start-job-card {
+  display: grid;
+  gap: 12px;
+  align-content: space-between;
+  min-width: 0;
+  min-height: 202px;
+}
+
+#command .workspace-bridge-summary {
+  display: grid;
+}
+
+body.mode-subscriber #command .workspace-bridge-summary,
+body.mode-subscriber #command .deep-search-head {
+  display: none !important;
+}
+
+body.mode-subscriber #command .global-search-form {
+  border: 1px solid rgba(47, 125, 91, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+@media (max-width: 760px) {
+  #command .start-job-shell {
+    padding: 12px;
+  }
+
+  #command .start-job-grid,
+  body.mode-subscriber #command .start-job-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #command .start-job-card {
+    min-height: 0;
   }
 }
