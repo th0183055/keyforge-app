@@ -49,6 +49,7 @@ let latestMetkaBridge = null;
 let latestWorkspaceBrief = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
+let latestGoogleWorkspace = null;
 let latestAuthStatus = null;
 let authRoleSelection = "owner";
 let appMode = "owner";
@@ -188,6 +189,13 @@ const migrateStorageProofButton = document.querySelector("#migrateStorageProof")
 const exportServerBackupButton = document.querySelector("#exportServerBackup");
 const importServerBackupButton = document.querySelector("#importServerBackup");
 const serverBackupImportInput = document.querySelector("#serverBackupImportInput");
+const googleWorkspaceStatusPanel = document.querySelector("#googleWorkspaceStatusPanel");
+const googleWorkspaceStatus = document.querySelector("#googleWorkspaceStatus");
+const connectGoogleWorkspaceButton = document.querySelector("#connectGoogleWorkspace");
+const disconnectGoogleWorkspaceButton = document.querySelector("#disconnectGoogleWorkspace");
+const syncGoogleCalendarButton = document.querySelector("#syncGoogleCalendar");
+const googleCalendarDaysInput = document.querySelector("#googleCalendarDays");
+const googleCalendarResult = document.querySelector("#googleCalendarResult");
 const referenceVaultForm = document.querySelector("#referenceVaultForm");
 const referenceVaultStatus = document.querySelector("#referenceVaultStatus");
 const referenceVaultList = document.querySelector("#referenceVaultList");
@@ -248,8 +256,12 @@ const refreshMetkaBridgeButton = document.querySelector("#refreshMetkaBridge");
 const importMetkaBridgeButton = document.querySelector("#importMetkaBridge");
 const clearMetkaBridgeButton = document.querySelector("#clearMetkaBridge");
 const metkaBridgeImportInput = document.querySelector("#metkaBridgeImportInput");
+const googleSheetSyncForm = document.querySelector("#googleSheetSyncForm");
+const googleSheetSyncStatus = document.querySelector("#googleSheetSyncStatus");
+const googleSheetSyncResult = document.querySelector("#googleSheetSyncResult");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
+const ymmDropdownForms = [quickYmmStartForm, ymmForm].filter(Boolean);
 const scanButton = document.querySelector(".scan-action");
 const vinResult = document.querySelector("#vinResult");
 const vinRecommendation = document.querySelector("#vinRecommendation");
@@ -415,7 +427,11 @@ function showView(id, options = {}) {
   if (id === "lishi" && !latestLishiLookup) loadLishiLookup();
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
   if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
-  if (id === "settings") loadStorageStatus({ quiet: true });
+  if (id === "metka-bridge" && !latestGoogleWorkspace) loadGoogleWorkspace({ quiet: true });
+  if (id === "settings") {
+    loadStorageStatus({ quiet: true });
+    loadGoogleWorkspace({ quiet: true });
+  }
   if (id === "command" && !latestWorkspaceBrief) loadWorkspaceBrief();
   updateAiContextUi();
 }
@@ -572,7 +588,14 @@ async function signIn(role, password) {
   renderAuthStatus();
   applyAppMode(latestAuthStatus.role === "subscriber" ? "subscriber" : "owner");
   if (authStatus) authStatus.textContent = "Signed in.";
-  await Promise.allSettled([loadJobs(), loadAiAdvisor(), loadAiMemory(), loadAiCommander({ quiet: true }), loadStorageStatus({ quiet: true })]);
+  await Promise.allSettled([
+    loadJobs(),
+    loadAiAdvisor(),
+    loadAiMemory(),
+    loadAiCommander({ quiet: true }),
+    loadStorageStatus({ quiet: true }),
+    refreshYmmDropdownOptions(null, { quiet: true }),
+  ]);
 }
 
 async function signOut() {
@@ -594,6 +617,96 @@ function setStartJobStatus(message, tone = "ready") {
   if (!startJobStatus) return;
   startJobStatus.textContent = message;
   startJobStatus.dataset.tone = tone;
+}
+
+const fallbackVehicleOptions = {
+  years: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"],
+  makes: ["Ford", "Chevrolet", "GMC", "Toyota", "Lexus", "Honda", "Acura", "Nissan", "Infiniti", "Hyundai", "Kia", "Mazda", "Subaru", "Volkswagen", "Audi", "BMW", "Jeep", "Dodge", "Ram"],
+  models: [],
+};
+let latestVehicleOptions = fallbackVehicleOptions;
+let vehicleOptionsRequestId = 0;
+
+function ymmSelect(form, role) {
+  return form?.querySelector(`[data-ymm-${role}]`) || null;
+}
+
+function selectedYmmValues(form) {
+  return {
+    year: cleanInput(ymmSelect(form, "year")?.value || ""),
+    make: cleanInput(ymmSelect(form, "make")?.value || ""),
+    model: cleanInput(ymmSelect(form, "model")?.value || ""),
+  };
+}
+
+function fillYmmSelect(select, values = [], placeholder = "Select", selected = "") {
+  if (!select) return;
+  const cleanSelected = cleanInput(selected);
+  const unique = [...new Set(values.map((value) => cleanInput(value)).filter(Boolean))];
+  if (cleanSelected && !unique.some((value) => value.toUpperCase() === cleanSelected.toUpperCase())) unique.unshift(cleanSelected);
+  select.innerHTML = [
+    `<option value="">${escapeHtml(placeholder)}</option>`,
+    ...unique.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`),
+  ].join("");
+  select.value = cleanSelected && unique.some((value) => value.toUpperCase() === cleanSelected.toUpperCase()) ? unique.find((value) => value.toUpperCase() === cleanSelected.toUpperCase()) : "";
+}
+
+function renderYmmDropdownForm(form, options = latestVehicleOptions, values = selectedYmmValues(form)) {
+  if (!form) return;
+  fillYmmSelect(ymmSelect(form, "year"), options.years || fallbackVehicleOptions.years, "Year", values.year);
+  fillYmmSelect(ymmSelect(form, "make"), options.makes || fallbackVehicleOptions.makes, "Make", values.make);
+  const modelSelect = ymmSelect(form, "model");
+  fillYmmSelect(modelSelect, values.make ? options.models || [] : [], values.make ? "Model" : "Pick make first", values.model);
+  if (modelSelect) modelSelect.disabled = !values.make;
+}
+
+function mirrorYmmDropdowns(sourceForm) {
+  const values = selectedYmmValues(sourceForm);
+  for (const form of ymmDropdownForms) {
+    if (form === sourceForm) continue;
+    renderYmmDropdownForm(form, latestVehicleOptions, values);
+  }
+}
+
+function setYmmDropdownValues(values = {}) {
+  const normalized = {
+    year: cleanInput(values.year),
+    make: cleanInput(values.make),
+    model: cleanInput(values.model),
+  };
+  const options = {
+    ...latestVehicleOptions,
+    models: normalized.model ? [normalized.model, ...(latestVehicleOptions.models || [])] : latestVehicleOptions.models || [],
+  };
+  for (const form of ymmDropdownForms) renderYmmDropdownForm(form, options, normalized);
+}
+
+async function refreshYmmDropdownOptions(sourceForm = null, { clearModel = false, quiet = false } = {}) {
+  const requestId = ++vehicleOptionsRequestId;
+  const values = selectedYmmValues(sourceForm || quickYmmStartForm || ymmForm);
+  if (clearModel && sourceForm) {
+    const modelSelect = ymmSelect(sourceForm, "model");
+    if (modelSelect) modelSelect.value = "";
+    values.model = "";
+  }
+  const params = new URLSearchParams();
+  if (values.year) params.set("year", values.year);
+  if (values.make) params.set("make", values.make);
+  try {
+    const payload = await api(`/api/vehicle-options?${params.toString()}`, { timeoutMs: 10000, noStatus: true, noFallback: true });
+    if (requestId !== vehicleOptionsRequestId) return;
+    latestVehicleOptions = {
+      years: payload.years?.length ? payload.years : fallbackVehicleOptions.years,
+      makes: payload.makes?.length ? payload.makes : fallbackVehicleOptions.makes,
+      models: payload.models || [],
+    };
+  } catch {
+    if (requestId !== vehicleOptionsRequestId) return;
+    latestVehicleOptions = fallbackVehicleOptions;
+    if (!quiet) setStartJobStatus("Vehicle dropdowns are using the built-in fallback list.", "warn");
+  }
+  for (const form of ymmDropdownForms) renderYmmDropdownForm(form, latestVehicleOptions, form === sourceForm ? values : selectedYmmValues(form));
+  if (sourceForm) mirrorYmmDropdowns(sourceForm);
 }
 
 function resetLookupSelectionState() {
@@ -643,11 +756,7 @@ async function runYmmLookup({ year = "", make = "", model = "" } = {}, submitBut
     if (!/^(19|20)\d{2}$/.test(year) || !make || !model) {
       throw new Error("Enter year, make, and model to search parts without a VIN.");
     }
-    if (ymmForm) {
-      ymmForm.elements.year.value = year;
-      ymmForm.elements.make.value = make;
-      ymmForm.elements.model.value = model;
-    }
+    setYmmDropdownValues({ year, make, model });
     if (submitButton) submitButton.disabled = true;
     resetLookupSelectionState();
     vinResult.innerHTML = `
@@ -698,11 +807,7 @@ async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" 
     setStartJobStatus("Enter year, make, and model.", "warn");
     return;
   }
-  if (ymmForm) {
-    ymmForm.elements.year.value = cleanYear;
-    ymmForm.elements.make.value = cleanMake;
-    ymmForm.elements.model.value = cleanModel;
-  }
+  setYmmDropdownValues({ year: cleanYear, make: cleanMake, model: cleanModel });
   setStartJobStatus(`Starting ${cleanYear} ${cleanMake} ${cleanModel}.`, "ready");
   showView("vin");
   await runYmmLookup({ year: cleanYear, make: cleanMake, model: cleanModel });
@@ -1898,6 +2003,7 @@ function resetVinWorkflow() {
   Object.values(liveProductFilters).forEach((selected) => selected.clear());
   vinForm.reset();
   ymmForm?.reset();
+  for (const form of ymmDropdownForms) renderYmmDropdownForm(form, latestVehicleOptions);
   vinForm.classList.remove("is-hidden");
   ymmForm?.classList.remove("is-hidden");
   vinResult.innerHTML = "";
@@ -5932,6 +6038,212 @@ async function runStorageDiagnostics() {
   }
 }
 
+function formatWorkspaceDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return cleanInput(value);
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function renderGoogleWorkspace(payload = latestGoogleWorkspace) {
+  if (!googleWorkspaceStatusPanel) return;
+  if (!payload) {
+    googleWorkspaceStatusPanel.innerHTML = `
+      <article class="assistant-card">
+        <strong>Google not checked</strong>
+        <p>Refresh Settings after the server is awake.</p>
+      </article>
+    `;
+    return;
+  }
+  latestGoogleWorkspace = payload;
+  const warnings = payload.warnings || [];
+  const profile = payload.profile || {};
+  const calendar = payload.calendar || {};
+  const sheets = payload.sheets || {};
+  const drive = payload.drive || {};
+  const cards = [
+    ["Connection", payload.connected ? "Connected" : payload.configured ? "Ready" : "Setup", profile.email || "Google Workspace"],
+    ["Calendar", calendar.events || 0, calendar.lastSyncAt ? `Synced ${formatWorkspaceDate(calendar.lastSyncAt)}` : payload.connected ? "Ready to preview" : "Connect first"],
+    ["Sheets", sheets.sheetStats?.length || 0, sheets.lastSyncAt ? `Synced ${formatWorkspaceDate(sheets.lastSyncAt)}` : "Field Data Bridge"],
+    ["Drive", drive.jobFolders || 0, drive.parentFolderConfigured ? "Parent folder set" : "Job folders ready"],
+  ];
+  googleWorkspaceStatusPanel.innerHTML = `
+    <section class="history-summary-grid storage-status-grid google-status-grid">
+      ${cards
+        .map(
+          ([label, value, caption]) => `
+            <article class="metric">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+              <p>${escapeHtml(caption)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    <section class="storage-status-details google-setup-details">
+      <article>
+        <span>Redirect URI</span>
+        <strong>${escapeHtml(payload.configured ? "Configured" : "Use this in Google Cloud")}</strong>
+        <p>${escapeHtml(payload.redirectUri || payload.setup?.redirectUri || "")}</p>
+      </article>
+      <article>
+        <span>Sheets import</span>
+        <strong>${escapeHtml(sheets.spreadsheetId || "Waiting")}</strong>
+        <p>${escapeHtml((sheets.importedSheets || []).slice(0, 8).join(", ") || "Sync from Field Data Bridge after connecting.")}</p>
+      </article>
+      <article>
+        <span>Calendar</span>
+        <strong>${escapeHtml(payload.calendarId || "primary")}</strong>
+        <p>${escapeHtml(calendar.sample?.[0]?.summary || "Preview upcoming jobs from the connected calendar.")}</p>
+      </article>
+    </section>
+    ${
+      warnings.length
+        ? `<section class="storage-warning-list">${warnings.map((warning) => `<article>${escapeHtml(warning)}</article>`).join("")}</section>`
+        : `<article class="assistant-card storage-ok-card"><strong>Workspace bridge ready</strong><p>Calendar, Sheets, and Drive hooks are available for owner-side workflow.</p></article>`
+    }
+  `;
+}
+
+async function loadGoogleWorkspace({ quiet = false } = {}) {
+  if (!googleWorkspaceStatusPanel) return null;
+  try {
+    if (googleWorkspaceStatus && !quiet) googleWorkspaceStatus.textContent = "Checking Google Workspace...";
+    const payload = await api("/api/google/status", { timeoutMs: 10000, noStatus: true });
+    renderGoogleWorkspace(payload);
+    if (googleWorkspaceStatus && !quiet) {
+      googleWorkspaceStatus.textContent = payload.connected
+        ? `Google connected${payload.profile?.email ? ` as ${payload.profile.email}` : ""}.`
+        : payload.configured
+          ? "Google is configured. Connect the owner account."
+          : "Google env vars are not set yet on Render.";
+    }
+    return payload;
+  } catch (error) {
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Google check failed: ${error.message}`;
+    googleWorkspaceStatusPanel.innerHTML = `<article class="assistant-card"><strong>Google unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+function connectGoogleWorkspace() {
+  window.location.href = "/api/google/oauth/start";
+}
+
+async function disconnectGoogleWorkspace() {
+  if (!window.confirm("Disconnect Google Workspace from this app? This keeps imported TimLock data, but removes saved Google tokens.")) return;
+  try {
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = "Disconnecting Google...";
+    const payload = await api("/api/google/disconnect", { method: "POST", body: JSON.stringify({}), timeoutMs: 12000, noStatus: true });
+    latestGoogleWorkspace = payload;
+    renderGoogleWorkspace(payload);
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = "Google disconnected.";
+  } catch (error) {
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Disconnect failed: ${error.message}`;
+  }
+}
+
+async function syncGoogleCalendarPreview() {
+  try {
+    const days = Math.max(1, Math.min(90, Number(googleCalendarDaysInput?.value || 14)));
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = "Reading Google Calendar...";
+    if (googleCalendarResult) googleCalendarResult.innerHTML = "";
+    const payload = await api(`/api/google/calendar/events?days=${encodeURIComponent(days)}`, { timeoutMs: 22000, noStatus: true });
+    latestGoogleWorkspace = payload.google;
+    renderGoogleWorkspace(payload.google);
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
+    const events = payload.events || [];
+    if (googleCalendarResult) {
+      googleCalendarResult.innerHTML = events.length
+        ? `
+          <section class="google-event-list">
+            ${events
+              .slice(0, 8)
+              .map(
+                (event) => `
+                  <article class="assistant-card compact-event-card">
+                    <strong>${escapeHtml(event.summary)}</strong>
+                    <p>${escapeHtml([formatWorkspaceDate(event.start), event.location].filter(Boolean).join(" | "))}</p>
+                  </article>
+                `,
+              )
+              .join("")}
+          </section>
+        `
+        : `<article class="assistant-card"><strong>No upcoming calendar jobs</strong><p>No events were found for the next ${escapeHtml(days)} days.</p></article>`;
+    }
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar preview loaded: ${events.length} event${events.length === 1 ? "" : "s"}.`;
+  } catch (error) {
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar sync failed: ${error.message}`;
+    if (googleCalendarResult) googleCalendarResult.innerHTML = `<article class="assistant-card"><strong>Calendar unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+async function syncGoogleSheetToBridge() {
+  if (!googleSheetSyncForm) return;
+  const data = new FormData(googleSheetSyncForm);
+  const spreadsheetId = cleanInput(data.get("spreadsheetId"));
+  if (!spreadsheetId) {
+    if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = "Paste the Google Sheet spreadsheet ID.";
+    return;
+  }
+  try {
+    if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = "Syncing Google Sheet into Field Data Bridge...";
+    const payload = await api("/api/google/sheets/import-metka", {
+      method: "POST",
+      body: JSON.stringify({
+        spreadsheetId,
+        sheets: cleanInput(data.get("sheets")),
+      }),
+      timeoutMs: 60000,
+      noStatus: true,
+    });
+    latestGoogleWorkspace = payload.google;
+    renderGoogleWorkspace(payload.google);
+    renderMetkaBridge(payload.metka);
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
+    latestJobLoadout = null;
+    latestWorkbench = null;
+    latestCoverageDashboard = null;
+    latestProofVault = null;
+    latestReferenceList = null;
+    await Promise.allSettled([loadCoverageDashboard(), loadJobLoadout(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
+    const imported = payload.importedSheets || [];
+    if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = `Google Sheet synced: ${imported.length} tab${imported.length === 1 ? "" : "s"}.`;
+    if (googleSheetSyncResult) {
+      googleSheetSyncResult.innerHTML = `
+        <section class="storage-file-list">
+          ${imported
+            .map(
+              (sheet) => `
+                <article>
+                  <span>${escapeHtml(sheet.sheet)}</span>
+                  <strong>${escapeHtml(sheet.rows || 0)}</strong>
+                  <p>${escapeHtml(`${sheet.columns || 0} columns`)}</p>
+                </article>
+              `,
+            )
+            .join("")}
+        </section>
+        ${
+          payload.skipped?.length
+            ? `<section class="storage-warning-list">${payload.skipped.slice(0, 8).map((item) => `<article>${escapeHtml(`${item.sheet}: ${item.reason}`)}</article>`).join("")}</section>`
+            : ""
+        }
+      `;
+    }
+  } catch (error) {
+    if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = `Google Sheet sync failed: ${error.message}`;
+    if (googleSheetSyncResult) googleSheetSyncResult.innerHTML = `<article class="assistant-card"><strong>Sheets sync unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
 async function exportServerBackup() {
   if (storageSettingsStatus) storageSettingsStatus.textContent = "Building server backup...";
   try {
@@ -7395,6 +7707,8 @@ function lishiLookupParamsFromProfile(profile) {
   if (vehicle.year) params.set("year", vehicle.year);
   if (vehicle.make) params.set("make", vehicle.make);
   if (vehicle.model) params.set("model", vehicle.model);
+  const preferredKeyway = cleanInput(reference.keyway?.primary || "");
+  if (preferredKeyway && !/VERIFY|FAMILY|\//i.test(preferredKeyway)) params.set("preferredKeyway", preferredKeyway);
   params.set("category", "Automotive");
   params.set("limit", "12");
   return params;
@@ -11562,6 +11876,18 @@ const initialRoute = routeFromLocation() || activeViewId || "command";
 replaceRouteHash(initialRoute);
 showView(initialRoute, { push: false, scroll: true });
 resetMainScrollSoon();
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get("google") === "connected") {
+  showView("settings", { push: false });
+  if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = "Google connected. Checking Workspace status...";
+  loadGoogleWorkspace();
+  window.history.replaceState({ view: "settings", timlock: true }, "", "#settings");
+} else if (urlParams.get("google") === "error") {
+  showView("settings", { push: false });
+  if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Google connection failed: ${urlParams.get("message") || "Unknown error"}`;
+  loadGoogleWorkspace({ quiet: true });
+  window.history.replaceState({ view: "settings", timlock: true }, "", "#settings");
+}
 
 globalSearchForm?.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -11583,6 +11909,13 @@ quickYmmStartForm?.addEventListener("submit", (event) => {
     model: data.get("quickModel"),
   });
 });
+
+for (const form of ymmDropdownForms) {
+  renderYmmDropdownForm(form, fallbackVehicleOptions);
+  ymmSelect(form, "year")?.addEventListener("change", () => refreshYmmDropdownOptions(form, { clearModel: true }));
+  ymmSelect(form, "make")?.addEventListener("change", () => refreshYmmDropdownOptions(form, { clearModel: true }));
+  ymmSelect(form, "model")?.addEventListener("change", () => mirrorYmmDropdowns(form));
+}
 
 refreshMissionControlButton?.addEventListener("click", () => loadMissionControl());
 refreshTrainingCenterButton?.addEventListener("click", () => loadTrainingCenter());
@@ -11608,6 +11941,9 @@ serverBackupImportInput?.addEventListener("change", async () => {
   await importServerBackup(serverBackupImportInput.files?.[0]);
   serverBackupImportInput.value = "";
 });
+connectGoogleWorkspaceButton?.addEventListener("click", connectGoogleWorkspace);
+disconnectGoogleWorkspaceButton?.addEventListener("click", disconnectGoogleWorkspace);
+syncGoogleCalendarButton?.addEventListener("click", syncGoogleCalendarPreview);
 codeDeskForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   runCodeDesk();
@@ -11683,6 +12019,11 @@ metkaBridgeImportInput?.addEventListener("change", async () => {
   metkaBridgeImportInput.value = "";
 });
 clearMetkaBridgeButton?.addEventListener("click", clearMetkaBridge);
+
+googleSheetSyncForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  syncGoogleSheetToBridge();
+});
 
 if (supplierSelect) {
   supplierSelect.addEventListener("change", () => {
@@ -12571,4 +12912,6 @@ bootTask("supplier accounts", loadSupplierAccounts);
 bootTask("reference vault", loadReferenceVault);
 bootTask("public sources", loadPublicReferenceSources);
 bootTask("storage status", () => loadStorageStatus({ quiet: true }));
+bootTask("google workspace", () => loadGoogleWorkspace({ quiet: true }));
+bootTask("vehicle options", () => refreshYmmDropdownOptions(null, { quiet: true }));
 updateInstallButton();

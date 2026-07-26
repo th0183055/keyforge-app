@@ -276,6 +276,55 @@ body.mode-subscriber [data-owner-only] {
   display: none !important;
 }
 
+.more-actions {
+  position: relative;
+}
+
+.more-actions summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #151922;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.more-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.more-actions[open] summary {
+  border-color: rgba(224, 36, 48, 0.55);
+}
+
+.more-actions > div {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 8px;
+  min-width: 190px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: #12161f;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.35);
+}
+
+.google-workspace-actions,
+.google-event-list {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-event-card {
+  padding: 12px;
+}
+
 .auth-gate {
   position: fixed;
   inset: 0;
@@ -1296,7 +1345,8 @@ svg {
   text-transform: uppercase;
 }
 
-.ymm-form input {
+.ymm-form input,
+.ymm-form select {
   min-height: 44px;
   background: white;
   text-transform: uppercase;
@@ -6136,6 +6186,7 @@ textarea {
 .worked-job-form textarea,
 .vin-form input,
 .ymm-form input,
+.ymm-form select,
 input,
 select,
 textarea {
@@ -9638,7 +9689,8 @@ body.mode-subscriber .topbar {
   text-transform: uppercase;
 }
 
-.start-job-card input {
+.start-job-card input,
+.start-job-card select {
   width: 100%;
   min-height: 46px;
   border: 1px solid #cbd5df;
@@ -9648,6 +9700,13 @@ body.mode-subscriber .topbar {
   color: #111827;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.start-job-card select:disabled,
+.ymm-form select:disabled {
+  color: #7b8490;
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .start-ymm-fields {
@@ -10786,7 +10845,8 @@ body.is-start-screen #command .start-job-card strong {
   font-size: clamp(1.35rem, 2.4vw, 2rem);
 }
 
-body.is-start-screen #command .start-job-card input {
+body.is-start-screen #command .start-job-card input,
+body.is-start-screen #command .start-job-card select {
   min-height: 52px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
@@ -10796,7 +10856,8 @@ body.is-start-screen #command .start-job-card input {
   font-weight: 800;
 }
 
-body.is-start-screen #command .start-job-card input:focus {
+body.is-start-screen #command .start-job-card input:focus,
+body.is-start-screen #command .start-job-card select:focus {
   border-color: #e02430;
   outline: 3px solid rgba(224, 36, 48, 0.24);
 }
@@ -11288,5 +11349,20 @@ body:not(.is-start-screen) ::selection {
   body:not(.is-start-screen) .app-status-banner span {
     width: 100%;
     text-align: center;
+  }
+
+  .more-actions {
+    width: 100%;
+  }
+
+  .more-actions summary {
+    width: 100%;
+    text-align: center;
+  }
+
+  .more-actions > div {
+    position: static;
+    min-width: 0;
+    width: 100%;
   }
 }

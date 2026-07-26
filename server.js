@@ -94,6 +94,28 @@ const metkaBridgeEmpty = {
   },
 };
 
+const googleWorkspaceEmpty = {
+  version: 1,
+  connectedAt: "",
+  updatedAt: "",
+  profile: null,
+  scopes: [],
+  tokens: null,
+  calendar: {
+    lastSyncAt: "",
+    events: [],
+  },
+  drive: {
+    jobFolders: [],
+  },
+  sheets: {
+    lastSyncAt: "",
+    spreadsheetId: "",
+    sheetStats: [],
+    importedSheets: [],
+  },
+};
+
 function supplierDefaults(definition) {
   return {
     id: definition.id,
@@ -130,6 +152,7 @@ const emptyStore = {
   shopRules: [],
   fieldPacketFeedback: [],
   metkaBridge: metkaBridgeEmpty,
+  googleWorkspace: googleWorkspaceEmpty,
   codeDeskRecords: [],
   codeDeskSystems: [],
   codeDeskLessons: [],
@@ -164,6 +187,7 @@ function normalizeStore(store = {}) {
     inventoryLedger: Array.isArray(store.inventoryLedger) ? store.inventoryLedger : [],
     inventoryLocations: Array.isArray(store.inventoryLocations) ? store.inventoryLocations : [],
     metkaBridge: normalizeMetkaBridgeStore(store.metkaBridge),
+    googleWorkspace: normalizeGoogleWorkspaceStore(store.googleWorkspace),
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
     codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
@@ -408,6 +432,35 @@ async function encryptSecret(value) {
 async function decryptSecret(cipherPayload) {
   if (!cipherPayload?.value || !cipherPayload?.iv || !cipherPayload?.tag) return "";
   const key = await localVaultKey();
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(cipherPayload.iv, "base64"));
+  decipher.setAuthTag(Buffer.from(cipherPayload.tag, "base64"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(cipherPayload.value, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+async function googleVaultKey() {
+  const configured = cleanString(process.env.GOOGLE_ENCRYPTION_KEY || process.env.LOCKFORGE_SECRET || process.env.TIMLOCK_AUTH_SECRET);
+  if (configured) return createHash("sha256").update(configured).digest();
+  return localVaultKey();
+}
+
+async function encryptGoogleSecret(value) {
+  const key = await googleVaultKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
+  return {
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    value: encrypted.toString("base64"),
+  };
+}
+
+async function decryptGoogleSecret(cipherPayload) {
+  if (!cipherPayload?.value || !cipherPayload?.iv || !cipherPayload?.tag) return "";
+  const key = await googleVaultKey();
   const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(cipherPayload.iv, "base64"));
   decipher.setAuthTag(Buffer.from(cipherPayload.tag, "base64"));
   return Buffer.concat([
@@ -3993,6 +4046,41 @@ function metkaBridgeCloneEmpty() {
   return JSON.parse(JSON.stringify(metkaBridgeEmpty));
 }
 
+function googleWorkspaceCloneEmpty() {
+  return JSON.parse(JSON.stringify(googleWorkspaceEmpty));
+}
+
+function normalizeGoogleWorkspaceStore(workspace = {}) {
+  const empty = googleWorkspaceCloneEmpty();
+  if (!workspace || typeof workspace !== "object") return empty;
+  const calendar = workspace.calendar && typeof workspace.calendar === "object" ? workspace.calendar : {};
+  const drive = workspace.drive && typeof workspace.drive === "object" ? workspace.drive : {};
+  const sheets = workspace.sheets && typeof workspace.sheets === "object" ? workspace.sheets : {};
+  return {
+    ...empty,
+    ...workspace,
+    profile: workspace.profile && typeof workspace.profile === "object" ? workspace.profile : null,
+    scopes: Array.isArray(workspace.scopes) ? workspace.scopes.map(cleanString).filter(Boolean) : [],
+    tokens: workspace.tokens && typeof workspace.tokens === "object" ? workspace.tokens : null,
+    calendar: {
+      ...empty.calendar,
+      ...calendar,
+      events: Array.isArray(calendar.events) ? calendar.events : [],
+    },
+    drive: {
+      ...empty.drive,
+      ...drive,
+      jobFolders: Array.isArray(drive.jobFolders) ? drive.jobFolders : [],
+    },
+    sheets: {
+      ...empty.sheets,
+      ...sheets,
+      sheetStats: Array.isArray(sheets.sheetStats) ? sheets.sheetStats : [],
+      importedSheets: Array.isArray(sheets.importedSheets) ? sheets.importedSheets : [],
+    },
+  };
+}
+
 function normalizeMetkaBridgeStore(bridge = {}) {
   const empty = metkaBridgeCloneEmpty();
   if (!bridge || typeof bridge !== "object") return empty;
@@ -4416,8 +4504,462 @@ function buildMetkaBridgeStatus(store = {}) {
   };
 }
 
+const googleOAuthAuthorizeUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+const googleOAuthTokenUrl = "https://oauth2.googleapis.com/token";
+const googleUserInfoUrl = "https://openidconnect.googleapis.com/v1/userinfo";
+const googleDefaultScopes = [
+  "openid",
+  "email",
+  "profile",
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+];
+
+function requestOrigin(request) {
+  const headers = request?.headers || {};
+  const forwardedHost = cleanString(headers["x-forwarded-host"]).split(",")[0];
+  const host = forwardedHost || cleanString(headers.host) || cleanString(process.env.RENDER_EXTERNAL_HOSTNAME);
+  const forwardedProto = cleanString(headers["x-forwarded-proto"]).split(",")[0];
+  const proto =
+    forwardedProto ||
+    cleanString(process.env.PUBLIC_URL).replace(/:\/\/.*/, "") ||
+    (host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https");
+  return host ? `${proto}://${host}` : "http://127.0.0.1:3000";
+}
+
+function googleClientConfig(request) {
+  const configuredScopes = uniqueCleanValues(cleanString(process.env.GOOGLE_SCOPES).split(/[,\s]+/));
+  const clientId = cleanString(process.env.GOOGLE_CLIENT_ID);
+  const clientSecret = cleanString(process.env.GOOGLE_CLIENT_SECRET);
+  const publicUrl = cleanString(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL);
+  const redirectBase = publicUrl || requestOrigin(request);
+  const redirectUri = cleanString(process.env.GOOGLE_REDIRECT_URI) || `${redirectBase.replace(/\/$/, "")}/api/google/oauth/callback`;
+  const warnings = [];
+  if (!clientId) warnings.push("GOOGLE_CLIENT_ID is not set.");
+  if (!clientSecret) warnings.push("GOOGLE_CLIENT_SECRET is not set.");
+  if (!cleanString(process.env.GOOGLE_ENCRYPTION_KEY || process.env.LOCKFORGE_SECRET || process.env.TIMLOCK_AUTH_SECRET)) {
+    warnings.push("Set GOOGLE_ENCRYPTION_KEY or LOCKFORGE_SECRET on Render so Google tokens survive redeploys.");
+  }
+  return {
+    configured: Boolean(clientId && clientSecret),
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes: configuredScopes.length ? uniqueCleanValues(["openid", "email", "profile", ...configuredScopes]) : googleDefaultScopes,
+    calendarId: cleanString(process.env.GOOGLE_CALENDAR_ID) || "primary",
+    driveParentFolderId: cleanString(process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID),
+    warnings,
+  };
+}
+
+function googleWorkspaceConnected(workspace = {}) {
+  const safe = normalizeGoogleWorkspaceStore(workspace);
+  return Boolean(safe.tokens?.accessTokenCipher || safe.tokens?.refreshTokenCipher);
+}
+
+function googlePublicProfile(profile = null) {
+  if (!profile || typeof profile !== "object") return null;
+  return {
+    email: cleanString(profile.email),
+    name: cleanString(profile.name),
+    picture: cleanString(profile.picture),
+  };
+}
+
+function googleWorkspacePublicStatus(store = {}, request = null) {
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const config = googleClientConfig(request);
+  const connected = googleWorkspaceConnected(workspace);
+  return {
+    generatedAt: new Date().toISOString(),
+    configured: config.configured,
+    connected,
+    profile: googlePublicProfile(workspace.profile),
+    scopes: workspace.scopes,
+    calendarId: config.calendarId,
+    redirectUri: config.redirectUri,
+    warnings: config.warnings,
+    calendar: {
+      connected,
+      lastSyncAt: workspace.calendar.lastSyncAt || "",
+      events: workspace.calendar.events.length,
+      sample: workspace.calendar.events.slice(0, 8),
+    },
+    drive: {
+      connected,
+      parentFolderConfigured: Boolean(config.driveParentFolderId),
+      jobFolders: workspace.drive.jobFolders.length,
+      sample: workspace.drive.jobFolders.slice(-6).reverse(),
+    },
+    sheets: {
+      connected,
+      lastSyncAt: workspace.sheets.lastSyncAt || "",
+      spreadsheetId: workspace.sheets.spreadsheetId || "",
+      importedSheets: workspace.sheets.importedSheets || [],
+      sheetStats: workspace.sheets.sheetStats || [],
+    },
+    setup: {
+      envKeys: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "GOOGLE_ENCRYPTION_KEY"],
+      redirectUri: config.redirectUri,
+      scopes: config.scopes,
+    },
+  };
+}
+
+async function signGoogleState(request) {
+  const payload = {
+    type: "google-workspace-oauth",
+    nonce: randomUUID(),
+    iat: Date.now(),
+    returnTo: "/#settings",
+    origin: requestOrigin(request),
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", await authSigningKey()).update(body).digest("base64url");
+  return `${body}.${signature}`;
+}
+
+async function verifyGoogleState(state) {
+  const [body, signature] = cleanString(state).split(".");
+  if (!body || !signature) throw new Error("Google sign-in state was missing or invalid.");
+  const expected = createHmac("sha256", await authSigningKey()).update(body).digest("base64url");
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !timingSafeEqual(left, right)) throw new Error("Google sign-in state did not validate.");
+  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+  if (payload.type !== "google-workspace-oauth") throw new Error("Google sign-in state had the wrong purpose.");
+  if (Date.now() - Number(payload.iat || 0) > 20 * 60 * 1000) throw new Error("Google sign-in state expired. Start the connection again.");
+  return payload;
+}
+
+function redirectTo(response, location) {
+  response.writeHead(302, { Location: location });
+  response.end();
+}
+
+async function googleErrorMessage(response) {
+  const text = await response.text().catch(() => "");
+  try {
+    const payload = JSON.parse(text);
+    return payload.error?.message || payload.error_description || response.statusText || `Google request failed (${response.status})`;
+  } catch {
+    return text || response.statusText || `Google request failed (${response.status})`;
+  }
+}
+
+async function applyGoogleTokenPayload(workspace, tokenPayload = {}, profile = null) {
+  const safe = normalizeGoogleWorkspaceStore(workspace);
+  const now = Date.now();
+  const existingTokens = safe.tokens && typeof safe.tokens === "object" ? safe.tokens : {};
+  const accessTokenCipher = tokenPayload.access_token
+    ? await encryptGoogleSecret(tokenPayload.access_token)
+    : existingTokens.accessTokenCipher || null;
+  const refreshTokenCipher = tokenPayload.refresh_token
+    ? await encryptGoogleSecret(tokenPayload.refresh_token)
+    : existingTokens.refreshTokenCipher || null;
+  const scopeTokens = uniqueCleanValues([
+    ...(safe.scopes || []),
+    ...cleanString(tokenPayload.scope || existingTokens.scope).split(/[,\s]+/),
+  ]);
+  return normalizeGoogleWorkspaceStore({
+    ...safe,
+    connectedAt: safe.connectedAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    profile: profile || safe.profile,
+    scopes: scopeTokens,
+    tokens: {
+      accessTokenCipher,
+      refreshTokenCipher,
+      expiryDate: tokenPayload.expires_in ? now + Math.max(60, Number(tokenPayload.expires_in) - 60) * 1000 : Number(existingTokens.expiryDate || 0),
+      tokenType: cleanString(tokenPayload.token_type || existingTokens.tokenType || "Bearer"),
+      scope: cleanString(tokenPayload.scope || existingTokens.scope || ""),
+    },
+  });
+}
+
+async function exchangeGoogleCode(request, code) {
+  const config = googleClientConfig(request);
+  if (!config.configured) throw new Error("Google Workspace OAuth is not configured on the server.");
+  const body = new URLSearchParams({
+    code,
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    redirect_uri: config.redirectUri,
+    grant_type: "authorization_code",
+  });
+  const response = await fetch(googleOAuthTokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!response.ok) throw new Error(await googleErrorMessage(response));
+  return response.json();
+}
+
+async function refreshGoogleAccessToken(store, request) {
+  const config = googleClientConfig(request);
+  if (!config.configured) throw new Error("Google Workspace OAuth is not configured on the server.");
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const refreshToken = await decryptGoogleSecret(workspace.tokens?.refreshTokenCipher).catch(() => "");
+  if (!refreshToken) {
+    const accessToken = await decryptGoogleSecret(workspace.tokens?.accessTokenCipher).catch(() => "");
+    if (accessToken) return accessToken;
+    throw new Error("Google Workspace is not connected. Connect it again from Settings.");
+  }
+  const response = await fetch(googleOAuthTokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!response.ok) throw new Error(await googleErrorMessage(response));
+  const payload = await response.json();
+  store.googleWorkspace = await applyGoogleTokenPayload(workspace, payload, workspace.profile);
+  await writeStore(store);
+  return decryptGoogleSecret(store.googleWorkspace.tokens?.accessTokenCipher);
+}
+
+async function googleAccessToken(store, request) {
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const expiresAt = Number(workspace.tokens?.expiryDate || 0);
+  const hasUsableAccessToken = workspace.tokens?.accessTokenCipher && (!expiresAt || expiresAt > Date.now() + 60_000);
+  if (hasUsableAccessToken) return decryptGoogleSecret(workspace.tokens.accessTokenCipher);
+  return refreshGoogleAccessToken(store, request);
+}
+
+async function googleApiJson(store, request, url, options = {}, retry = true) {
+  const accessToken = await googleAccessToken(store, request);
+  const headers = {
+    ...(options.headers || {}),
+    Authorization: `Bearer ${accessToken}`,
+  };
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 && retry) {
+    await refreshGoogleAccessToken(store, request);
+    return googleApiJson(store, request, url, options, false);
+  }
+  if (!response.ok) throw new Error(await googleErrorMessage(response));
+  if (response.status === 204) return null;
+  return response.json().catch(() => ({}));
+}
+
+async function googleUserProfile(accessToken) {
+  const response = await fetch(googleUserInfoUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) return null;
+  const profile = await response.json().catch(() => null);
+  return profile && typeof profile === "object" ? profile : null;
+}
+
+async function handleGoogleOAuthStart(request, response) {
+  const config = googleClientConfig(request);
+  if (!config.configured) {
+    sendError(response, 400, "Google Workspace OAuth is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render.", {
+      setup: googleWorkspacePublicStatus({}, request).setup,
+    });
+    return;
+  }
+  const state = await signGoogleState(request);
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: "code",
+    scope: config.scopes.join(" "),
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: "true",
+    state,
+  });
+  redirectTo(response, `${googleOAuthAuthorizeUrl}?${params.toString()}`);
+}
+
+async function handleGoogleOAuthCallback(request, response) {
+  const url = new URL(request.url, requestOrigin(request));
+  const appRoot = `${requestOrigin(request)}/`;
+  try {
+    if (url.searchParams.get("error")) throw new Error(url.searchParams.get("error_description") || url.searchParams.get("error"));
+    const code = cleanString(url.searchParams.get("code"));
+    if (!code) throw new Error("Google did not return an authorization code.");
+    await verifyGoogleState(url.searchParams.get("state"));
+    const tokenPayload = await exchangeGoogleCode(request, code);
+    const profile = tokenPayload.access_token ? await googleUserProfile(tokenPayload.access_token) : null;
+    const store = await readStore();
+    store.googleWorkspace = await applyGoogleTokenPayload(store.googleWorkspace, tokenPayload, profile);
+    await writeStore(store);
+    redirectTo(response, `${appRoot}?google=connected#settings`);
+  } catch (error) {
+    redirectTo(response, `${appRoot}?google=error&message=${encodeURIComponent(error.message)}#settings`);
+  }
+}
+
+function googleCalendarEventPublic(event = {}) {
+  return {
+    id: cleanString(event.id),
+    summary: cleanString(event.summary || "(No title)"),
+    start: cleanString(event.start?.dateTime || event.start?.date),
+    end: cleanString(event.end?.dateTime || event.end?.date),
+    location: cleanString(event.location),
+    status: cleanString(event.status),
+    htmlLink: cleanString(event.htmlLink),
+    description: cleanString(event.description).slice(0, 500),
+  };
+}
+
+async function syncGoogleCalendarEvents(request, store, options = {}) {
+  const config = googleClientConfig(request);
+  const days = Math.max(1, Math.min(90, Number(options.days || 14)));
+  const timeMin = new Date();
+  const timeMax = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  const apiUrl = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`);
+  apiUrl.searchParams.set("timeMin", timeMin.toISOString());
+  apiUrl.searchParams.set("timeMax", timeMax.toISOString());
+  apiUrl.searchParams.set("singleEvents", "true");
+  apiUrl.searchParams.set("orderBy", "startTime");
+  apiUrl.searchParams.set("maxResults", String(Math.max(10, Math.min(250, Number(options.limit || 80)))));
+  const payload = await googleApiJson(store, request, apiUrl);
+  const events = (payload.items || []).map(googleCalendarEventPublic).filter((event) => event.id || event.summary);
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  workspace.calendar = {
+    ...workspace.calendar,
+    lastSyncAt: new Date().toISOString(),
+    events,
+  };
+  workspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = workspace;
+  await writeStore(store);
+  return {
+    google: googleWorkspacePublicStatus(store, request),
+    days,
+    events,
+  };
+}
+
+async function createGoogleCalendarEvent(request, store, body = {}) {
+  const config = googleClientConfig(request);
+  const event = {
+    summary: cleanString(body.summary || body.title || "TimLock job"),
+    location: cleanString(body.location),
+    description: cleanString(body.description || body.notes),
+    start: body.start
+      ? { dateTime: new Date(body.start).toISOString() }
+      : { dateTime: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
+    end: body.end
+      ? { dateTime: new Date(body.end).toISOString() }
+      : { dateTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString() },
+  };
+  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`;
+  const created = await googleApiJson(store, request, apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  return { event: googleCalendarEventPublic(created), google: googleWorkspacePublicStatus(store, request) };
+}
+
+function googleSheetRange(sheetName) {
+  return `'${cleanString(sheetName).replace(/'/g, "''")}'!A:AZ`;
+}
+
+async function fetchGoogleSheetRows(request, store, spreadsheetId, sheetName) {
+  const range = googleSheetRange(sheetName);
+  const apiUrl = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`);
+  apiUrl.searchParams.set("majorDimension", "ROWS");
+  const payload = await googleApiJson(store, request, apiUrl);
+  return Array.isArray(payload.values) ? payload.values : [];
+}
+
+async function syncGoogleSheetToMetkaBridge(request, store, body = {}) {
+  const spreadsheetId = cleanString(body.spreadsheetId || body.sheetId || body.id);
+  if (!spreadsheetId) throw new Error("Enter the Google Sheet spreadsheet ID.");
+  const sheetNames = uniqueCleanValues(
+    Array.isArray(body.sheets) ? body.sheets : cleanString(body.sheets || body.sheetNames).split(/[,\n]+/),
+  ).map(metkaCanonicalSheetName);
+  const requestedSheets = sheetNames.length ? sheetNames : metkaCanonicalSheetNames;
+  const imported = {};
+  const skipped = [];
+  for (const sheet of requestedSheets) {
+    try {
+      const rows = await fetchGoogleSheetRows(request, store, spreadsheetId, sheet);
+      if (rows.length) imported[sheet] = rows;
+      else skipped.push({ sheet, reason: "empty" });
+    } catch (error) {
+      skipped.push({ sheet, reason: error.message });
+    }
+  }
+  if (!Object.keys(imported).length) throw new Error("No Google Sheet tabs imported. Check sharing/access, spreadsheet ID, and tab names.");
+  const bridge = normalizeMetkaBridgePayload({
+    source: `Google Sheets ${spreadsheetId}`,
+    sheets: imported,
+  });
+  store.metkaBridge = bridge;
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  workspace.sheets = {
+    ...workspace.sheets,
+    lastSyncAt: new Date().toISOString(),
+    spreadsheetId,
+    sheetStats: bridge.sheetStats,
+    importedSheets: bridge.sheetStats.map((stat) => stat.sheet),
+  };
+  workspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = workspace;
+  await writeStore(store);
+  return {
+    google: googleWorkspacePublicStatus(store, request),
+    metka: buildMetkaBridgeStatus(store),
+    importedSheets: bridge.sheetStats,
+    skipped,
+  };
+}
+
+async function createGoogleDriveJobFolder(request, store, body = {}) {
+  const config = googleClientConfig(request);
+  const vehicle = body.vehicle && typeof body.vehicle === "object" ? body.vehicle : {};
+  const vin = cleanString(body.vin || vehicle.vin);
+  const title = uniqueCleanValues([
+    vin,
+    vehicle.year,
+    vehicle.make,
+    vehicle.model,
+    cleanString(body.customer || body.jobId),
+  ]).join(" ");
+  const name = cleanString(body.name || title || `TimLock Job ${new Date().toISOString().slice(0, 10)}`).replace(/[<>:"/\\|?*]/g, "-").slice(0, 120);
+  const created = await googleApiJson(store, request, "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: config.driveParentFolderId ? [config.driveParentFolderId] : undefined,
+    }),
+  });
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  workspace.drive.jobFolders = [
+    ...(workspace.drive.jobFolders || []),
+    {
+      id: cleanString(created.id),
+      name: cleanString(created.name),
+      webViewLink: cleanString(created.webViewLink),
+      vin,
+      jobId: cleanString(body.jobId),
+      createdAt: new Date().toISOString(),
+    },
+  ].slice(-500);
+  workspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = workspace;
+  await writeStore(store);
+  return { folder: workspace.drive.jobFolders.at(-1), google: googleWorkspacePublicStatus(store, request) };
+}
+
 async function buildWorkspaceBrief(store = {}) {
   const metka = buildMetkaBridgeStatus(store);
+  const google = googleWorkspacePublicStatus(store);
   const metkaCounts = metka.counts || {};
   const metkaRows = [
     metkaCounts.workLogJobs,
@@ -4434,7 +4976,8 @@ async function buildWorkspaceBrief(store = {}) {
   try {
     calendar = JSON.parse(await readFile(path.join(dataDir, "calendar-analysis.json"), "utf8"));
   } catch {}
-  const calendarEvents = Number(calendar?.totalEvents || 0);
+  const googleCalendarEvents = Number(google.calendar?.events || 0);
+  const calendarEvents = Math.max(Number(calendar?.totalEvents || 0), googleCalendarEvents);
   const proofAttachmentStore = await readProofAttachments().catch(() => ({ attachments: [] }));
   const attachmentCount = Array.isArray(proofAttachmentStore.attachments) ? proofAttachmentStore.attachments.length : 0;
   const sheetRows = metkaRows;
@@ -4444,31 +4987,40 @@ async function buildWorkspaceBrief(store = {}) {
     headline: metka.connected
       ? "Google Workspace and Metka data are available to the field engine."
       : "Workspace bridge is ready for Google/Metka imports.",
+    google,
     sources: [
       {
         id: "google-calendar",
         label: "Google Calendar",
-        status: calendarEvents ? "connected" : "setup",
+        status: google.connected || calendarEvents ? "connected" : "setup",
         value: calendarEvents ? `${calendarEvents} events` : "Not imported",
         detail: calendarEvents
-          ? `${calendar?.dateRange?.start || "Calendar"} to ${calendar?.dateRange?.end || "latest"} job signals`
-          : "Use the Apps Script/calendar export to feed job demand and service timing.",
+          ? google.calendar?.lastSyncAt
+            ? `Synced from Google Calendar ${google.calendar.lastSyncAt.slice(0, 10)}`
+            : `${calendar?.dateRange?.start || "Calendar"} to ${calendar?.dateRange?.end || "latest"} job signals`
+          : google.configured
+            ? "Connect Google Calendar to feed schedule/job timing."
+            : "Add Google OAuth env vars to connect Calendar.",
       },
       {
         id: "google-sheets",
         label: "Google Sheets",
-        status: sheetRows ? "connected" : "setup",
+        status: google.sheets?.lastSyncAt || sheetRows ? "connected" : "setup",
         value: sheetRows ? `${sheetRows} rows` : "Waiting",
         detail: sheetRows
           ? `${metkaCounts.sheets || 0} imported tables powering parts, proof, inventory, and services`
-          : "Export Sheets/Metka tables as JSON and import them in Field Data Bridge.",
+          : google.configured
+            ? "Sync the Metka/Google Sheet in Field Data Bridge."
+            : "Add Google OAuth env vars, then sync Sheets into Field Data Bridge.",
       },
       {
         id: "google-drive",
         label: "Google Drive",
-        status: attachmentCount ? "connected" : "setup",
-        value: attachmentCount ? `${attachmentCount} files` : "Ready",
-        detail: "Proof Vault attachments can be synced server-side for cross-device job evidence.",
+        status: google.connected || attachmentCount ? "connected" : "setup",
+        value: google.drive?.jobFolders ? `${google.drive.jobFolders} folders` : attachmentCount ? `${attachmentCount} files` : "Ready",
+        detail: google.connected
+          ? "Drive is connected for job folders and future proof packet exports."
+          : "Connect Drive for job folders and future proof packet exports.",
       },
       {
         id: "metka",
@@ -5998,6 +6550,12 @@ function lishiQueryHasToolAlias(tool = {}, query = "") {
   return lishiToolAliasTokens(tool).some((alias) => queryCompact === alias || queryTokens.includes(alias));
 }
 
+function lishiPreferredKeywayMatches(tool = {}, preferredKeyway = "") {
+  const preferred = normalizeVehicleText(preferredKeyway).replace(/\s+/g, "");
+  if (!preferred) return false;
+  return lishiToolAliasTokens(tool).some((alias) => alias === preferred);
+}
+
 function lishiVehicleApplicationMatches(applications = [], options = {}) {
   return applications
     .map((application) => ({
@@ -6012,26 +6570,29 @@ function lishiToolEvidence(tool = {}, applications = [], options = {}) {
   const vehicleContext = lishiHasVehicleContext(options);
   const vehicleMatches = lishiVehicleApplicationMatches(applications, options);
   const exactToolQuery = lishiQueryHasToolAlias(tool, options.q);
+  const preferredKeyway = lishiPreferredKeywayMatches(tool, options.preferredKeyway);
   const bestVehicleScore = vehicleMatches[0]?.score || 0;
   const vehicleConfirmed = Boolean(vehicleContext && vehicleMatches.length);
   const matchStatus = vehicleConfirmed
     ? "vehicle-confirmed"
-    : vehicleContext && exactToolQuery
+    : vehicleContext && (exactToolQuery || preferredKeyway)
       ? "keyway-shortlist"
-      : vehicleContext
-        ? "verify-required"
-        : exactToolQuery
-          ? "tool-confirmed"
-          : "search-match";
-  const confidencePercent = vehicleConfirmed
-    ? Math.min(98, 72 + Math.min(26, Math.round(bestVehicleScore / 8)))
-    : matchStatus === "tool-confirmed"
-      ? 90
-      : matchStatus === "keyway-shortlist"
-        ? 58
-        : matchStatus === "search-match"
-          ? 54
-          : 30;
+    : vehicleContext
+      ? "verify-required"
+      : exactToolQuery || preferredKeyway
+        ? "tool-confirmed"
+        : "search-match";
+  const confidencePercent = preferredKeyway && !vehicleConfirmed
+    ? 82
+    : vehicleConfirmed
+      ? Math.min(98, 72 + Math.min(26, Math.round(bestVehicleScore / 8)))
+      : matchStatus === "tool-confirmed"
+        ? 90
+        : matchStatus === "keyway-shortlist"
+          ? 58
+          : matchStatus === "search-match"
+            ? 54
+            : 30;
   const warnings = uniqueCleanValues([
     vehicleContext && !vehicleConfirmed ? "No imported vehicle/application row confirmed this exact year/make/model." : "",
     matchStatus === "keyway-shortlist" ? "Tool/keyway token matched, but the vehicle row did not confirm it. Verify at the lock or insert." : "",
@@ -6043,6 +6604,8 @@ function lishiToolEvidence(tool = {}, applications = [], options = {}) {
     matchLabel:
       matchStatus === "vehicle-confirmed"
         ? "Vehicle match"
+        : preferredKeyway
+          ? "Preferred keyway"
         : matchStatus === "keyway-shortlist"
           ? "Verify keyway"
           : matchStatus === "tool-confirmed"
@@ -6076,6 +6639,10 @@ function lishiToolScore(tool, applications, options) {
   const category = cleanString(options.category);
   let score = 0;
   let queryMatched = false;
+  if (lishiPreferredKeywayMatches(tool, options.preferredKeyway)) {
+    score += 720;
+    queryMatched = true;
+  }
   if (query) {
     const queryNorm = normalizeVehicleText(query);
     const exactAliases = [tool.tool, tool.canonical, ...(tool.aliases || [])].map(normalizeVehicleText);
@@ -7807,6 +8374,8 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   const title = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].map(cleanString).filter(Boolean).join(" ") || query || vin || "Current job";
   const proofPatterns = buildProofPatternBaseline(evidenceIndex, partsReference, { vin, vehicle });
   const shopEvidence = buildShopEvidence(vehicle, vin, cleanJobs);
+  const fieldVehicleReference = vehicle.year && vehicle.make && vehicle.model ? vehicleReferenceFor(vehicle, null, shopEvidence) : {};
+  const preferredKeyway = workbenchPreferredKeyway({ vehicleReference: fieldVehicleReference }, body);
   const partQuery = workbenchPrimaryPartQuery(profile, { ...body, q: normalizeVinCandidate(query) ? "" : query }) || query;
   const partHistory = partQuery ? buildPartHistory(partQuery, evidenceIndex, partsReference) : null;
   const proofVault = buildProofVault(vin || query || title, evidenceIndex, partsReference);
@@ -7821,11 +8390,12 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   });
   const lishiReference = await readLishiMasterReference();
   const lishiLookup = buildLishiLookup(lishiReference, {
-    q: uniqueCleanValues([query, [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), proofPatterns.best?.lishiKeyways?.[0]?.value]).join(" "),
+    q: uniqueCleanValues([query, fieldVehicleReference.keyway?.primary, fieldVehicleReference.lishi?.primary, [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), proofPatterns.best?.lishiKeyways?.[0]?.value]).join(" "),
     year: vehicle.year,
     make: vehicle.make,
     model: vehicle.model,
     category: "Automotive",
+    preferredKeyway,
     limit: 16,
   });
   const partCandidates = new Map();
@@ -9130,6 +9700,128 @@ async function buildAutoCodeBaseline(options = {}) {
   };
 }
 
+const vehicleOptionSeedRows = [
+  { year: "2026", make: "Ford", model: "F-150" },
+  { year: "2025", make: "Ford", model: "F-150" },
+  { year: "2024", make: "Ford", model: "F-150" },
+  { year: "2024", make: "Ford", model: "Maverick" },
+  { year: "2024", make: "Toyota", model: "Camry" },
+  { year: "2024", make: "Toyota", model: "RAV4" },
+  { year: "2024", make: "Honda", model: "Accord" },
+  { year: "2024", make: "Honda", model: "CR-V" },
+  { year: "2024", make: "Chevrolet", model: "Silverado" },
+  { year: "2024", make: "Nissan", model: "Rogue" },
+  { year: "2024", make: "Hyundai", model: "Tucson" },
+  { year: "2024", make: "Kia", model: "Telluride" },
+];
+
+function vehicleOptionYear(value) {
+  const year = cleanString(value);
+  return /^(19|20)\d{2}$/.test(year) ? year : "";
+}
+
+function vehicleOptionMakeLabel(value) {
+  const text = normalizeVehicleText(value);
+  const alias = coverageMakeAliases.find(([needle]) => text === needle || text.includes(needle));
+  if (alias) return alias[1];
+  return cleanString(value)
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replace(/\bBmw\b/g, "BMW")
+    .replace(/\bGmc\b/g, "GMC");
+}
+
+function vehicleOptionModelLabel(value) {
+  return normalizeWorkedJobModel(value)
+    .replace(/\bF\s+(\d{3})\b/gi, "F-$1")
+    .replace(/\bSUPER\s+DUTY\b/gi, "Super Duty")
+    .replace(/\bCR\s+V\b/gi, "CR-V")
+    .trim();
+}
+
+function addVehicleOptionRow(rows, input = {}, source = "reference") {
+  const year = vehicleOptionYear(input.year);
+  const make = vehicleOptionMakeLabel(input.make);
+  const model = vehicleOptionModelLabel(input.model);
+  if (!year || !make || !model) return;
+  rows.push({ year, make, model, source });
+}
+
+const vehicleOptionSourceWeight = {
+  proof: 120,
+  "vehicle-profile": 105,
+  programming: 85,
+  seed: 75,
+  vpic: 35,
+  reference: 25,
+};
+
+function vehicleOptionRowScore(row = {}) {
+  let score = vehicleOptionSourceWeight[row.source] || 0;
+  if (/\bF[\s-]?150\b/i.test(row.model || "")) score += 120;
+  if (/\b(F-?150|F-?250|F-?350|SUPER DUTY|RANGER|MAVERICK|EXPEDITION|EXPLORER|ESCAPE|TRANSIT)\b/i.test(row.model || "")) score += 30;
+  if (/\b(CAMRY|RAV4|COROLLA|ACCORD|CIVIC|CR-V|ROGUE|ALTIMA|SILVERADO|SIERRA|TAHOE|TELLURIDE|TUCSON)\b/i.test(row.model || "")) score += 24;
+  return score;
+}
+
+function uniqueVehicleOptionValues(rows = [], field, ranked = false) {
+  const values = new Map();
+  for (const row of rows) {
+    const raw = cleanString(row[field]);
+    if (!raw) continue;
+    const key = field === "year" ? raw : normalizeVehicleText(raw);
+    const score = vehicleOptionRowScore(row);
+    const existing = values.get(key);
+    if (!existing || score > existing.score) values.set(key, { value: raw, score });
+  }
+  const list = Array.from(values.values());
+  if (field === "year") return list.map((item) => item.value).sort((a, b) => Number(b) - Number(a));
+  return list
+    .sort((a, b) => (ranked ? b.score - a.score : 0) || a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: "base" }))
+    .map((item) => item.value);
+}
+
+async function buildVehicleOptions(options = {}, store = { jobs: [] }) {
+  const selectedYear = vehicleOptionYear(options.year);
+  const selectedMake = normalizeVehicleText(options.make);
+  const rows = [];
+  const [programming, vpic, profiles] = await Promise.all([
+    readJsonCached(programmingReferencePath, { rows: [] }),
+    readJsonCached(vpicCatalogPath, { rows: [] }),
+    readVehicleProfiles().catch(() => ({ profiles: [] })),
+  ]);
+
+  for (const row of programming.rows || []) addVehicleOptionRow(rows, row, "programming");
+  for (const row of vpic.rows || []) addVehicleOptionRow(rows, row, "vpic");
+  for (const profile of profiles.profiles || []) addVehicleOptionRow(rows, profile.match || profile.vehicle || profile, "vehicle-profile");
+  for (const job of storeFieldJobs(store).slice(0, 5000)) addVehicleOptionRow(rows, coverageVehicleForJob(job), "proof");
+  for (const seed of vehicleOptionSeedRows) addVehicleOptionRow(rows, seed, "seed");
+
+  const deduped = new Map();
+  for (const row of rows) {
+    const key = `${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`;
+    if (!deduped.has(key)) deduped.set(key, row);
+  }
+  const allRows = Array.from(deduped.values());
+  const yearRows = selectedMake ? allRows.filter((row) => normalizeVehicleText(row.make) === selectedMake) : allRows;
+  const makeRows = selectedYear ? allRows.filter((row) => row.year === selectedYear) : allRows;
+  const modelRows = allRows
+    .filter((row) => !selectedYear || row.year === selectedYear)
+    .filter((row) => !selectedMake || normalizeVehicleText(row.make) === selectedMake);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    selected: {
+      year: selectedYear,
+      make: options.make ? vehicleOptionMakeLabel(options.make) : "",
+    },
+    totalRows: allRows.length,
+    years: uniqueVehicleOptionValues(yearRows, "year"),
+    makes: uniqueVehicleOptionValues(makeRows, "make"),
+    models: selectedMake ? uniqueVehicleOptionValues(modelRows, "model", true).slice(0, 350) : [],
+  };
+}
+
 function compactReferenceValue(value) {
   if (Array.isArray(value)) {
     return value
@@ -9342,7 +10034,26 @@ async function resolveWorkbenchProfile(body = {}, store = { jobs: [] }) {
   const requestedVin = explicitWorkbenchVin(body);
   const profileVin = normalizeVinCandidate(incomingProfile.vin);
   const profileMatchesVin = requestedVin && profileVin === requestedVin;
-  if (!requestedVin) return incomingProfile;
+  if (!requestedVin) {
+    const vehicle = body.vehicle && typeof body.vehicle === "object" ? body.vehicle : {};
+    const structuredVehicle = {
+      year: body.year || vehicle.year || incomingProfile.vehicle?.year,
+      make: body.make || vehicle.make || incomingProfile.vehicle?.make,
+      model: body.model || vehicle.model || incomingProfile.vehicle?.model,
+      trim: body.trim || vehicle.trim || incomingProfile.vehicle?.trim,
+      bodyClass: body.bodyClass || vehicle.bodyClass || incomingProfile.vehicle?.bodyClass,
+    };
+    if (structuredVehicle.year && structuredVehicle.make && structuredVehicle.model) {
+      return buildVehicleProfile(structuredVehicle, store, {
+        lookupMode: "ymm",
+        confidence: "Year/make/model lookup - verify trim and key package",
+        source: "Vehicle details from year/make/model; key/programmer/tool guidance from local verified key intelligence database.",
+        fallbackSource: "Vehicle details from year/make/model; locksmith workflow guidance from local brand fallback model.",
+        skipSupplierLookup: true,
+      });
+    }
+    return incomingProfile;
+  }
   if (profileMatchesVin && incomingProfile.vehicle?.year && incomingProfile.vehicle?.make && incomingProfile.vehicle?.model) return incomingProfile;
   return decodeWorkbenchVin(requestedVin, store);
 }
@@ -9399,6 +10110,13 @@ function workbenchLishiQuery(profile = {}, body = {}) {
   ])
     .slice(0, 8)
     .join(" ");
+}
+
+function workbenchPreferredKeyway(profile = {}, body = {}) {
+  const reference = profile.vehicleReference || body.vehicleReference || {};
+  const raw = cleanString(body.preferredKeyway || body.keyway || reference.keyway?.primary || "");
+  if (!raw || /VERIFY|FAMILY|\//i.test(raw)) return "";
+  return raw;
 }
 
 function workbenchAutoQuery(profile = {}, body = {}) {
@@ -9762,11 +10480,14 @@ function bestProgrammerDecisionValue(partHistory, proofPatterns, coverage) {
 function bestDecodeDecisionValue(lishiLookup, profile, lishiEvidence = {}) {
   if (lishiEvidence.status === "conflict" && lishiEvidence.primary) return `Verify ${lishiEvidence.primary}`;
   if (lishiEvidence.primary && lishiEvidence.confidencePercent >= 78) return lishiEvidence.primary;
+  const reference = profile?.vehicleReference || {};
+  const referencePrimary = cleanString(reference.keyway?.primary);
+  const referenceConfidence = cleanString(reference.keyway?.confidence).toLowerCase();
+  if (referencePrimary && /field-corrected|high/.test(referenceConfidence) && !/[\/]|FAMILY|VERIFY/i.test(referencePrimary)) return referencePrimary;
   const vehicleConfirmed = (lishiLookup?.tools || []).find((tool) => tool.vehicleConfirmed || tool.matchStatus === "vehicle-confirmed");
   if (vehicleConfirmed?.canonical || vehicleConfirmed?.tool) return vehicleConfirmed.canonical || vehicleConfirmed.tool;
   const shortlist = (lishiLookup?.tools || []).find((tool) => tool.matchStatus === "keyway-shortlist");
   if (shortlist?.canonical || shortlist?.tool) return `Verify ${shortlist.canonical || shortlist.tool}`;
-  const reference = profile?.vehicleReference || {};
   return reference.keyway?.primary || reference.lishi?.primary || "";
 }
 
@@ -9950,6 +10671,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   profile.shopEvidence.proofPatterns = proofPatterns;
   const partQuery = workbenchPrimaryPartQuery(profile, body);
   const lishiQuery = workbenchLishiQuery(profile, body);
+  const preferredKeyway = workbenchPreferredKeyway(profile, body);
   const autoQuery = workbenchAutoQuery(profile, body);
   const proofQuery = cleanString(body.proofQuery || requestedVin || partQuery || body.q || profile.vin || workbenchVehicleLabel(profile));
   const [partHistory, proofVault, lishiLookup, autoBaseline] = await Promise.all([
@@ -9961,6 +10683,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       make: vehicle.make,
       model: vehicle.model,
       category: "Automotive",
+      preferredKeyway,
       limit: 24,
     })),
     buildAutoCodeBaseline({
@@ -11004,6 +11727,8 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
   const text = normalizeVehicleText(`${vehicle.make} ${vehicle.model} ${vehicle.trim} ${vehicle.bodyClass}`);
   const lateFord = ["ford", "lincoln"].includes(family) && year >= 2015;
   const fordTruck = lateFord && /F150|F 150|EXPEDITION|NAVIGATOR|SUPER DUTY|F250|F350/.test(text);
+  const fordFSeries = lateFord && /F150|F 150|F250|F350|SUPER DUTY/.test(text);
+  const fordHu198Truck = fordFSeries && year >= 2021;
   const fordEscape = family === "ford" && /ESCAPE/.test(text) && year >= 2013 && year <= 2019;
   const hondaOlder = family === "honda" && year <= 2005;
   const toyotaLate = ["toyota", "lexus"].includes(family) && year >= 2018;
@@ -11100,12 +11825,17 @@ function vehicleReferenceFor(vehicle, programmingReference, shopEvidence) {
     reference.cutting.push("Cut/test HU101 mechanical operation before programming electronics");
     reference.partVerification.push("Confirm supplier key/blank fitment shows HU101 before finalizing the job kit");
   } else if (fordTruck) {
-    reference.keyway = { primary: "HU101 / HU198 family likely", alternates: ["Confirm center mill profile", "Emergency insert may differ by package"], confidence: "medium" };
-    reference.lishi = { primary: "HU101 or HU198 Lishi/decoder by confirmed keyway", alternates: ["Confirm 4-depth/10-cut vs newer profile before use"], confidence: "medium" };
+    if (fordHu198Truck) {
+      reference.keyway = { primary: "HU198", alternates: ["Verify at door lock/emergency insert", "Use HU101 only if a replaced cylinder proves it"], confidence: "field-corrected high" };
+      reference.lishi = { primary: "HU198 Lishi / decoder", alternates: ["Confirm the HU198 profile at the lock before decode"], confidence: "field-corrected high" };
+    } else {
+      reference.keyway = { primary: "HU101 / HU198 family likely", alternates: ["Confirm center mill profile", "Emergency insert may differ by package"], confidence: "medium" };
+      reference.lishi = { primary: "HU101 or HU198 Lishi/decoder by confirmed keyway", alternates: ["Confirm 4-depth/10-cut vs newer profile before use"], confidence: "medium" };
+    }
     reference.origination.push("Common Ford truck path: decode/source code, cut HU101/HU198 blade, then program remote/prox");
     reference.unlock.push("Ford truck long-reach entry setup; protect weatherstrip and wiring");
     reference.access.push("Check truck cab configuration and where customer key/lockout access is needed");
-    reference.decodePlan.push("For F-Series, confirm HU101 vs HU198 at the door/insert before pulling parts");
+    reference.decodePlan.push(fordHu198Truck ? "For 2021+ F-Series, dispatch HU198 keyway and HU198 Lishi together unless the lock proves a cylinder swap" : "For F-Series, confirm HU101 vs HU198 at the door/insert before pulling parts");
     reference.cutting.push("Verify center-mill profile and depth system before final blade");
     reference.partVerification.push("Ford truck tailgate, remote start, panic, and button count can split otherwise similar remotes");
     reference.warnings.push("Late Ford prox/flip can vary by trim, remote start, tailgate, and FCC");
@@ -11219,19 +11949,27 @@ function applyReferenceVault(reference, entries) {
   if (!entries?.length) return reference;
   const next = structuredClone(reference);
   const strongest = entries[0];
-  if (strongest.keyway?.primary) {
+  const referenceKeywayConfidence = cleanString(next.keyway?.confidence).toLowerCase();
+  const referenceLishiConfidence = cleanString(next.lishi?.confidence).toLowerCase();
+  const keepFieldCorrectedKeyway = /field-corrected|shop-corrected|verified high/.test(referenceKeywayConfidence);
+  const keepFieldCorrectedLishi = /field-corrected|shop-corrected|verified high/.test(referenceLishiConfidence);
+  if (strongest.keyway?.primary && !keepFieldCorrectedKeyway) {
     next.keyway = {
       primary: strongest.keyway.primary,
       alternates: strongest.keyway.alternates || next.keyway?.alternates || [],
       confidence: strongest.confidence || next.keyway?.confidence || "verify",
     };
+  } else if (strongest.keyway?.alternates?.length) {
+    appendUnique(next.keyway.alternates, strongest.keyway.alternates);
   }
-  if (strongest.lishi?.primary) {
+  if (strongest.lishi?.primary && !keepFieldCorrectedLishi) {
     next.lishi = {
       primary: strongest.lishi.primary,
       alternates: strongest.lishi.alternates || next.lishi?.alternates || [],
       confidence: strongest.confidence || next.lishi?.confidence || "verify",
     };
+  } else if (strongest.lishi?.alternates?.length) {
+    appendUnique(next.lishi.alternates, strongest.lishi.alternates);
   }
   for (const entry of entries) {
     appendUnique(next.keySystems, entry.keySystems);
@@ -12433,6 +13171,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/public-reference-sources",
     "/api/metka-bridge",
     "/api/workspace-brief",
+    "/api/google",
     "/api/supplier-accounts",
     "/api/audit-log",
   ];
@@ -12512,6 +13251,11 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/health") {
     sendJson(response, 200, await buildHealthStatus());
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/google/oauth/callback") {
+    await handleGoogleOAuthCallback(request, response);
     return;
   }
 
@@ -12637,8 +13381,78 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/vehicle-options") {
+    const url = new URL(request.url, `http://${request.headers.host}`);
+    sendJson(
+      response,
+      200,
+      await buildVehicleOptions(
+        {
+          year: url.searchParams.get("year"),
+          make: url.searchParams.get("make"),
+        },
+        store,
+      ),
+    );
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/metka-bridge") {
     sendJson(response, 200, buildMetkaBridgeStatus(store));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/google/status") {
+    sendJson(response, 200, googleWorkspacePublicStatus(store, request));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/google/oauth/start") {
+    await handleGoogleOAuthStart(request, response);
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/google/disconnect") {
+    store.googleWorkspace = googleWorkspaceCloneEmpty();
+    await writeStore(store);
+    sendJson(response, 200, googleWorkspacePublicStatus(store, request));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/google/calendar/events") {
+    try {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      sendJson(response, 200, await syncGoogleCalendarEvents(request, store, { days: url.searchParams.get("days") }));
+    } catch (error) {
+      sendError(response, 400, `Google Calendar sync failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/google/calendar/event") {
+    try {
+      sendJson(response, 201, await createGoogleCalendarEvent(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Google Calendar event failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/google/sheets/import-metka") {
+    try {
+      sendJson(response, 201, await syncGoogleSheetToMetkaBridge(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Google Sheets sync failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/google/drive/job-folder") {
+    try {
+      sendJson(response, 201, await createGoogleDriveJobFolder(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Google Drive job folder failed: ${error.message}`);
+    }
     return;
   }
 
@@ -12993,6 +13807,7 @@ async function handleApi(request, response, pathname) {
         make: url.searchParams.get("make"),
         model: url.searchParams.get("model"),
         category: url.searchParams.get("category"),
+        preferredKeyway: url.searchParams.get("preferredKeyway"),
         limit: url.searchParams.get("limit"),
       }),
     );

@@ -60,101 +60,50 @@
             <span>Start Job</span>
             <small>VIN / YMM first</small>
           </button>
-          <button class="nav-item" data-view="vin">
-            <span>VIN Walkthrough</span>
-            <small>Decode to final path</small>
-          </button>
           <button class="nav-item" data-view="workbench">
-            <span>Job Workbench</span>
-            <small>Parts, proof, tools</small>
+            <span>Job Packet</span>
+            <small>One field answer</small>
           </button>
           <button class="nav-item" data-view="loadout">
-            <span>Job Loadout</span>
+            <span>What To Bring</span>
             <small>What to bring</small>
           </button>
           <button class="nav-item" data-view="ai">
             <span>AI Bench</span>
             <small>Copilot and audit</small>
           </button>
-
-          <details class="nav-group" data-nav-group>
-            <summary>
-              <span>Proof</span>
-              <small>History and records</small>
-            </summary>
-            <div class="nav-group-items">
-              <button class="nav-item" data-view="part-history">
-                <span>Part History</span>
-                <small>Used parts and jobs</small>
-              </button>
-              <button class="nav-item" data-view="proof-vault">
-                <span>Proof Vault</span>
-                <small>Evidence locker</small>
-              </button>
-              <button class="nav-item" data-view="learn">
-                <span>Worked Job</span>
-                <small>Add shop truth</small>
-              </button>
-            </div>
-          </details>
-
-          <details class="nav-group" data-nav-group>
-            <summary>
-              <span>References</span>
-              <small>Code, Lishi, coverage</small>
-            </summary>
-            <div class="nav-group-items">
-              <button class="nav-item" data-view="code-desk">
-                <span>Code Desk</span>
-                <small>Cuts and code cards</small>
-              </button>
-              <button class="nav-item" data-view="lishi">
-                <span>Lishi Lookup</span>
-                <small>Tool and keyway</small>
-              </button>
-              <button class="nav-item" data-view="coverage">
-                <span>Coverage</span>
-                <small>Programmer proof</small>
-              </button>
-              <button class="nav-item" data-view="reference-lists" data-owner-only>
-                <span>Reference Lists</span>
-                <small>Raw data browser</small>
-              </button>
-            </div>
-          </details>
-
-          <details class="nav-group" data-nav-group>
-            <summary>
-              <span>System</span>
-              <small>Owner tools</small>
-            </summary>
-            <div class="nav-group-items">
-              <button class="nav-item" data-view="mission-control" data-owner-only>
-                <span>Mission Control</span>
-                <small>Health and gaps</small>
-              </button>
-              <button class="nav-item" data-view="training-center" data-owner-only>
-                <span>Training Center</span>
-                <small>Backtest decisions</small>
-              </button>
-              <button class="nav-item" data-view="metka-bridge" data-owner-only>
-                <span>Field Data Bridge</span>
-                <small>Metka import brain</small>
-              </button>
-              <button class="nav-item" data-view="settings" data-owner-only>
-                <span>Settings</span>
-                <small>Sources and storage</small>
-              </button>
-              <button class="nav-item" data-view="launch">
-                <span>Launch</span>
-                <small>Access and pricing</small>
-              </button>
-              <button class="nav-item" data-view="about">
-                <span>About</span>
-                <small>App notes</small>
-              </button>
-            </div>
-          </details>
+          <div class="nav-section-label">
+            <span>Centers</span>
+            <small>Proof and tools</small>
+          </div>
+          <button class="nav-item" data-view="proof-vault">
+            <span>Proof Center</span>
+            <small>History, vault, save</small>
+          </button>
+          <button class="nav-item" data-view="code-desk">
+            <span>Tool Center</span>
+            <small>Codes and Lishi</small>
+          </button>
+          <button class="nav-item" data-view="coverage">
+            <span>Coverage</span>
+            <small>Programmer proof</small>
+          </button>
+          <div class="nav-section-label" data-owner-only>
+            <span>Owner</span>
+            <small>Setup and data</small>
+          </div>
+          <button class="nav-item" data-view="mission-control" data-owner-only>
+            <span>Owner Dashboard</span>
+            <small>Health and gaps</small>
+          </button>
+          <button class="nav-item" data-view="metka-bridge" data-owner-only>
+            <span>Data Bridge</span>
+            <small>Metka / Sheets</small>
+          </button>
+          <button class="nav-item" data-view="settings" data-owner-only>
+            <span>Settings</span>
+            <small>Sources and storage</small>
+          </button>
         </nav>
 
         <section class="mode-panel" aria-label="App mode">
@@ -222,20 +171,15 @@
                 </div>
               </div>
               <div class="start-menu-grid">
-                <button type="button" data-view-target="workbench"><span>Job Workbench</span><small>One packet</small></button>
-                <button type="button" data-view-target="loadout"><span>Job Loadout</span><small>What to bring</small></button>
-                <button type="button" data-view-target="part-history"><span>Part History</span><small>Used proof</small></button>
-                <button type="button" data-view-target="proof-vault"><span>Proof Vault</span><small>Evidence</small></button>
-                <button type="button" data-view-target="code-desk"><span>Code Desk</span><small>Codes and cuts</small></button>
-                <button type="button" data-view-target="lishi"><span>Lishi Lookup</span><small>Tool match</small></button>
-                <button type="button" data-view-target="coverage"><span>Coverage</span><small>Programmers</small></button>
+                <button type="button" data-view-target="workbench"><span>Job Packet</span><small>One answer</small></button>
+                <button type="button" data-view-target="loadout"><span>What To Bring</span><small>Field kit</small></button>
+                <button type="button" data-view-target="proof-vault"><span>Proof Center</span><small>History + save</small></button>
+                <button type="button" data-view-target="code-desk"><span>Tool Center</span><small>Codes + Lishi</small></button>
                 <button type="button" data-view-target="ai"><span>AI Bench</span><small>Ask copilot</small></button>
-                <button type="button" data-view-target="learn"><span>Save Worked Job</span><small>Teach app</small></button>
               </div>
               <div class="start-menu-grid owner-menu-grid" data-owner-only>
-                <button type="button" data-view-target="metka-bridge"><span>Field Data Bridge</span><small>Metka / Sheets</small></button>
-                <button type="button" data-view-target="mission-control"><span>Mission Control</span><small>Owner health</small></button>
-                <button type="button" data-view-target="settings"><span>Settings</span><small>Storage / sources</small></button>
+                <button type="button" data-view-target="metka-bridge"><span>Data Bridge</span><small>Metka / Sheets</small></button>
+                <button type="button" data-view-target="settings"><span>Settings</span><small>Google / storage</small></button>
               </div>
             </aside>
             <div class="start-job-head">
@@ -270,15 +214,21 @@
                 <div class="start-ymm-fields">
                   <label>
                     Year
-                    <input name="quickYear" inputmode="numeric" maxlength="4" placeholder="2024" autocomplete="off" />
+                    <select name="quickYear" data-ymm-year>
+                      <option value="">Year</option>
+                    </select>
                   </label>
                   <label>
                     Make
-                    <input name="quickMake" placeholder="Ford" autocomplete="off" />
+                    <select name="quickMake" data-ymm-make>
+                      <option value="">Make</option>
+                    </select>
                   </label>
                   <label>
                     Model
-                    <input name="quickModel" placeholder="F-150" autocomplete="off" />
+                    <select name="quickModel" data-ymm-model disabled>
+                      <option value="">Model</option>
+                    </select>
                   </label>
                 </div>
                 <button class="primary-action" type="submit">Start YMM</button>
@@ -392,15 +342,21 @@
                 </div>
                 <label>
                   Year
-                  <input name="year" inputmode="numeric" maxlength="4" placeholder="2025" autocomplete="off" />
+                  <select name="year" data-ymm-year>
+                    <option value="">Year</option>
+                  </select>
                 </label>
                 <label>
                   Make
-                  <input name="make" placeholder="Ford" autocomplete="off" />
+                  <select name="make" data-ymm-make>
+                    <option value="">Make</option>
+                  </select>
                 </label>
                 <label>
                   Model
-                  <input name="model" placeholder="F-150" autocomplete="off" />
+                  <select name="model" data-ymm-model disabled>
+                    <option value="">Model</option>
+                  </select>
                 </label>
                 <button class="secondary-action" type="submit">Find Parts</button>
               </form>
@@ -487,6 +443,10 @@
                 <p class="eyebrow">Proof trail</p>
                 <h3>Part history</h3>
               </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" data-view-target="proof-vault">Proof Center</button>
+                <button class="secondary-action small" type="button" data-view-target="learn">Save Worked Job</button>
+              </div>
             </div>
             <form id="partHistoryForm" class="part-history-form">
               <label>
@@ -529,15 +489,22 @@
           <section class="panel wide proof-vault-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Evidence locker</p>
-                <h3>Proof Vault</h3>
+                <p class="eyebrow">Proof center</p>
+                <h3>Proof, history, and saved outcomes</h3>
               </div>
               <div class="proof-vault-actions">
-                <button class="secondary-action small" type="button" id="syncProofVault">Sync</button>
-                <button class="secondary-action small" type="button" id="migrateProofVault">Migrate Local Proof</button>
-                <button class="secondary-action small" type="button" id="exportProofVault">Export Backup</button>
-                <button class="secondary-action small" type="button" id="importProofVault">Import Backup</button>
-                <input id="proofVaultImportInput" type="file" accept="application/json" hidden />
+                <button class="secondary-action small" type="button" data-view-target="part-history">Part History</button>
+                <button class="primary-action small" type="button" data-view-target="learn">Save Worked Job</button>
+                <details class="more-actions" data-owner-only>
+                  <summary>More</summary>
+                  <div>
+                    <button class="secondary-action small" type="button" id="syncProofVault">Sync</button>
+                    <button class="secondary-action small" type="button" id="migrateProofVault">Migrate Local Proof</button>
+                    <button class="secondary-action small" type="button" id="exportProofVault">Export Backup</button>
+                    <button class="secondary-action small" type="button" id="importProofVault">Import Backup</button>
+                    <input id="proofVaultImportInput" type="file" accept="application/json" hidden />
+                  </div>
+                </details>
               </div>
             </div>
             <form id="proofVaultForm" class="part-history-form">
@@ -551,7 +518,7 @@
             <div class="proof-vault-result" id="proofVault">
               <article class="assistant-card">
                 <strong>Proof Vault ready</strong>
-                <p>Saved jobs, aliases, programmer evidence, and attachments will appear here.</p>
+                <p>Search a VIN, part, programmer, OE, or FCC.</p>
               </article>
             </div>
           </section>
@@ -561,15 +528,21 @@
           <section class="panel wide code-desk-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Lock decode</p>
-                <h3>Code Desk</h3>
+                <p class="eyebrow">Tool center</p>
+                <h3>Code Desk and Lishi</h3>
               </div>
               <div class="proof-vault-actions">
-                <button class="secondary-action small" type="button" id="syncCodeDesk">Sync Library</button>
-                <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes / Cards</button>
-                <button class="secondary-action small" type="button" id="exportCodeDesk">Export Codes</button>
-                <button class="secondary-action small" type="button" id="clearCodeDesk">Clear Codes</button>
-                <input id="codeDeskImportInput" type="file" accept=".csv,.tsv,.json,text/csv,application/json" hidden />
+                <button class="secondary-action small" type="button" data-view-target="lishi">Lishi Lookup</button>
+                <details class="more-actions" data-owner-only>
+                  <summary>Library</summary>
+                  <div>
+                    <button class="secondary-action small" type="button" id="syncCodeDesk">Sync Library</button>
+                    <button class="secondary-action small" type="button" id="importCodeDesk">Import Codes / Cards</button>
+                    <button class="secondary-action small" type="button" id="exportCodeDesk">Export Codes</button>
+                    <button class="secondary-action small" type="button" id="clearCodeDesk">Clear Codes</button>
+                    <input id="codeDeskImportInput" type="file" accept=".csv,.tsv,.json,text/csv,application/json" hidden />
+                  </div>
+                </details>
               </div>
             </div>
             <form id="codeDeskForm" class="code-desk-form">
@@ -604,7 +577,7 @@
             <div class="code-desk-result" id="codeDeskResult">
               <article class="assistant-card">
                 <strong>Code Desk ready</strong>
-                <p>Use starter cards and automotive templates. Import authorized code records or exact depth-space cards for production lookup.</p>
+                <p>Run cuts, measurements, or authorized code data.</p>
               </article>
             </div>
             <section class="code-desk-auto-panel">
@@ -648,6 +621,7 @@
                 <p class="eyebrow">Pick / decode reference</p>
                 <h3>Lishi Lookup</h3>
               </div>
+              <button class="secondary-action small" type="button" data-view-target="code-desk">Code Desk</button>
             </div>
             <form id="lishiLookupForm" class="lishi-lookup-form">
               <label class="wide-field">
@@ -1251,6 +1225,36 @@
               </article>
             </div>
           </section>
+
+          <section class="panel wide google-workspace-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Google Workspace</p>
+                <h3>Calendar, Sheets, and Drive</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="connectGoogleWorkspace">Connect Google</button>
+                <button class="secondary-action small danger-action" type="button" id="disconnectGoogleWorkspace">Disconnect</button>
+              </div>
+            </div>
+            <div class="form-status" id="googleWorkspaceStatus"></div>
+            <div class="storage-status-panel google-workspace-status" id="googleWorkspaceStatusPanel">
+              <article class="assistant-card">
+                <strong>Google status loading</strong>
+                <p>Checking OAuth setup and saved connection.</p>
+              </article>
+            </div>
+            <section class="google-workspace-actions">
+              <form class="field-os-form compact" id="googleCalendarSyncForm">
+                <label>
+                  Calendar window
+                  <input id="googleCalendarDays" name="days" type="number" min="1" max="90" value="14" />
+                </label>
+                <button class="primary-action" type="button" id="syncGoogleCalendar">Preview Calendar Jobs</button>
+              </form>
+              <div class="google-calendar-result" id="googleCalendarResult"></div>
+            </section>
+          </section>
         </section>
 
         <section class="view" id="metka-bridge">
@@ -1274,6 +1278,27 @@
                 <p>WorkLog becomes proof. InventoryLedger becomes stock. ProductAliasLog, wkst, and PartReference become aliases. Costs, service rows, programmers, locations, and pricing stay owner-only.</p>
               </div>
               <button class="primary-action" type="button" data-view-target="loadout">Open Job Loadout</button>
+            </section>
+            <section class="assistant-card google-sheet-sync-card">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Google Sheets sync</p>
+                  <h3>Pull Metka tabs directly into the Field Data Bridge.</h3>
+                </div>
+              </div>
+              <form class="field-os-form" id="googleSheetSyncForm">
+                <label>
+                  Spreadsheet ID
+                  <input name="spreadsheetId" placeholder="Paste the Google Sheet ID" autocomplete="off" />
+                </label>
+                <label>
+                  Tabs
+                  <input name="sheets" placeholder="Optional: WorkLog, InventoryLedger, ProductAliasLog, wkst" autocomplete="off" />
+                </label>
+                <button class="primary-action" type="submit">Sync Google Sheet</button>
+              </form>
+              <div class="form-status" id="googleSheetSyncStatus"></div>
+              <div class="google-sheet-sync-result" id="googleSheetSyncResult"></div>
             </section>
             <div class="form-status" id="metkaBridgeStatus"></div>
             <div class="metka-bridge-result" id="metkaBridgeResult">

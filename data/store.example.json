@@ -23,6 +23,27 @@
       "locations": []
     }
   },
+  "googleWorkspace": {
+    "version": 1,
+    "connectedAt": "",
+    "updatedAt": "",
+    "profile": null,
+    "scopes": [],
+    "tokens": null,
+    "calendar": {
+      "lastSyncAt": "",
+      "events": []
+    },
+    "drive": {
+      "jobFolders": []
+    },
+    "sheets": {
+      "lastSyncAt": "",
+      "spreadsheetId": "",
+      "sheetStats": [],
+      "importedSheets": []
+    }
+  },
   "inventoryItems": [],
   "inventoryLedger": [],
   "inventoryLocations": [],
