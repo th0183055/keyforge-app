@@ -128,6 +128,7 @@ const emptyStore = {
   auditLog: [],
   aiFeedback: [],
   shopRules: [],
+  fieldPacketFeedback: [],
   metkaBridge: metkaBridgeEmpty,
   codeDeskRecords: [],
   codeDeskSystems: [],
@@ -158,6 +159,7 @@ function normalizeStore(store = {}) {
     auditLog: Array.isArray(store.auditLog) ? store.auditLog : [],
     aiFeedback: Array.isArray(store.aiFeedback) ? store.aiFeedback : [],
     shopRules: Array.isArray(store.shopRules) ? store.shopRules : [],
+    fieldPacketFeedback: Array.isArray(store.fieldPacketFeedback) ? store.fieldPacketFeedback : [],
     inventoryItems: Array.isArray(store.inventoryItems) ? store.inventoryItems : [],
     inventoryLedger: Array.isArray(store.inventoryLedger) ? store.inventoryLedger : [],
     inventoryLocations: Array.isArray(store.inventoryLocations) ? store.inventoryLocations : [],
@@ -1557,6 +1559,7 @@ function mergeStorageStore(currentStore, incomingStore = {}, replace = false) {
     auditLog: mergeStorageRecords(current.auditLog, incoming.auditLog, ["createdAt", "prompt", "route"], "audit"),
     aiFeedback: mergeStorageRecords(current.aiFeedback, incoming.aiFeedback, ["createdAt", "prompt", "value"], "ai-feedback"),
     shopRules: mergeStorageRecords(current.shopRules, incoming.shopRules, ["title", "body", "createdAt"], "shop-rule"),
+    fieldPacketFeedback: mergeStorageRecords(current.fieldPacketFeedback, incoming.fieldPacketFeedback, ["createdAt", "outcome", "query", "itemValue"], "field-packet-feedback"),
     codeDeskRecords: mergeStorageRecords(current.codeDeskRecords, incoming.codeDeskRecords, ["system", "code", "bitting"], "code-desk-record"),
     codeDeskSystems: mergeStorageRecords(current.codeDeskSystems, incoming.codeDeskSystems, ["name", "id"], "code-desk-system"),
     codeDeskLessons: mergeStorageRecords(current.codeDeskLessons, incoming.codeDeskLessons, ["createdAt", "system", "code", "bitting", "outcome"], "code-desk-lesson"),
@@ -1637,6 +1640,7 @@ async function buildStorageStatus() {
     auditLog: store.auditLog.length,
     aiFeedback: store.aiFeedback.length,
     shopRules: store.shopRules.length,
+    fieldPacketFeedback: store.fieldPacketFeedback.length,
     vehicleProfiles: Array.isArray(vehicleProfiles.profiles) ? vehicleProfiles.profiles.length : 0,
     referenceVault: Array.isArray(referenceVault.entries) ? referenceVault.entries.length : 0,
     publicSources: Array.isArray(publicSources.sources) ? publicSources.sources.length : 0,
@@ -2051,6 +2055,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
     publicSources: publicSources.sources?.length || 0,
     aiFeedback: store.aiFeedback?.length || 0,
     shopRules: store.shopRules?.length || 0,
+    fieldPacketFeedback: store.fieldPacketFeedback?.length || 0,
     codeDeskRecords: store.codeDeskRecords?.length || 0,
     codeDeskSystems: store.codeDeskSystems?.length || 0,
     codeDeskLessons: store.codeDeskLessons?.length || 0,
@@ -2083,7 +2088,7 @@ async function buildMissionControl(body = {}, store = { jobs: [] }) {
         (dataCounts.publicSources ? 10 : 0),
     ),
   );
-  const aiScore = Math.min(100, Math.round((advisor.readinessScore || 0) * 0.8 + Math.min(20, dataCounts.aiFeedback + dataCounts.shopRules)));
+  const aiScore = Math.min(100, Math.round((advisor.readinessScore || 0) * 0.8 + Math.min(20, dataCounts.aiFeedback + dataCounts.shopRules + dataCounts.fieldPacketFeedback)));
   const readinessScore = Math.round(healthScore * 0.18 + storageScore * 0.16 + authScore * 0.12 + coverageScore * 0.2 + dataScore * 0.2 + aiScore * 0.14);
   const riskQueue = uniqueCleanValues([
     ...storageWarnings,
@@ -2783,7 +2788,7 @@ async function importStorageBundle(body = {}) {
   const replace = Boolean(body.replace || bundle.replace || body.mode === "replace" || bundle.mode === "replace");
   const result = {};
 
-  if (data.store || data.jobs || data.aiFeedback || data.shopRules) {
+  if (data.store || data.jobs || data.aiFeedback || data.shopRules || data.fieldPacketFeedback) {
     const current = await readStore();
     const incoming = data.store || {
       jobs: data.jobs,
@@ -2791,6 +2796,7 @@ async function importStorageBundle(body = {}) {
       auditLog: data.auditLog,
       aiFeedback: data.aiFeedback,
       shopRules: data.shopRules,
+      fieldPacketFeedback: data.fieldPacketFeedback,
       aiPreferences: data.aiPreferences,
     };
     const next = mergeStorageStore(current, incoming, replace);
@@ -2800,6 +2806,7 @@ async function importStorageBundle(body = {}) {
       auditLog: next.auditLog.length,
       aiFeedback: next.aiFeedback.length,
       shopRules: next.shopRules.length,
+      fieldPacketFeedback: next.fieldPacketFeedback.length,
     };
   }
 
@@ -3297,6 +3304,94 @@ function cleanPartOutcome(input) {
       ...refs,
     ].filter(Boolean),
     createdAt: new Date().toISOString(),
+  };
+}
+
+function cleanFieldPacketFeedback(input = {}) {
+  const packet = input.packet && typeof input.packet === "object" ? input.packet : {};
+  const choice = input.choice && typeof input.choice === "object"
+    ? input.choice
+    : (packet.choices || []).find((item) => cleanString(item.id) === cleanString(input.sectionId)) || {};
+  const outcomeKey = cleanString(input.outcome || "worked").toLowerCase().replace(/[^a-z0-9]+/g, "-") || "worked";
+  const allowed = new Set(["worked", "wrong-part", "wrong-programmer", "wrong-lishi", "missing-item", "wrong", "failed", "correct", "confirmed"]);
+  const outcome = allowed.has(outcomeKey) ? outcomeKey : "worked";
+  const title = cleanString(input.title || packet.title || "Field packet");
+  const query = cleanString(input.query || packet.query);
+  const vin = normalizeVinCandidate(input.vin || packet.vin) || cleanString(input.vin || packet.vin).toUpperCase();
+  const sectionId = cleanString(input.sectionId || choice.id || "");
+  const itemLabel = cleanString(input.itemLabel || choice.label || choice.value || "");
+  const itemValue = cleanString(input.itemValue || choice.value || choice.label || "");
+  const primaryPart = cleanString(packet.primary?.label || packet.primary?.value || "");
+  const backupPart = cleanString(packet.backup?.label || packet.backup?.value || "");
+  const programmer = cleanString(packet.programmer?.label || packet.programmer?.value || "");
+  const lishi = cleanString(packet.lishi?.label || packet.lishi?.value || "");
+  const tokens = uniqueCleanValues([
+    query,
+    vin,
+    title,
+    sectionId,
+    itemLabel,
+    itemValue,
+    primaryPart,
+    backupPart,
+    programmer,
+    lishi,
+    packet.choices?.flatMap((packetChoice) => [packetChoice.label, packetChoice.value, packetChoice.identifiers || []]) || [],
+  ]).slice(0, 80);
+  if (!query && !vin && !itemLabel && !primaryPart && !programmer && !lishi) {
+    throw new Error("Build a field packet before saving recommendation feedback.");
+  }
+  return {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    outcome,
+    title,
+    query,
+    vin,
+    sectionId,
+    itemLabel,
+    itemValue,
+    primaryPart,
+    backupPart,
+    programmer,
+    lishi,
+    confidencePercent: Number(input.confidencePercent || packet.confidencePercent || 0),
+    note: cleanString(input.note),
+    tokens,
+  };
+}
+
+function fieldPacketFeedbackStats(feedback = []) {
+  const counts = {};
+  for (const item of feedback || []) {
+    const key = cleanString(item.outcome || "unknown") || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return {
+    total: feedback.length,
+    worked: (counts.worked || 0) + (counts.correct || 0) + (counts.confirmed || 0),
+    wrongPart: counts["wrong-part"] || 0,
+    wrongProgrammer: counts["wrong-programmer"] || 0,
+    wrongLishi: counts["wrong-lishi"] || 0,
+    missingItem: counts["missing-item"] || 0,
+    counts,
+  };
+}
+
+function saveFieldPacketFeedback(body = {}, store = {}) {
+  const feedback = cleanFieldPacketFeedback(body);
+  store.fieldPacketFeedback = Array.isArray(store.fieldPacketFeedback) ? store.fieldPacketFeedback : [];
+  store.fieldPacketFeedback.unshift(feedback);
+  store.fieldPacketFeedback = store.fieldPacketFeedback.slice(0, 3000);
+  return {
+    feedback,
+    stats: fieldPacketFeedbackStats(store.fieldPacketFeedback),
+    memory: {
+      total: store.fieldPacketFeedback.length,
+      message: feedback.outcome === "worked"
+        ? "Field packet marked worked. Matching future choices will get a confidence boost."
+        : "Field packet correction saved. Matching future choices will be treated more carefully.",
+    },
   };
 }
 
@@ -7325,6 +7420,155 @@ function serializeFieldLoadoutCandidate(candidate = null) {
   };
 }
 
+function fieldPacketFeedbackTokens(value = []) {
+  return uniqueCleanValues(value)
+    .flatMap(partReferenceTokenVariants)
+    .map(compactToken)
+    .filter((token) => token.length >= 4);
+}
+
+function fieldPacketFeedbackText(feedback = {}) {
+  return compactToken([
+    feedback.query,
+    feedback.vin,
+    feedback.title,
+    feedback.vehicle,
+    feedback.sectionId,
+    feedback.itemLabel,
+    feedback.itemValue,
+    feedback.primaryPart,
+    feedback.backupPart,
+    feedback.programmer,
+    feedback.lishi,
+    feedback.tokens || [],
+    feedback.note,
+  ].flat(Infinity).join(" "));
+}
+
+function fieldPacketRelevantFeedback(feedback = [], contextValues = [], limit = 80) {
+  const tokens = fieldPacketFeedbackTokens(contextValues);
+  if (!tokens.length) return [];
+  return (feedback || [])
+    .filter((item) => {
+      const text = fieldPacketFeedbackText(item);
+      return tokens.some((token) => text.includes(token));
+    })
+    .slice(0, limit);
+}
+
+function fieldPacketCandidateMatchesFeedback(candidate = {}, feedback = {}) {
+  const candidateTokens = fieldPacketFeedbackTokens(fieldLoadoutCandidateValues(candidate));
+  if (!candidateTokens.length) return false;
+  const feedbackText = fieldPacketFeedbackText(feedback);
+  return candidateTokens.some((token) => feedbackText.includes(token));
+}
+
+function fieldPacketFeedbackPenaltyApplies(candidate = {}, feedback = {}) {
+  const section = cleanString(feedback.sectionId).toLowerCase();
+  const outcome = cleanString(feedback.outcome).toLowerCase();
+  const kind = cleanString(candidate.kind || "part").toLowerCase();
+  if (outcome === "wrong-programmer") return kind === "programmer" || section === "programmer";
+  if (outcome === "wrong-lishi") return kind === "lishi" || section === "lishi";
+  if (outcome === "wrong-part") return kind === "part" || ["primary", "backup"].includes(section);
+  if (outcome === "missing-item") return false;
+  return ["wrong", "failed", "bad"].includes(outcome);
+}
+
+function applyFieldPacketLearning(candidateMaps = [], feedback = [], contextValues = []) {
+  const relevant = fieldPacketRelevantFeedback(feedback, contextValues, 120);
+  let boosts = 0;
+  let corrections = 0;
+  for (const map of candidateMaps) {
+    for (const candidate of map.values()) {
+      const matches = relevant.filter((item) => fieldPacketCandidateMatchesFeedback(candidate, item));
+      if (!matches.length) continue;
+      const worked = matches.filter((item) => ["worked", "correct", "confirmed"].includes(cleanString(item.outcome).toLowerCase())).length;
+      const wrong = matches.filter((item) => fieldPacketFeedbackPenaltyApplies(candidate, item)).length;
+      const missing = matches.filter((item) => cleanString(item.outcome).toLowerCase() === "missing-item").length;
+      const adjustment = Math.min(worked * 6, 18) - Math.min(wrong * 10, 24) + Math.min(missing * 2, 6);
+      if (!adjustment) continue;
+      candidate.score = Math.max(0, Math.min(99, Number(candidate.score || 0) + adjustment));
+      candidate.evidence = uniqueCleanValues([
+        candidate.evidence || [],
+        adjustment > 0 ? `${worked} field packet win${worked === 1 ? "" : "s"}` : `${wrong} field packet correction${wrong === 1 ? "" : "s"}`,
+      ]).slice(0, 6);
+      if (adjustment > 0) boosts += 1;
+      else corrections += 1;
+    }
+  }
+  return {
+    relevant: relevant.length,
+    boosts,
+    corrections,
+    total: feedback?.length || 0,
+  };
+}
+
+function fieldPacketChoice(section = {}) {
+  const item = section.item || {};
+  return {
+    id: cleanString(section.id),
+    title: cleanString(section.title),
+    label: cleanString(item.label || item.value || "Verify manually"),
+    value: cleanString(item.value || item.label),
+    score: Number(item.score || 0),
+    confidenceLabel: cleanString(item.confidenceLabel || fieldLoadoutConfidenceLabel(item.score)),
+    proofJobs: Number(item.proofJobs || 0),
+    inventory: item.inventory || {},
+    source: cleanString(item.sources?.[0] || item.source || ""),
+    identifiers: uniqueCleanValues(item.identifiers || []).slice(0, 8),
+  };
+}
+
+function buildFieldPacketFromLoadout(loadout = {}, learning = {}) {
+  const choices = (loadout.sections || []).map(fieldPacketChoice);
+  const byId = new Map(choices.map((choice) => [choice.id, choice]));
+  const primary = byId.get("primary");
+  const backup = byId.get("backup");
+  const programmer = byId.get("programmer");
+  const lishi = byId.get("lishi");
+  const supplies = byId.get("supplies");
+  const proof = byId.get("proof");
+  const checklist = uniqueCleanValues([
+    primary?.label && primary.score ? `Bring ${primary.label}` : "Verify primary key/remote before cutting or programming",
+    backup?.label && backup.score ? `Backup ${backup.label}` : "",
+    programmer?.label && programmer.score ? `Use ${programmer.label}` : "Confirm programmer path before dispatch",
+    lishi?.label && lishi.score ? `Pack ${lishi.label}` : "Verify keyway or decode tool at vehicle",
+    supplies?.label ? `Small kit ${supplies.label}` : "",
+    proof?.label || "Authorization + final working proof",
+  ]).slice(0, 8);
+  const gaps = choices
+    .filter((choice) => Number(choice.score || 0) < 56)
+    .map((choice) => `${choice.title}: verify manually`)
+    .slice(0, 5);
+  return {
+    id: metkaStableId("field-packet", [loadout.vin, loadout.query, loadout.title, primary?.value, programmer?.value]),
+    generatedAt: loadout.generatedAt || new Date().toISOString(),
+    title: cleanString(loadout.title || loadout.query || "Current job"),
+    query: cleanString(loadout.query),
+    vin: cleanString(loadout.vin),
+    confidencePercent: Number(loadout.confidencePercent || 0),
+    confidenceLabel: cleanString(loadout.confidenceLabel || fieldLoadoutConfidenceLabel(loadout.confidencePercent)),
+    primary,
+    backup,
+    programmer,
+    lishi,
+    supplies,
+    proof,
+    choices,
+    checklist,
+    gaps,
+    proofSummary: loadout.proof || {},
+    inventorySummary: loadout.inventory || {},
+    learning: {
+      relevantFeedback: learning.relevant || 0,
+      boostedChoices: learning.boosts || 0,
+      correctedChoices: learning.corrections || 0,
+      totalFeedback: learning.total || 0,
+    },
+  };
+}
+
 function fieldLoadoutNoChoice(label, reason) {
   return {
     key: compactToken(label),
@@ -7581,6 +7825,11 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
     evidence: ["Authorization photo", "Final working key/programmer outcome"],
   }, partsReference, store);
 
+  const learning = applyFieldPacketLearning(
+    [partCandidates, programmerCandidates, lishiCandidates, supplyCandidates],
+    store.fieldPacketFeedback || [],
+    [query, partQuery, vin, title, vehicle.year, vehicle.make, vehicle.model, vehicle.trim],
+  );
   const sortCandidates = (map) => Array.from(map.values()).sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(b.proofJobs || 0) - Number(a.proofJobs || 0) || a.label.localeCompare(b.label));
   const partList = sortCandidates(partCandidates);
   const programmerList = sortCandidates(programmerCandidates);
@@ -7602,7 +7851,7 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   if (!lishiList.length && !partList.length) confidencePercent = Math.min(confidencePercent, 52);
   const exactProof = Number(shopEvidence.exactVinCount || 0);
   const relatedProof = Math.max(Number(shopEvidence.exactVehicleCount || 0), Number(proofPatterns.best?.records || 0));
-  return {
+  const loadout = {
     generatedAt: new Date().toISOString(),
     title,
     query,
@@ -7622,6 +7871,7 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
       metkaQuoteDemand: metkaQuotes.length,
       lishiCandidates: lishiList.length,
       serviceFamily,
+      fieldPacketFeedback: learning.relevant,
     },
     sections,
     alternates: partList.slice(2, 8).map(serializeFieldLoadoutCandidate),
@@ -7646,6 +7896,8 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
       },
     },
   };
+  loadout.fieldPacket = buildFieldPacketFromLoadout(loadout, learning);
+  return loadout;
 }
 
 function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = [], options = {}) {
@@ -12034,6 +12286,17 @@ async function handleApi(request, response, pathname) {
   if (request.method === "POST" && pathname === "/api/job-loadout") {
     const body = await readJsonBody(request);
     sendJson(response, 200, await buildJobLoadout(body, store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/field-packet/feedback") {
+    try {
+      const result = saveFieldPacketFeedback(await readJsonBody(request), store);
+      await writeStore(store);
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendError(response, 400, error.message);
+    }
     return;
   }
 

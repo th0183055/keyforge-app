@@ -4,6 +4,7 @@
   "auditLog": [],
   "aiFeedback": [],
   "shopRules": [],
+  "fieldPacketFeedback": [],
   "metkaBridge": {
     "version": 1,
     "importedAt": "",

@@ -7888,6 +7888,56 @@ function renderLoadoutAlternate(item = {}) {
   `;
 }
 
+function renderFieldPacketChoice(choice = {}) {
+  const inventory = choice.inventory || {};
+  return `
+    <article class="field-packet-choice ${escapeHtml(loadoutTone(choice.score))}">
+      <span>${escapeHtml(choice.title || "Choice")}</span>
+      <strong>${escapeHtml(choice.label || "Verify manually")}</strong>
+      <p>${escapeHtml([choice.score ? `${choice.score}%` : "Verify", choice.proofJobs ? `${choice.proofJobs} proof` : "", inventory.label || ""].filter(Boolean).join(" | "))}</p>
+    </article>
+  `;
+}
+
+function renderFieldPacket(packet = {}) {
+  const choices = (packet.choices || []).filter((choice) => ["primary", "backup", "programmer", "lishi", "supplies", "proof"].includes(choice.id));
+  const checklist = packet.checklist || [];
+  const gaps = packet.gaps || [];
+  const learning = packet.learning || {};
+  return `
+    <section class="field-packet-panel ${escapeHtml(loadoutTone(packet.confidencePercent))}">
+      <div class="field-packet-head">
+        <div>
+          <p class="eyebrow">Field Packet v2</p>
+          <h3>${escapeHtml(packet.title || "Current job")}</h3>
+          <p>${escapeHtml([packet.vin, `${packet.confidencePercent || 0}% ${packet.confidenceLabel || "confidence"}`, learning.relevantFeedback ? `${learning.relevantFeedback} learned marks` : ""].filter(Boolean).join(" | "))}</p>
+        </div>
+        <strong><span>${escapeHtml(packet.confidencePercent || 0)}%</span><small>${escapeHtml(packet.confidenceLabel || "Packet")}</small></strong>
+      </div>
+      <div class="field-packet-grid">
+        ${choices.map(renderFieldPacketChoice).join("")}
+      </div>
+      <div class="field-packet-bottom">
+        <section>
+          <span>Checklist</span>
+          ${checklist.length ? `<ol>${checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Build a loadout to create the tech checklist.</p>`}
+        </section>
+        <section>
+          <span>${gaps.length ? "Verify" : "Ready"}</span>
+          ${gaps.length ? `<ol>${gaps.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Capture authorization and final working proof after the job.</p>`}
+        </section>
+      </div>
+      <div class="field-packet-feedback">
+        <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong part</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong programmer</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing item</button>
+      </div>
+    </section>
+  `;
+}
+
 function renderJobLoadout(payload = {}) {
   if (!loadoutResult) return;
   latestJobLoadout = payload;
@@ -7902,6 +7952,7 @@ function renderJobLoadout(payload = {}) {
       </div>
       <strong><span>${escapeHtml(payload.confidencePercent || 0)}%</span><small>${escapeHtml(payload.confidenceLabel || "Loadout")}</small></strong>
     </section>
+    ${payload.fieldPacket ? renderFieldPacket(payload.fieldPacket) : ""}
     <section class="loadout-summary-grid">
       <article class="metric"><span>Exact</span><strong>${escapeHtml(summary.exactProof || 0)}</strong><p>VIN proof</p></article>
       <article class="metric"><span>Related</span><strong>${escapeHtml(summary.relatedProof || 0)}</strong><p>Pattern proof</p></article>
@@ -7954,14 +8005,54 @@ async function loadJobLoadout(query = loadoutQueryFromForm()) {
 
 function copyJobLoadout() {
   if (!latestJobLoadout) return;
+  const packet = latestJobLoadout.fieldPacket || {};
   const lines = [
-    `Loadout: ${latestJobLoadout.title || latestJobLoadout.query || "Current job"}`,
-    `Confidence: ${latestJobLoadout.confidencePercent || 0}% ${latestJobLoadout.confidenceLabel || ""}`,
-    ...(latestJobLoadout.sections || []).map((section) => `${section.title}: ${section.item?.label || section.item?.value || "Verify"}`),
+    `Field Packet: ${packet.title || latestJobLoadout.title || latestJobLoadout.query || "Current job"}`,
+    `Confidence: ${packet.confidencePercent || latestJobLoadout.confidencePercent || 0}% ${packet.confidenceLabel || latestJobLoadout.confidenceLabel || ""}`,
+    ...(packet.checklist?.length ? packet.checklist.map((item) => `- ${item}`) : (latestJobLoadout.sections || []).map((section) => `- ${section.title}: ${section.item?.label || section.item?.value || "Verify"}`)),
   ];
   navigator.clipboard?.writeText(lines.join("\n")).then(() => {
     if (loadoutStatus) loadoutStatus.textContent = "Loadout copied.";
   });
+}
+
+async function submitFieldPacketFeedback(outcome, sectionId = "", button = null) {
+  const packet = latestJobLoadout?.fieldPacket;
+  if (!packet) {
+    if (loadoutStatus) loadoutStatus.textContent = "Build a Field Packet before saving feedback.";
+    return;
+  }
+  const choice = (packet.choices || []).find((item) => item.id === sectionId) || {};
+  const originalText = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving...";
+  }
+  try {
+    const payload = await api("/api/field-packet/feedback", {
+      method: "POST",
+      body: JSON.stringify({
+        outcome,
+        sectionId,
+        choice,
+        packet,
+        query: latestJobLoadout.query,
+        vin: latestJobLoadout.vin,
+        confidencePercent: latestJobLoadout.confidencePercent,
+      }),
+      timeoutMs: 12000,
+      noStatus: true,
+    });
+    if (loadoutStatus) loadoutStatus.textContent = payload.memory?.message || "Field Packet feedback saved.";
+    await loadJobLoadout(loadoutQueryFromForm());
+  } catch (error) {
+    if (loadoutStatus) loadoutStatus.textContent = `Feedback failed: ${error.message}`;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function openLoadoutTarget(target, query = "") {
@@ -11383,6 +11474,16 @@ document.addEventListener("click", (event) => {
     window.setTimeout(() => {
       copyLoadoutButton.textContent = "Copy Kit";
     }, 1200);
+    return;
+  }
+
+  const fieldPacketFeedbackButton = event.target.closest("[data-field-packet-feedback]");
+  if (fieldPacketFeedbackButton) {
+    submitFieldPacketFeedback(
+      fieldPacketFeedbackButton.dataset.fieldPacketFeedback,
+      fieldPacketFeedbackButton.dataset.fieldPacketSection || "",
+      fieldPacketFeedbackButton,
+    );
     return;
   }
 
