@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, mkdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,8 @@ const bootedAt = new Date().toISOString();
 const staticJsonCache = new Map();
 const partsReferenceRowsByIdCache = new WeakMap();
 const jobEvidenceIndexMarker = Symbol("timlock-job-evidence-index");
+const googleWorkspaceStatusCacheMs = 15 * 1000;
+let googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
 
 const supplierRegistry = [
   {
@@ -1542,18 +1544,33 @@ async function jsonFileHealth(label, filePath, countKey = "", optional = false) 
   }
 }
 
+async function fastFileHealth(label, filePath, optional = false) {
+  try {
+    const details = await stat(filePath);
+    return {
+      label,
+      ok: true,
+      optional,
+      bytes: details.size,
+      sizeMb: Number((details.size / 1024 / 1024).toFixed(2)),
+      modifiedAt: details.mtime.toISOString(),
+    };
+  } catch (error) {
+    return { label, ok: false, optional, error: error.message };
+  }
+}
+
 async function buildHealthStatus() {
-  await ensureStore();
   const files = await Promise.all([
-    jsonFileHealth("job store", storePath, "jobs"),
-    jsonFileHealth("key intelligence", keyIntelligencePath, "records"),
-    jsonFileHealth("programming reference", programmingReferencePath, "rows"),
-    jsonFileHealth("VIN reference", vinReferencePath, "rows"),
-    jsonFileHealth("vPIC catalog", vpicCatalogPath, "rows"),
-    jsonFileHealth("parts cross-reference", partsCrossReferencePath, "rows"),
-    jsonFileHealth("Lishi master reference", lishiMasterReferencePath, "tools"),
-    jsonFileHealth("reference vault", referenceVaultPath, "entries", true),
-    jsonFileHealth("proof attachments", proofAttachmentsPath, "attachments", true),
+    fastFileHealth("job store", storePath),
+    fastFileHealth("key intelligence", keyIntelligencePath),
+    fastFileHealth("programming reference", programmingReferencePath),
+    fastFileHealth("VIN reference", vinReferencePath),
+    fastFileHealth("vPIC catalog", vpicCatalogPath),
+    fastFileHealth("parts cross-reference", partsCrossReferencePath),
+    fastFileHealth("Lishi master reference", lishiMasterReferencePath),
+    fastFileHealth("reference vault", referenceVaultPath, true),
+    fastFileHealth("proof attachments", proofAttachmentsPath, true),
   ]);
   const missing = files.filter((item) => !item.ok && !item.optional);
   return {
@@ -10043,8 +10060,6 @@ const vehicleOptionSourceWeight = {
 const vehicleOptionsCacheMs = 10 * 60 * 1000;
 let vehicleOptionBaseRowsCache = { at: 0, rows: [] };
 const vehicleOptionsResponseCache = new Map();
-const googleWorkspaceStatusCacheMs = 15 * 1000;
-let googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
 
 function vehicleOptionRowScore(row = {}) {
   let score = vehicleOptionSourceWeight[row.source] || 0;
