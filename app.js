@@ -7627,6 +7627,42 @@ function renderWorkbenchProofPatterns(payload = {}) {
   `;
 }
 
+function renderWorkbenchTruthCheck(payload = {}) {
+  const ledger = payload.truthLedger || {};
+  if (!ledger.label) return "";
+  const counts = ledger.counts || {};
+  const chips = [
+    ["Exact VIN", counts.exactVin || 0],
+    ["Same vehicle", counts.sameVehicle || 0],
+    ["Part jobs", counts.partJobs || 0],
+    ["VIN pattern", counts.vinPattern || 0],
+  ];
+  const ownerRules = appMode === "owner"
+    ? `
+      <details class="truth-check-detail">
+        <summary>Evidence rules</summary>
+        <div>
+          ${(ledger.rules || []).map((rule) => `<span>${escapeHtml(rule)}</span>`).join("") || `<span>Save exact VIN, final part, programmer, and proof to strengthen this packet.</span>`}
+        </div>
+      </details>
+    `
+    : "";
+  return `
+    <section class="truth-check-panel ${escapeHtml(ledger.tier || "thin-proof")}">
+      <div class="truth-check-main">
+        <p class="eyebrow">Truth Check</p>
+        <h3>${escapeHtml(ledger.label || "Verify")}</h3>
+        <p>${escapeHtml(ledger.subscriberSummary || ledger.summary || "Verify before dispatch.")}</p>
+      </div>
+      <strong><span>${escapeHtml(ledger.score || 0)}%</span><small>cap ${escapeHtml(ledger.cap || 0)}%</small></strong>
+      <div class="truth-check-chips">
+        ${chips.map(([label, value]) => `<span>${escapeHtml(label)} <b>${escapeHtml(value)}</b></span>`).join("")}
+      </div>
+      ${ownerRules}
+    </section>
+  `;
+}
+
 function renderWorkbenchSources(payload = {}) {
   const sources = payload.sourceMap || {};
   return `
@@ -7697,7 +7733,7 @@ function renderWorkbenchDecisionEngine(payload = {}) {
                 <article>
                   <span>${escapeHtml(choice.label)}</span>
                   <strong>${escapeHtml(choice.value)}</strong>
-                  <small>${escapeHtml([choice.source, choice.detail].filter(Boolean).join(" | ") || `${choice.confidence}%`)}</small>
+                  <small>${escapeHtml([choice.source, choice.detail, choice.truthCapped ? `truth-capped at ${choice.truthCap}%` : ""].filter(Boolean).join(" | ") || `${choice.confidence}%`)}</small>
                   ${
                     (choice.ownerEvidence || []).length
                       ? `<p>${escapeHtml(choice.ownerEvidence.slice(0, 3).join(" | "))}</p>`
@@ -7731,6 +7767,7 @@ function renderWorkbenchDecisionEngine(payload = {}) {
                 <span>${escapeHtml(choice.label)}</span>
                 <strong>${escapeHtml(choice.value)}</strong>
                 <em>${escapeHtml(`${choice.confidence}%`)}</em>
+                ${choice.truthCapped && appMode === "owner" ? `<small class="truth-cap">Capped</small>` : ""}
               </article>
             `,
           )
@@ -7749,13 +7786,15 @@ function renderJobWorkbench(payload = {}) {
   latestWorkbench = payload;
   const overview = payload.overview || {};
   const activeQueries = payload.activeQueries || {};
+  const truth = payload.truthLedger || {};
   const metrics = [
     ["Current", payload.title || "Job context", payload.vin || payload.query || "Search ready"],
-    ["Proof", overview.matchedJobs || 0, `${overview.savedJobs || 0} saved jobs`],
+    ["Proof", truth.label || overview.trustLabel || "Verify", `${overview.exactProofMatches || 0} exact | ${overview.relatedProfileMatches || 0} related`],
     ["Parts", overview.partReferenceRows || 0, activeQueries.part || "Search-ready"],
     ["Coverage", overview.observedCoveragePercent ?? "N/A", "Observed shop proof"],
   ];
   workbenchResult.innerHTML = `
+    ${renderWorkbenchTruthCheck(payload)}
     ${renderWorkbenchDecisionEngine(payload)}
     ${renderWorkbenchAiBrief(payload)}
     <section class="history-summary-grid">
@@ -7904,13 +7943,14 @@ function renderFieldPacket(packet = {}) {
   const checklist = packet.checklist || [];
   const gaps = packet.gaps || [];
   const learning = packet.learning || {};
+  const truth = packet.truthLedger || {};
   return `
     <section class="field-packet-panel ${escapeHtml(loadoutTone(packet.confidencePercent))}">
       <div class="field-packet-head">
         <div>
           <p class="eyebrow">Field Packet v2</p>
           <h3>${escapeHtml(packet.title || "Current job")}</h3>
-          <p>${escapeHtml([packet.vin, `${packet.confidencePercent || 0}% ${packet.confidenceLabel || "confidence"}`, learning.relevantFeedback ? `${learning.relevantFeedback} learned marks` : ""].filter(Boolean).join(" | "))}</p>
+          <p>${escapeHtml([packet.vin, truth.label ? `${truth.label} proof` : "", `${packet.confidencePercent || 0}% ${packet.confidenceLabel || "confidence"}`, learning.relevantFeedback ? `${learning.relevantFeedback} learned marks` : ""].filter(Boolean).join(" | "))}</p>
         </div>
         <strong><span>${escapeHtml(packet.confidencePercent || 0)}%</span><small>${escapeHtml(packet.confidenceLabel || "Packet")}</small></strong>
       </div>

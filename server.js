@@ -6420,14 +6420,24 @@ function summarizeProofPatternGroup(kind, label, records = [], partsReference = 
   const topFamilyLabel = topFamilies[0]?.value || "Unknown";
   const familyKey = proofIgnitionFamilyFromText(topFamilyLabel).key;
   const outcomeCoveragePercent = coveragePercent(successes, warnings);
-  const base = kind === "exact-vin" ? 72 : kind === "vin-pattern" ? 58 : 44;
+  const confidenceModel = proofPatternConfidenceModel(kind);
   const confidencePercent = records.length
-    ? Math.min(98, base + Math.min(records.length * 8, 24) + (topParts.length ? 6 : 0) + (outcomeCoveragePercent !== null ? Math.min(Math.round(outcomeCoveragePercent / 8), 10) : 0))
+    ? Math.min(
+        confidenceModel.max,
+        confidenceModel.base +
+          Math.min(records.length * confidenceModel.perRecord, confidenceModel.recordCap) +
+          (topParts.length ? confidenceModel.partBoost : 0) +
+          (outcomeCoveragePercent !== null ? Math.min(Math.round(outcomeCoveragePercent / 10), confidenceModel.outcomeBoost) : 0),
+      )
     : 0;
 
   return {
     kind,
     label,
+    trustTier: confidenceModel.tier,
+    trustLabel: confidenceModel.label,
+    trustCap: confidenceModel.max,
+    trustNote: confidenceModel.note,
     records: records.length,
     successes,
     warnings,
@@ -6459,6 +6469,67 @@ function summarizeProofPatternGroup(kind, label, records = [], partsReference = 
   };
 }
 
+function proofPatternConfidenceModel(kind) {
+  if (kind === "exact-vin") {
+    return {
+      tier: "exact-vin",
+      label: "Exact VIN proof",
+      note: "Same VIN was saved in worked-job history.",
+      base: 82,
+      perRecord: 8,
+      recordCap: 12,
+      partBoost: 4,
+      outcomeBoost: 4,
+      max: 100,
+    };
+  }
+  if (kind === "vehicle") {
+    return {
+      tier: "same-vehicle",
+      label: "Same vehicle proof",
+      note: "Same year/make/model was seen. Verify trim, FCC, keyway, and ignition family.",
+      base: 58,
+      perRecord: 5,
+      recordCap: 18,
+      partBoost: 4,
+      outcomeBoost: 4,
+      max: 84,
+    };
+  }
+  if (kind === "vin-pattern") {
+    return {
+      tier: "vin-pattern",
+      label: "VIN pattern clue",
+      note: "VIN structure matched prior jobs, but it is not enough by itself for a final part/programmer decision.",
+      base: 38,
+      perRecord: 3,
+      recordCap: 14,
+      partBoost: 2,
+      outcomeBoost: 2,
+      max: 66,
+    };
+  }
+  return {
+    tier: "broad",
+    label: "Broad proof clue",
+    note: "Broad saved-job evidence only. Verify manually.",
+    base: 32,
+    perRecord: 2,
+    recordCap: 10,
+    partBoost: 0,
+    outcomeBoost: 0,
+    max: 58,
+  };
+}
+
+function proofPatternGroupPriority(group = {}) {
+  if (!Number(group.records || 0)) return 99;
+  if (group.kind === "exact-vin") return 1;
+  if (group.kind === "vehicle") return 2;
+  if (group.kind === "vin-pattern") return 3;
+  return 8;
+}
+
 function buildProofPatternBaseline(jobs = [], partsReference = {}, options = {}) {
   const targetVin = normalizeVinCandidate(options.vin);
   const targetPattern = proofPatternFromVin(targetVin);
@@ -6479,10 +6550,12 @@ function buildProofPatternBaseline(jobs = [], partsReference = {}, options = {})
     : [];
   const groups = [
     summarizeProofPatternGroup("exact-vin", targetVin ? `Exact VIN ${targetVin}` : "Exact VIN", exactVinRecords, partsReference),
-    summarizeProofPatternGroup("vin-pattern", targetPattern?.label || "VIN structure pattern", vinPatternRecords, partsReference),
     summarizeProofPatternGroup("vehicle", workbenchVehicleLabel({ vehicle: targetVehicle }, "Decoded vehicle"), vehicleRecords, partsReference),
+    summarizeProofPatternGroup("vin-pattern", targetPattern?.label || "VIN structure pattern", vinPatternRecords, partsReference),
   ];
-  const best = groups.find((group) => group.records) || groups[0];
+  const best = groups
+    .filter((group) => Number(group.records || 0))
+    .sort((a, b) => proofPatternGroupPriority(a) - proofPatternGroupPriority(b) || Number(b.confidencePercent || 0) - Number(a.confidencePercent || 0))[0] || groups[0];
   return {
     generatedAt: new Date().toISOString(),
     totalProofJobs: records.length,
@@ -7560,6 +7633,7 @@ function buildFieldPacketFromLoadout(loadout = {}, learning = {}) {
     gaps,
     proofSummary: loadout.proof || {},
     inventorySummary: loadout.inventory || {},
+    truthLedger: loadout.truthLedger || null,
     learning: {
       relevantFeedback: learning.relevant || 0,
       boostedChoices: learning.boosts || 0,
@@ -7660,6 +7734,15 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   const partQuery = workbenchPrimaryPartQuery(profile, { ...body, q: normalizeVinCandidate(query) ? "" : query }) || query;
   const partHistory = partQuery ? buildPartHistory(partQuery, evidenceIndex, partsReference) : null;
   const proofVault = buildProofVault(vin || query || title, evidenceIndex, partsReference);
+  const truthLedger = buildWorkbenchTruthLedger({
+    profile: { vin },
+    vehicle,
+    partQuery,
+    partHistory,
+    proofVault,
+    proofPatterns,
+    shopEvidence,
+  });
   const lishiReference = await readLishiMasterReference();
   const lishiLookup = buildLishiLookup(lishiReference, {
     q: uniqueCleanValues([query, [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "), proofPatterns.best?.lishiKeyways?.[0]?.value]).join(" "),
@@ -7849,6 +7932,7 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   if (!partList.length) confidencePercent = Math.min(confidencePercent, 55);
   if (!programmerList.length) confidencePercent = Math.min(confidencePercent, 74);
   if (!lishiList.length && !partList.length) confidencePercent = Math.min(confidencePercent, 52);
+  if (!["exact-vin", "same-vehicle"].includes(truthLedger.tier)) confidencePercent = Math.min(confidencePercent, Number(truthLedger.cap || confidencePercent));
   const exactProof = Number(shopEvidence.exactVinCount || 0);
   const relatedProof = Math.max(Number(shopEvidence.exactVehicleCount || 0), Number(proofPatterns.best?.records || 0));
   const loadout = {
@@ -7872,7 +7956,11 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
       lishiCandidates: lishiList.length,
       serviceFamily,
       fieldPacketFeedback: learning.relevant,
+      truthTier: truthLedger.tier,
+      truthScore: truthLedger.score,
+      truthCap: truthLedger.cap,
     },
+    truthLedger,
     sections,
     alternates: partList.slice(2, 8).map(serializeFieldLoadoutCandidate),
     proof: {
@@ -9310,6 +9398,10 @@ function compactProofPatternGroup(group = {}) {
   return {
     kind: group.kind || "",
     label: group.label || "",
+    trustTier: group.trustTier || "",
+    trustLabel: group.trustLabel || "",
+    trustCap: group.trustCap || 0,
+    trustNote: group.trustNote || "",
     records: group.records || 0,
     successes: group.successes || 0,
     warnings: group.warnings || 0,
@@ -9457,6 +9549,118 @@ function proofFamilyDisplay(family = {}) {
   return cleanString(family.label) || "Verify key type";
 }
 
+function buildWorkbenchTruthLedger({ profile = {}, vehicle = {}, partQuery = "", partHistory = null, proofVault = null, proofPatterns = null, shopEvidence = null } = {}) {
+  const exactVin = Number(shopEvidence?.exactVinCount || 0);
+  const sameVehicle = Number(shopEvidence?.exactVehicleCount || 0);
+  const makeModel = Number(shopEvidence?.makeModelCount || 0);
+  const partJobs = Number(partHistory?.jobs?.length || 0);
+  const partRows = Number(partHistory?.referenceStats?.matchedReferenceRows || partHistory?.crossReferences?.length || 0);
+  const proofVaultRecords = Number(proofVault?.summary?.matchingJobs || 0);
+  const bestPattern = proofPatterns?.best || {};
+  const vinPatternRecords = Number((proofPatterns?.groups || []).find((group) => group.kind === "vin-pattern")?.records || 0);
+  const vehiclePatternRecords = Number((proofPatterns?.groups || []).find((group) => group.kind === "vehicle")?.records || 0);
+  const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
+  const hasVin = Boolean(profile.vin);
+  const relatedVehicle = Math.max(sameVehicle, vehiclePatternRecords);
+  const directPartProof = partJobs && partQuery ? partJobs : 0;
+  let tier = "thin-proof";
+  let label = "Thin proof";
+  let summary = "No saved proof is strong enough yet.";
+  let cap = hasVehicle || hasVin ? 58 : 52;
+  let score = cap;
+  let strongest = "None";
+
+  if (exactVin) {
+    tier = "exact-vin";
+    label = "Exact VIN";
+    strongest = "Exact VIN proof";
+    cap = 100;
+    score = 100;
+    summary = `${exactVin} exact VIN worked-job record${exactVin === 1 ? "" : "s"}.`;
+  } else if (relatedVehicle) {
+    tier = "same-vehicle";
+    label = "Same vehicle";
+    strongest = "Same year/make/model proof";
+    cap = 84;
+    score = Math.min(cap, 68 + Math.min(relatedVehicle * 4, 12));
+    summary = `${relatedVehicle} same-vehicle proof record${relatedVehicle === 1 ? "" : "s"}; verify trim/FCC/keyway.`;
+  } else if (directPartProof) {
+    tier = "part-history";
+    label = "Part history";
+    strongest = "Part proof";
+    cap = 78;
+    score = Math.min(cap, 64 + Math.min(directPartProof * 4, 10));
+    summary = `${directPartProof} saved job${directPartProof === 1 ? "" : "s"} matched the part family.`;
+  } else if (bestPattern.kind === "vin-pattern" && Number(bestPattern.records || 0)) {
+    tier = "vin-pattern";
+    label = "VIN pattern";
+    strongest = "VIN structure clue";
+    cap = 66;
+    score = Math.min(cap, Number(bestPattern.confidencePercent || 0) || 58);
+    summary = `${bestPattern.records} VIN-pattern clue${bestPattern.records === 1 ? "" : "s"}; not final without vehicle/part verification.`;
+  } else if (partRows) {
+    tier = "cross-reference";
+    label = "Cross-reference";
+    strongest = "Catalog cross-reference";
+    cap = 72;
+    score = Math.min(cap, 58 + Math.min(partRows * 4, 10));
+    summary = `${partRows} cross-reference row${partRows === 1 ? "" : "s"} matched; needs field proof.`;
+  }
+
+  const rules = uniqueCleanValues([
+    exactVin ? "Exact VIN proof can drive final recommendations." : "",
+    !exactVin && relatedVehicle ? "Same-vehicle proof is strong but still requires trim/FCC/keyway verification." : "",
+    !exactVin && !relatedVehicle && directPartProof ? "Part-history proof cannot prove the vehicle package by itself." : "",
+    vinPatternRecords ? "VIN-pattern evidence is capped as a clue, never a final answer." : "",
+    !exactVin ? "Save exact VIN + final working part/programmer to raise future confidence." : "",
+  ]).slice(0, 6);
+
+  return {
+    tier,
+    label,
+    score,
+    cap,
+    strongest,
+    summary,
+    subscriberSummary: summary.replace(/;.*$/, ""),
+    counts: {
+      exactVin,
+      sameVehicle: relatedVehicle,
+      makeModel,
+      partJobs,
+      partRows,
+      proofVaultRecords,
+      vinPattern: vinPatternRecords,
+      totalProofJobs: proofPatterns?.totalProofJobs || 0,
+    },
+    warnings: uniqueCleanValues([
+      !exactVin && vinPatternRecords ? "VIN-pattern clues are capped until exact vehicle/part proof exists." : "",
+      !hasVin ? "No VIN attached to this packet." : "",
+      !hasVehicle ? "No complete year/make/model identity attached." : "",
+    ]).slice(0, 4),
+    rules,
+  };
+}
+
+function applyWorkbenchTruthGate(choice = {}, truthLedger = {}) {
+  const raw = Number(choice.confidence || 0);
+  const source = cleanString(choice.source).toUpperCase();
+  const id = cleanString(choice.id);
+  let cap = 100;
+  if (id === "vehicle") cap = raw;
+  else if (id === "proof") cap = Number(truthLedger.cap || raw || 55);
+  else if (/PROOF|PATTERN|SHOP|OBSERVED|HISTORY|VAULT/.test(source)) cap = Number(truthLedger.cap || raw || 55);
+  else if (/CROSS-REFERENCE|REFERENCE/.test(source) && truthLedger.tier === "thin-proof") cap = 72;
+  else if (truthLedger.tier === "vin-pattern") cap = Math.min(74, Number(truthLedger.cap || 66) + 8);
+  const confidence = workbenchClampPercent(Math.min(raw, cap), raw);
+  return {
+    ...choice,
+    confidence,
+    truthCapped: confidence < raw,
+    truthCap: cap,
+  };
+}
+
 function bestPartDecisionValue(partHistory, proofPatterns, partQuery) {
   const topPart = proofPatterns?.best?.topParts?.[0];
   if (topPart?.value) return topPart.value;
@@ -9490,7 +9694,7 @@ function bestDecodeDecisionValue(lishiLookup, profile, lishiEvidence = {}) {
   return reference.keyway?.primary || reference.lishi?.primary || "";
 }
 
-function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, warnings = [] }) {
+function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, truthLedger = {}, warnings = [] }) {
   const title = workbenchVehicleLabel(profile, body.q);
   const bestPattern = proofPatterns?.best || {};
   const patternRecords = Number(bestPattern.records || 0);
@@ -9512,7 +9716,7 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
   const keyTypeValue = proofFamilyDisplay(bestPattern.ignitionFamily);
   const partOnlySearch = Boolean(partQuery && !hasVehicle && !hasVin);
 
-  const choices = [
+  const rawChoices = [
     workbenchChoice(
       "vehicle",
       "Vehicle",
@@ -9599,10 +9803,14 @@ function buildWorkbenchDecisionEngine({ body = {}, profile = {}, vehicle = {}, p
       ],
     ),
   ];
+  const choices = rawChoices.map((choice) => applyWorkbenchTruthGate(choice, truthLedger));
   const weightedChoices = choices.filter((choice) => choice.confidence > 0);
-  const overall = weightedChoices.length
+  let overall = weightedChoices.length
     ? workbenchClampPercent(weightedChoices.reduce((sum, choice) => sum + choice.confidence, 0) / weightedChoices.length, 0)
     : 0;
+  if (truthLedger?.tier && !["exact-vin", "same-vehicle"].includes(truthLedger.tier)) {
+    overall = Math.min(overall, Number(truthLedger.cap || overall));
+  }
   const blockers = uniqueCleanValues([
     !hasVin && !partOnlySearch ? "VIN" : "",
     choices.find((choice) => choice.id === "part")?.confidence < 65 ? "part proof" : "",
@@ -9695,6 +9903,15 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
   });
   profile.lishiEvidence = lishiEvidence;
   const coverage = buildCoverageDashboard(cleanJobs, partsReference);
+  const truthLedger = buildWorkbenchTruthLedger({
+    profile,
+    vehicle,
+    partQuery,
+    partHistory,
+    proofVault,
+    proofPatterns,
+    shopEvidence,
+  });
   const matchedJobs = uniqueCleanValues([
     partHistory?.jobs?.map((job) => job.id),
     proofVault?.records?.map((record) => record.id),
@@ -9721,6 +9938,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     autoBaseline,
     coverage,
     proofPatterns,
+    truthLedger,
     warnings,
   });
   const decisionEngine = buildWorkbenchDecisionEngine({
@@ -9735,6 +9953,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     autoBaseline,
     coverage,
     proofPatterns,
+    truthLedger,
     warnings,
   });
   return {
@@ -9752,8 +9971,10 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
     overview: {
       savedJobs: cleanJobs.length,
       matchedJobs: matchedJobs.length,
-      exactProofMatches: directProofJobs.length,
-      relatedProfileMatches: relatedProfileJobs.filter((id) => !directProofJobs.includes(id)).length,
+      exactProofMatches: truthLedger.counts?.exactVin || 0,
+      relatedProfileMatches: (truthLedger.counts?.sameVehicle || 0) + (truthLedger.counts?.partJobs || 0),
+      trustScore: truthLedger.score,
+      trustLabel: truthLedger.label,
       partReferenceRows: partsReference.totalRows || partsReference.rows?.length || 0,
       lishiTools: lishiReference.stats?.tools || lishiReference.tools?.length || 0,
       lishiApplications: lishiReference.stats?.applications || lishiReference.applications?.length || 0,
@@ -9763,6 +9984,7 @@ async function buildJobWorkbench(body = {}, store = { jobs: [] }) {
       observedCoveragePercent: coverage.summary?.observedCoveragePercent,
     },
     decisionEngine,
+    truthLedger,
     lishiEvidence,
     nextActions: [
       { label: "Verify authorization and attach proof", target: "proof-vault", tone: "required" },
@@ -9837,10 +10059,11 @@ function globalGroup(id, label, target, results = [], note = "") {
   };
 }
 
-function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, warnings = [] }) {
-  const directProof = Math.max(Number(partHistory?.jobs?.length || 0), Number(proofVault?.summary?.matchingJobs || 0));
-  const relatedProof = Number(profile.matchedJobs?.length || 0);
-  const matchedProof = Math.max(directProof, relatedProof);
+function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuery = "", partHistory, proofVault, lishiLookup, lishiEvidence = {}, autoBaseline, coverage, proofPatterns, truthLedger = {}, warnings = [] }) {
+  const directProof = Number(truthLedger?.counts?.exactVin || 0);
+  const relatedProof = Number(truthLedger?.counts?.sameVehicle || 0);
+  const partProof = Number(truthLedger?.counts?.partJobs || partHistory?.jobs?.length || 0);
+  const matchedProof = Math.max(directProof, relatedProof, partProof);
   const bestPattern = proofPatterns?.best || {};
   const patternProof = Number(bestPattern.records || 0);
   const patternConfidence = Number(bestPattern.confidencePercent || 0);
@@ -9852,14 +10075,14 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   const observedCoverage = Number(coverage?.summary?.observedCoveragePercent);
   const hasVehicle = Boolean(vehicle?.year && vehicle?.make && vehicle?.model);
   const hasVin = Boolean(profile.vin || body.vin);
-  const confidencePercent = Math.max(
+  const rawConfidencePercent = Math.max(
     38,
     Math.min(
       100,
       42 +
         (hasVin ? 10 : 0) +
         (hasVehicle ? 8 : 0) +
-        Math.min(directProof * 8 + relatedProof * 4, 28) +
+        Math.min(directProof * 10 + relatedProof * 4 + partProof * 3, 28) +
         Math.min(Math.round(patternConfidence / 8), 12) +
         Math.min(partRows * 5, 12) +
         (lishiEvidence?.status === "conflict" ? -4 : lishiEvidence?.primary ? Math.min(Math.round(shopLishiConfidence / 14), 7) : 0) +
@@ -9868,11 +10091,16 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
         (Number.isFinite(observedCoverage) ? Math.min(observedCoverage / 10, 8) : 0),
     ),
   );
+  const confidencePercent = ["exact-vin", "same-vehicle"].includes(truthLedger?.tier)
+    ? rawConfidencePercent
+    : Math.min(rawConfidencePercent, Number(truthLedger?.cap || rawConfidencePercent));
   const title = workbenchVehicleLabel(profile, body.q) || cleanString(body.q || "current job");
   const decision = directProof
     ? `Start from saved proof for ${title}.`
     : relatedProof
       ? `Use related saved proof for ${title}, then verify exact VIN/key package.`
+      : partProof
+        ? `Use part-history proof for ${title}, then verify exact vehicle package.`
       : patternProof
         ? `Use the Proof Pattern baseline for ${title}, then verify the exact key package.`
     : partRows
@@ -9881,8 +10109,10 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
         ? `Use vehicle identity first, then verify keyway/FCC before ordering.`
         : `Start with a VIN, YMM, LR#, MW#, TI#, OE#, FCC, or keyway search.`;
   const evidence = uniqueCleanValues([
+    truthLedger?.summary ? `Truth grade: ${truthLedger.label} - ${truthLedger.summary}` : "",
     directProof ? `${directProof} direct proof record${directProof === 1 ? "" : "s"} matched this packet.` : "",
     !directProof && relatedProof ? `${relatedProof} related saved job${relatedProof === 1 ? "" : "s"} matched the decoded vehicle/profile; verify before trusting it.` : "",
+    !directProof && !relatedProof && partProof ? `${partProof} part-history job${partProof === 1 ? "" : "s"} matched this part family; verify vehicle package before trusting it.` : "",
     !directProof && !relatedProof && patternProof
       ? `${patternProof} Proof Pattern record${patternProof === 1 ? "" : "s"} matched ${bestPattern.label || "this baseline"}; observed family: ${bestPattern.ignitionFamily?.label || "unknown"}.`
       : "",
@@ -9903,6 +10133,7 @@ function buildWorkbenchAiBrief({ body = {}, profile = {}, vehicle = {}, partQuer
   const gaps = uniqueCleanValues([
     !matchedProof ? "No saved worked-job proof matched yet." : "",
     !patternProof ? "No proof-pattern baseline matched this VIN/vehicle yet." : "",
+    ...(truthLedger?.warnings || []),
     !partRows && partQuery ? "No cross-reference row matched the part query." : "",
     lishiEvidence?.status === "conflict" ? lishiEvidence.decision : "",
     !lishiConfirmedTools && !lishiEvidence?.primary ? "No vehicle-confirmed Lishi/keyway match is confirmed from the current query." : "",

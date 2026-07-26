@@ -7094,6 +7094,126 @@ textarea:focus {
   box-shadow: 0 14px 30px rgba(22, 29, 37, 0.12);
 }
 
+.truth-check-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 14px;
+  border: 1px solid #bfc7d1;
+  border-left: 6px solid #727d89;
+  border-radius: 8px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(236, 241, 246, 0.96));
+  box-shadow: 0 12px 26px rgba(22, 29, 37, 0.1);
+}
+
+.truth-check-panel.exact-vin {
+  border-left-color: #127044;
+}
+
+.truth-check-panel.same-vehicle {
+  border-left-color: #1e6091;
+}
+
+.truth-check-panel.part-history,
+.truth-check-panel.cross-reference {
+  border-left-color: #9a7226;
+}
+
+.truth-check-panel.vin-pattern,
+.truth-check-panel.thin-proof {
+  border-left-color: #8d4f2d;
+}
+
+.truth-check-main {
+  min-width: 0;
+}
+
+.truth-check-main h3,
+.truth-check-main p {
+  margin: 0;
+}
+
+.truth-check-main h3 {
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: clamp(1.15rem, 2vw, 1.5rem);
+  line-height: 1.08;
+}
+
+.truth-check-main p {
+  margin-top: 5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.truth-check-panel > strong {
+  display: grid;
+  min-width: 96px;
+  justify-items: center;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #151a20;
+  color: #f8fafc;
+}
+
+.truth-check-panel > strong span {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.truth-check-panel > strong small {
+  margin-top: 3px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.truth-check-chips,
+.truth-check-detail {
+  grid-column: 1 / -1;
+}
+
+.truth-check-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.truth-check-chips span,
+.truth-check-detail span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d2d9e1;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.truth-check-chips b {
+  color: var(--ink);
+}
+
+.truth-check-detail summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.truth-check-detail div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
 .workbench-decision-panel {
   display: grid;
   gap: 12px;
@@ -7185,6 +7305,18 @@ textarea:focus {
   font-size: 0.72rem;
   font-style: normal;
   font-weight: 900;
+}
+
+.workbench-decision-grid .truth-cap {
+  display: inline-flex;
+  margin: 8px 0 0 6px;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: #fff5e6;
+  color: #7a4a16;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .workbench-step-strip {
@@ -9977,6 +10109,20 @@ body.mode-subscriber .loadout-card {
   body.mode-subscriber .global-command-panel,
   body.mode-subscriber .panel {
     padding: 12px;
+  }
+
+  .truth-check-panel {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .truth-check-panel > strong {
+    justify-self: start;
+  }
+
+  .truth-check-chips span {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: space-between;
   }
 
   .field-packet-head,
