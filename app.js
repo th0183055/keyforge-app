@@ -47,6 +47,7 @@ let latestMissionControl = null;
 let latestTrainingCenter = null;
 let latestMetkaBridge = null;
 let latestWorkspaceBrief = null;
+let latestDispatchIntelligence = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestGoogleWorkspace = null;
@@ -263,6 +264,11 @@ const googleSheetSyncResult = document.querySelector("#googleSheetSyncResult");
 const serviceIntakeImportForm = document.querySelector("#serviceIntakeImportForm");
 const serviceIntakeStatus = document.querySelector("#serviceIntakeStatus");
 const serviceIntakeResult = document.querySelector("#serviceIntakeResult");
+const dispatchIntelligenceForm = document.querySelector("#dispatchIntelligenceForm");
+const dispatchIntelligenceStatus = document.querySelector("#dispatchIntelligenceStatus");
+const dispatchIntelligenceResult = document.querySelector("#dispatchIntelligenceResult");
+const refreshDispatchIntelligenceButton = document.querySelector("#refreshDispatchIntelligence");
+const syncDispatchCalendarButton = document.querySelector("#syncDispatchCalendar");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const ymmDropdownForms = [quickYmmStartForm, ymmForm].filter(Boolean);
@@ -335,6 +341,10 @@ const routeMeta = {
   "metka-bridge": {
     eyebrow: "Owner data room",
     title: "Metka into field decisions.",
+  },
+  dispatch: {
+    eyebrow: "Dispatch Intelligence",
+    title: "Calendar, QUO, and field packets.",
   },
   coverage: {
     eyebrow: "Observed proof",
@@ -433,6 +443,7 @@ function showView(id, options = {}) {
   if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
   if (id === "metka-bridge" && !latestGoogleWorkspace) loadGoogleWorkspace({ quiet: true });
   if (id === "metka-bridge") loadServiceIntake({ quiet: true });
+  if (id === "dispatch" && !latestDispatchIntelligence) loadDispatchIntelligence();
   if (id === "settings") {
     loadStorageStatus({ quiet: true });
     loadGoogleWorkspace({ quiet: true });
@@ -6227,6 +6238,7 @@ async function syncGoogleCalendarPreview() {
     latestGoogleWorkspace = payload.google;
     renderGoogleWorkspace(payload.google);
     latestWorkspaceBrief = null;
+    latestDispatchIntelligence = null;
     await loadWorkspaceBrief();
     const events = payload.events || [];
     if (googleCalendarResult) {
@@ -6249,6 +6261,7 @@ async function syncGoogleCalendarPreview() {
         : `<article class="assistant-card"><strong>No upcoming calendar jobs</strong><p>No events were found for the next ${escapeHtml(days)} days.</p></article>`;
     }
     if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar preview loaded: ${events.length} event${events.length === 1 ? "" : "s"}.`;
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar sync failed: ${error.message}`;
     if (googleCalendarResult) googleCalendarResult.innerHTML = `<article class="assistant-card"><strong>Calendar unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
@@ -6284,6 +6297,7 @@ async function syncGoogleSheetToBridge() {
     latestCoverageDashboard = null;
     latestProofVault = null;
     latestReferenceList = null;
+    latestDispatchIntelligence = null;
     await Promise.allSettled([loadCoverageDashboard(), loadJobLoadout(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
     const imported = payload.importedSheets || [];
     if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = `Google Sheet synced: ${imported.length} tab${imported.length === 1 ? "" : "s"}.`;
@@ -6353,7 +6367,9 @@ async function scheduleJobFromStart() {
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
     quickScheduleJobForm.reset();
     latestWorkspaceBrief = null;
+    latestDispatchIntelligence = null;
     await loadWorkspaceBrief();
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     setStartJobStatus(`Schedule failed: ${error.message}`, "warn");
   }
@@ -6439,8 +6455,256 @@ async function importServiceIntake() {
     if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Imported ${payload.added || 0}; updated ${payload.updated || 0}; skipped ${payload.skipped || 0}.`;
     serviceIntakeImportForm.elements.rawText.value = "";
     latestReferenceList = null;
+    latestDispatchIntelligence = null;
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Intake import failed: ${error.message}`;
+  }
+}
+
+function dispatchFormPayload(overrides = {}) {
+  const data = dispatchIntelligenceForm ? new FormData(dispatchIntelligenceForm) : new FormData();
+  const days = Math.max(1, Math.min(90, Number(data.get("days") || overrides.days || 14)));
+  const q = cleanInput(overrides.q || data.get("query") || "");
+  return {
+    days,
+    q,
+    id: cleanInput(overrides.id || ""),
+    syncCalendar: Boolean(overrides.syncCalendar),
+    limit: 40,
+  };
+}
+
+function dispatchSourceBadge(source = "") {
+  if (source === "google-calendar") return "Calendar";
+  if (source === "service-intake") return "QUO";
+  if (source === "timlock-schedule") return "TimLock";
+  return "Dispatch";
+}
+
+function dispatchPacketTone(percent = 0) {
+  const value = Number(percent || 0);
+  if (value >= 88) return "high";
+  if (value >= 70) return "good";
+  if (value >= 52) return "verify";
+  return "low";
+}
+
+function dispatchItemTitle(item = {}) {
+  return cleanInput(item.vehicleLabel || item.title || item.service || item.vin || "Dispatch item");
+}
+
+function dispatchItemQuery(item = {}) {
+  return cleanInput([item.vin, item.vehicleLabel, item.title, item.service, item.customer].filter(Boolean).join(" "));
+}
+
+function renderDispatchQueueItem(item = {}, selectedId = "") {
+  const active = item.id === selectedId;
+  const when = item.start ? formatWorkspaceDate(item.start) : "Unscheduled";
+  const meta = [when, item.customer, item.location].filter(Boolean).join(" | ");
+  return `
+    <button class="dispatch-queue-card ${active ? "active" : ""}" type="button" data-dispatch-select="${escapeHtml(item.id)}">
+      <span>${escapeHtml(dispatchSourceBadge(item.source))}</span>
+      <strong>${escapeHtml(dispatchItemTitle(item))}</strong>
+      <small>${escapeHtml(meta || item.service || "Review job")}</small>
+      ${item.vin ? `<em>${escapeHtml(item.vin)}</em>` : ""}
+    </button>
+  `;
+}
+
+function renderDispatchChoice(label, value, fallback = "Verify") {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || fallback)}</strong>
+    </article>
+  `;
+}
+
+function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
+  if (!selected?.id || !packet) {
+    return `
+      <section class="dispatch-packet-card empty">
+        <p class="eyebrow">AI packet</p>
+        <h3>No dispatch item selected</h3>
+        <p>Sync Google Calendar, import QUO/service jobs, or create a TimLock schedule from the start screen.</p>
+      </section>
+    `;
+  }
+  const confidence = Number(packet.confidencePercent || 0);
+  const tone = dispatchPacketTone(confidence);
+  const next = payload.next || [];
+  const canWriteCalendar = selected.hasCalendarEvent || selected.calendarEventId || selected.source === "google-calendar";
+  const canPromote = selected.source === "service-intake" || (selected.source === "timlock-schedule" && !selected.hasCalendarEvent);
+  return `
+    <section class="dispatch-packet-card ${escapeHtml(tone)}">
+      <div class="dispatch-packet-hero">
+        <div>
+          <p class="eyebrow">AI Dispatch Packet</p>
+          <h3>${escapeHtml(packet.title || dispatchItemTitle(selected))}</h3>
+          <p>${escapeHtml([selected.customer, selected.phone, selected.location, selected.vin].filter(Boolean).join(" | "))}</p>
+        </div>
+        <strong><span>${escapeHtml(confidence || 0)}%</span><small>${escapeHtml(packet.confidenceLabel || "Packet")}</small></strong>
+      </div>
+      <section class="dispatch-packet-grid">
+        ${renderDispatchChoice("Key", packet.primary)}
+        ${renderDispatchChoice("Backup", packet.backup)}
+        ${renderDispatchChoice("Programmer", packet.programmer)}
+        ${renderDispatchChoice("Lishi", packet.lishi)}
+      </section>
+      <section class="dispatch-packet-columns">
+        <article>
+          <span>Checklist</span>
+          ${(packet.checklist || []).length ? `<ol>${packet.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Open What To Bring for the full field kit.</p>`}
+        </article>
+        <article>
+          <span>Next</span>
+          ${next.length ? `<ol>${next.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Verify authorization, perform the work, and save proof.</p>`}
+        </article>
+      </section>
+      <div class="dispatch-action-bar">
+        <button class="primary-action small" type="button" data-dispatch-action="loadout" data-dispatch-id="${escapeHtml(selected.id)}">What To Bring</button>
+        <button class="secondary-action small" type="button" data-dispatch-action="workbench" data-dispatch-id="${escapeHtml(selected.id)}">Job Packet</button>
+        ${canPromote ? `<button class="secondary-action small" type="button" data-owner-only data-dispatch-action="promote" data-dispatch-id="${escapeHtml(selected.id)}">Add To Calendar</button>` : ""}
+        ${canWriteCalendar ? `<button class="secondary-action small" type="button" data-owner-only data-dispatch-action="writeback" data-dispatch-id="${escapeHtml(selected.id)}">Write AI Note</button>` : ""}
+        <button class="secondary-action small" type="button" data-owner-only data-dispatch-action="drive" data-dispatch-id="${escapeHtml(selected.id)}">Drive Folder</button>
+        ${selected.calendarHtmlLink ? `<button class="secondary-action small" type="button" data-dispatch-action="calendar" data-dispatch-id="${escapeHtml(selected.id)}">Open Calendar</button>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderDispatchIntelligence(payload = {}) {
+  if (!dispatchIntelligenceResult) return;
+  latestDispatchIntelligence = payload;
+  const queue = payload.queue || [];
+  const selected = payload.selected || queue.find((item) => item.id === payload.summary?.selectedId) || {};
+  const sources = payload.sources || {};
+  dispatchIntelligenceResult.innerHTML = `
+    <section class="dispatch-summary-grid">
+      <article class="metric"><span>Queue</span><strong>${escapeHtml(payload.summary?.total || queue.length || 0)}</strong><p>${escapeHtml(`${payload.days || 14} day window`)}</p></article>
+      <article class="metric"><span>Calendar</span><strong>${escapeHtml(sources.calendar || 0)}</strong><p>${escapeHtml(payload.google?.connected ? "Google connected" : "Connect Google")}</p></article>
+      <article class="metric"><span>QUO</span><strong>${escapeHtml(sources.intake || 0)}</strong><p>Service intake</p></article>
+      <article class="metric"><span>TimLock</span><strong>${escapeHtml(sources.scheduled || 0)}</strong><p>Scheduled jobs</p></article>
+    </section>
+    <section class="dispatch-workspace">
+      <div class="dispatch-queue-panel">
+        <div class="panel-header tight">
+          <div>
+            <p class="eyebrow">${escapeHtml(queue.length)} job${queue.length === 1 ? "" : "s"}</p>
+            <h3>Dispatch Queue</h3>
+          </div>
+        </div>
+        <div class="dispatch-queue-list">
+          ${queue.length ? queue.map((item) => renderDispatchQueueItem(item, selected.id)).join("") : `<article class="assistant-card"><strong>No jobs in queue</strong><p>Sync Calendar, import QUO, or schedule a job from the start screen.</p></article>`}
+        </div>
+      </div>
+      ${renderDispatchPacket(payload.packet, selected, payload)}
+    </section>
+  `;
+  updateAiContextUi();
+}
+
+async function loadDispatchIntelligence(options = {}) {
+  if (!dispatchIntelligenceResult) return null;
+  const payload = dispatchFormPayload(options);
+  try {
+    if (dispatchIntelligenceStatus && !options.quiet) {
+      dispatchIntelligenceStatus.textContent = payload.syncCalendar ? "Syncing Google Calendar and building dispatch packets..." : "Building Dispatch Intelligence...";
+    }
+    const result = await api("/api/dispatch-intelligence", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: payload.syncCalendar ? 65000 : 28000,
+      retryOnTimeout: true,
+      noStatus: true,
+    });
+    renderDispatchIntelligence(result);
+    latestGoogleWorkspace = result.google || latestGoogleWorkspace;
+    if (dispatchIntelligenceStatus && !options.quiet) {
+      const count = result.summary?.total || result.queue?.length || 0;
+      dispatchIntelligenceStatus.textContent = `Dispatch ready: ${count} job${count === 1 ? "" : "s"} across Calendar, QUO, and TimLock.`;
+    }
+    return result;
+  } catch (error) {
+    if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = `Dispatch unavailable: ${error.message}`;
+    dispatchIntelligenceResult.innerHTML = `<article class="assistant-card"><strong>Dispatch unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+function selectedDispatchItem(id = "") {
+  const cleanId = cleanInput(id);
+  return (
+    (latestDispatchIntelligence?.queue || []).find((item) => item.id === cleanId) ||
+    (latestDispatchIntelligence?.selected?.id === cleanId ? latestDispatchIntelligence.selected : null) ||
+    latestDispatchIntelligence?.selected ||
+    {}
+  );
+}
+
+async function dispatchAction(id = "", action = "", button = null) {
+  const item = selectedDispatchItem(id);
+  const query = dispatchItemQuery(item);
+  if (action === "loadout") {
+    showView("loadout");
+    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query;
+    loadJobLoadout(query);
+    return;
+  }
+  if (action === "workbench") {
+    showView("workbench");
+    if (workbenchForm) workbenchForm.elements.workbenchQuery.value = query;
+    loadJobWorkbench(query);
+    return;
+  }
+  if (action === "calendar") {
+    if (item.calendarHtmlLink) window.open(item.calendarHtmlLink, "_blank", "noopener");
+    return;
+  }
+  const endpointByAction = {
+    promote: "/api/dispatch-intelligence/promote",
+    writeback: "/api/dispatch-intelligence/writeback",
+    drive: "/api/dispatch-intelligence/drive-folder",
+  };
+  const endpoint = endpointByAction[action];
+  if (!endpoint) return;
+  const originalText = button?.textContent || "";
+  try {
+    if (button) {
+      button.disabled = true;
+      button.textContent = action === "drive" ? "Creating..." : action === "writeback" ? "Writing..." : "Adding...";
+    }
+    if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = "Updating Google Workspace...";
+    const result = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ id: item.id || id }),
+      timeoutMs: 45000,
+      noStatus: true,
+    });
+    if (result.google) latestGoogleWorkspace = result.google;
+    latestWorkspaceBrief = null;
+    latestDispatchIntelligence = null;
+    await Promise.allSettled([loadWorkspaceBrief(), loadDispatchIntelligence({ id: item.id || id, quiet: true })]);
+    if (dispatchIntelligenceStatus) {
+      dispatchIntelligenceStatus.textContent =
+        action === "drive"
+          ? `Drive folder ready${result.folder?.webViewLink ? "." : "."}`
+          : action === "writeback"
+            ? "AI packet written to Google Calendar."
+            : result.event?.htmlLink
+              ? "Calendar event created."
+              : result.message || "Dispatch item updated.";
+    }
+    if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
+    if (result.folder?.webViewLink) window.open(result.folder.webViewLink, "_blank", "noopener");
+  } catch (error) {
+    if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = `${action} failed: ${error.message}`;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
 }
 
@@ -12149,6 +12413,23 @@ serverBackupImportInput?.addEventListener("change", async () => {
 connectGoogleWorkspaceButton?.addEventListener("click", connectGoogleWorkspace);
 disconnectGoogleWorkspaceButton?.addEventListener("click", disconnectGoogleWorkspace);
 syncGoogleCalendarButton?.addEventListener("click", syncGoogleCalendarPreview);
+dispatchIntelligenceForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  loadDispatchIntelligence();
+});
+refreshDispatchIntelligenceButton?.addEventListener("click", () => loadDispatchIntelligence());
+syncDispatchCalendarButton?.addEventListener("click", () => loadDispatchIntelligence({ syncCalendar: true }));
+dispatchIntelligenceResult?.addEventListener("click", (event) => {
+  const selectButton = event.target.closest("[data-dispatch-select]");
+  if (selectButton) {
+    loadDispatchIntelligence({ id: selectButton.dataset.dispatchSelect });
+    return;
+  }
+  const actionButton = event.target.closest("[data-dispatch-action]");
+  if (actionButton) {
+    dispatchAction(actionButton.dataset.dispatchId, actionButton.dataset.dispatchAction, actionButton);
+  }
+});
 codeDeskForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   runCodeDesk();

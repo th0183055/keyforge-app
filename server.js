@@ -5259,6 +5259,339 @@ async function createGoogleDriveJobFolder(request, store, body = {}) {
   return { folder: workspace.drive.jobFolders.at(-1), google: googleWorkspacePublicStatus(store, request) };
 }
 
+function dispatchVehicleFromRecord(record = {}, text = "") {
+  const direct = {
+    year: vehicleOptionYear(record.year || record.vehicle?.year),
+    make: vehicleOptionMakeLabel(record.make || record.vehicle?.make),
+    model: vehicleOptionModelLabel(record.model || record.vehicle?.model),
+    trim: cleanString(record.trim || record.vehicle?.trim),
+  };
+  if (direct.year || direct.make || direct.model) return direct;
+  const inferred = coverageVehicleForJob({ title: text, vehicle: text, vin: record.vin });
+  return {
+    year: vehicleOptionYear(inferred.year),
+    make: vehicleOptionMakeLabel(inferred.make),
+    model: vehicleOptionModelLabel(inferred.model),
+    trim: cleanString(inferred.trim),
+  };
+}
+
+function dispatchVehicleLabel(vehicle = {}, fallback = "") {
+  return uniqueCleanValues([vehicle.year, vehicle.make, vehicle.model, vehicle.trim]).join(" ") || cleanString(fallback);
+}
+
+function dispatchItemSearchText(item = {}) {
+  return uniqueCleanValues([
+    item.vin,
+    item.vehicleLabel,
+    item.service,
+    item.customer,
+    item.location,
+    item.title,
+    item.notes,
+  ]).join(" ");
+}
+
+function dispatchDateValue(value) {
+  const parsed = Date.parse(cleanString(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dispatchWindowIncludes(item = {}, days = 14) {
+  const when = dispatchDateValue(item.start || item.scheduledAt || item.createdAt || item.importedAt);
+  if (!when) return true;
+  const now = Date.now();
+  const max = now + Math.max(1, Math.min(90, Number(days) || 14)) * 24 * 60 * 60 * 1000;
+  return when >= now - 24 * 60 * 60 * 1000 && when <= max;
+}
+
+function dispatchItemFromCalendarEvent(event = {}) {
+  const text = uniqueCleanValues([event.summary, event.description, event.location]).join(" ");
+  const vin = normalizeVinCandidate(event.vin) || extractVinsFromText(text)[0] || "";
+  const vehicle = dispatchVehicleFromRecord({ vin }, text);
+  const title = cleanString(event.summary || dispatchVehicleLabel(vehicle, vin) || "Google Calendar job");
+  return {
+    id: `calendar:${cleanString(event.id) || metkaStableId("calendar", [title, event.start, event.location])}`,
+    source: "google-calendar",
+    sourceLabel: "Google Calendar",
+    sourceId: cleanString(event.id),
+    calendarEventId: cleanString(event.id),
+    calendarHtmlLink: cleanString(event.htmlLink),
+    title,
+    customer: "",
+    phone: "",
+    service: cleanString(event.summary || "Calendar job"),
+    location: cleanString(event.location),
+    notes: cleanString(event.description),
+    start: cleanString(event.start),
+    end: cleanString(event.end),
+    vin,
+    vehicle,
+    vehicleLabel: dispatchVehicleLabel(vehicle, title),
+    status: cleanString(event.status || "calendar"),
+    raw: event,
+  };
+}
+
+function dispatchItemFromScheduledJob(job = {}) {
+  const text = uniqueCleanValues([job.title, job.customer, job.service, job.notes, job.vehicle, job.location, job.vin]).join(" ");
+  const vin = normalizeVinCandidate(job.vin) || extractVinsFromText(text)[0] || "";
+  const vehicle = dispatchVehicleFromRecord({ ...job, vin }, text);
+  const title = cleanString(job.title || uniqueCleanValues([job.service, dispatchVehicleLabel(vehicle), job.customer]).join(" ") || "Scheduled job");
+  return {
+    id: `scheduled:${cleanString(job.id) || metkaStableId("scheduled", [title, job.start, job.customer, vin])}`,
+    source: "timlock-schedule",
+    sourceLabel: "TimLock Schedule",
+    sourceId: cleanString(job.id),
+    calendarEventId: cleanString(job.calendarEventId),
+    calendarHtmlLink: cleanString(job.calendarHtmlLink),
+    title,
+    customer: cleanString(job.customer),
+    phone: cleanString(job.phone),
+    service: cleanString(job.service || "Locksmith service"),
+    location: cleanString(job.location),
+    notes: cleanString(job.notes),
+    start: cleanString(job.start || job.scheduledAt || job.schedule),
+    end: cleanString(job.end),
+    vin,
+    vehicle,
+    vehicleLabel: dispatchVehicleLabel(vehicle, title),
+    status: cleanString(job.status || "scheduled"),
+    raw: job,
+  };
+}
+
+function dispatchItemFromServiceIntake(record = {}) {
+  const text = uniqueCleanValues([record.title, record.customer, record.service, record.notes, record.vehicle, record.location, record.vin]).join(" ");
+  const vin = normalizeVinCandidate(record.vin) || extractVinsFromText(text)[0] || "";
+  const vehicle = dispatchVehicleFromRecord({ ...record, vin }, text);
+  const title = cleanString(record.title || uniqueCleanValues([record.service, dispatchVehicleLabel(vehicle), record.customer]).join(" ") || "Service intake");
+  return {
+    id: `intake:${cleanString(record.id) || metkaStableId("intake", [title, record.customer, record.phone, record.scheduledAt, vin])}`,
+    source: "service-intake",
+    sourceLabel: cleanString(record.source || "QUO"),
+    sourceId: cleanString(record.id),
+    title,
+    customer: cleanString(record.customer),
+    phone: cleanString(record.phone),
+    service: cleanString(record.service || "Locksmith service"),
+    location: cleanString(record.location),
+    notes: cleanString(record.notes),
+    start: cleanString(record.scheduledAt),
+    vin,
+    vehicle,
+    vehicleLabel: dispatchVehicleLabel(vehicle, title),
+    status: "intake",
+    raw: record,
+  };
+}
+
+function dispatchItemsFromStore(store = {}, days = 14) {
+  const google = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const intake = normalizeServiceIntakeStore(store.serviceIntake);
+  const items = [
+    ...(google.calendar.events || []).map(dispatchItemFromCalendarEvent),
+    ...(store.scheduledJobs || []).map(dispatchItemFromScheduledJob),
+    ...(intake.records || []).map(dispatchItemFromServiceIntake),
+  ].filter((item) => dispatchWindowIncludes(item, days));
+  const deduped = new Map();
+  for (const item of items) {
+    const signature = compactToken(uniqueCleanValues([item.vin, item.start, item.customer, item.phone, item.location, item.title]).join("|")) || item.id;
+    const existing = deduped.get(signature);
+    if (!existing || dispatchDateValue(item.start) > dispatchDateValue(existing.start)) deduped.set(signature, item);
+  }
+  return Array.from(deduped.values()).sort((a, b) => {
+    const dateA = dispatchDateValue(a.start || a.importedAt);
+    const dateB = dispatchDateValue(b.start || b.importedAt);
+    if (dateA || dateB) return (dateA || Number.MAX_SAFE_INTEGER) - (dateB || Number.MAX_SAFE_INTEGER);
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function dispatchItemById(store = {}, id = "", days = 90) {
+  return dispatchItemsFromStore(store, days).find((item) => item.id === id || item.sourceId === id) || null;
+}
+
+function dispatchLoadoutBody(item = {}) {
+  const q = dispatchItemSearchText(item);
+  return {
+    q,
+    query: q,
+    vin: item.vin,
+    vehicle: item.vehicle,
+  };
+}
+
+function dispatchPacketSummary(item = {}, loadout = {}) {
+  const packet = loadout.fieldPacket || {};
+  const choiceById = (id) => (packet.choices || []).find((choice) => choice.id === id) || {};
+  const choiceText = (choice) => cleanString(choice?.label || choice?.value || "");
+  return {
+    title: packet.title || loadout.title || item.title,
+    confidencePercent: Number(packet.confidencePercent || loadout.confidencePercent || 0),
+    confidenceLabel: cleanString(packet.confidenceLabel || loadout.confidenceLabel || "Confidence"),
+    primary: choiceText(packet.primary || choiceById("primary")),
+    backup: choiceText(packet.backup || choiceById("backup")),
+    programmer: choiceText(packet.programmer || choiceById("programmer")),
+    lishi: choiceText(packet.lishi || choiceById("lishi")),
+    proof: choiceText(packet.proof || choiceById("proof")),
+    checklist: (packet.checklist || []).slice(0, 6),
+    gaps: (packet.gaps || []).slice(0, 4),
+  };
+}
+
+function dispatchPacketNote(item = {}, loadout = {}) {
+  const summary = dispatchPacketSummary(item, loadout);
+  return uniqueCleanValues([
+    "TimLock Dispatch Packet",
+    summary.title,
+    `Confidence: ${summary.confidencePercent}% ${summary.confidenceLabel}`,
+    summary.primary ? `Key: ${summary.primary}` : "",
+    summary.backup ? `Backup: ${summary.backup}` : "",
+    summary.programmer ? `Programmer: ${summary.programmer}` : "",
+    summary.lishi ? `Lishi: ${summary.lishi}` : "",
+    summary.proof ? `Proof: ${summary.proof}` : "",
+    ...(summary.checklist || []).map((step) => `- ${step}`),
+  ]).join("\n");
+}
+
+async function buildDispatchIntelligence(request, body = {}, store = {}, options = {}) {
+  const days = Math.max(1, Math.min(90, Number(body.days || body.windowDays || 14)));
+  if (body.syncCalendar && options.canSyncCalendar && googleWorkspaceConnected(store.googleWorkspace)) {
+    await syncGoogleCalendarEvents(request, store, { days });
+  }
+  const requestedId = cleanString(body.id || body.dispatchId || body.itemId);
+  const requestedQuery = cleanString(body.q || body.query);
+  const normalizedQuery = normalizeVehicleText(requestedQuery);
+  const sourceItems = dispatchItemsFromStore(store, days);
+  const items = sourceItems
+    .filter((item) => !normalizedQuery || item.id === requestedId || item.sourceId === requestedId || normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizedQuery))
+    .slice(0, Math.max(1, Math.min(80, Number(body.limit || 30))));
+  const selected =
+    (requestedId && items.find((item) => item.id === requestedId || item.sourceId === requestedId)) ||
+    (requestedQuery && items.find((item) => normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizeVehicleText(requestedQuery)))) ||
+    items[0] ||
+    null;
+  const loadout = selected ? await buildJobLoadout(dispatchLoadoutBody(selected), store) : null;
+  const sources = {
+    calendar: items.filter((item) => item.source === "google-calendar").length,
+    intake: items.filter((item) => item.source === "service-intake").length,
+    scheduled: items.filter((item) => item.source === "timlock-schedule").length,
+  };
+  return {
+    generatedAt: new Date().toISOString(),
+    days,
+    google: googleWorkspacePublicStatus(store, request),
+    sources,
+    summary: {
+      total: items.length,
+      connectedCalendar: googleWorkspaceConnected(store.googleWorkspace),
+      selectedId: selected?.id || "",
+      readyPackets: selected && loadout ? 1 : 0,
+    },
+    queue: items.map((item) => ({
+      id: item.id,
+      source: item.source,
+      sourceLabel: item.sourceLabel,
+      sourceId: item.sourceId,
+      title: item.title,
+      customer: item.customer,
+      phone: item.phone,
+      service: item.service,
+      location: item.location,
+      start: item.start,
+      vin: item.vin,
+      vehicleLabel: item.vehicleLabel,
+      status: item.status,
+      hasCalendarEvent: Boolean(item.calendarEventId || item.source === "google-calendar"),
+      calendarHtmlLink: item.calendarHtmlLink,
+    })),
+    selected,
+    packet: selected && loadout ? dispatchPacketSummary(selected, loadout) : null,
+    loadout,
+    next: selected
+      ? uniqueCleanValues([
+          selected.source === "service-intake" ? "Promote QUO intake to Calendar" : "",
+          selected.calendarEventId || selected.source === "google-calendar" ? "Write TimLock note back to Calendar" : "",
+          "Create Drive job folder",
+          "Save final proof after completion",
+        ])
+      : ["Sync Google Calendar or import QUO jobs."],
+  };
+}
+
+async function promoteDispatchItemToCalendar(request, store, body = {}) {
+  const item = dispatchItemById(store, cleanString(body.id || body.itemId || body.dispatchId));
+  if (!item) throw new Error("Dispatch item not found.");
+  if (item.source === "google-calendar") return { ok: true, job: null, event: { id: item.calendarEventId, htmlLink: item.calendarHtmlLink }, message: "Already a Google Calendar event.", google: googleWorkspacePublicStatus(store, request) };
+  return createScheduledJob(request, store, {
+    source: `Dispatch Intelligence / ${item.sourceLabel}`,
+    id: item.source === "timlock-schedule" ? item.sourceId : "",
+    start: item.start,
+    end: item.end,
+    customer: item.customer,
+    phone: item.phone,
+    location: item.location,
+    notes: item.notes,
+    vin: item.vin,
+    vehicle: item.vehicle,
+    year: item.vehicle?.year,
+    make: item.vehicle?.make,
+    model: item.vehicle?.model,
+    service: item.service,
+    title: item.title,
+  });
+}
+
+async function writeDispatchPacketToCalendar(request, store, body = {}) {
+  const item = dispatchItemById(store, cleanString(body.id || body.itemId || body.dispatchId));
+  if (!item) throw new Error("Dispatch item not found.");
+  const eventId = item.calendarEventId || (item.source === "google-calendar" ? item.sourceId : "");
+  if (!eventId) throw new Error("This dispatch item is not connected to a Google Calendar event yet.");
+  const config = googleClientConfig(request);
+  const loadout = await buildJobLoadout(dispatchLoadoutBody(item), store);
+  const note = cleanString(body.note) || dispatchPacketNote(item, loadout);
+  const existingDescription = cleanString(item.notes);
+  const marker = "----- TimLock Dispatch Packet -----";
+  const descriptionBase = existingDescription.split(marker)[0].trim();
+  const description = uniqueCleanValues([descriptionBase, marker, note]).join("\n\n").slice(0, 8000);
+  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const updated = await googleApiJson(store, request, apiUrl, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description }),
+  });
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  workspace.calendar.events = (workspace.calendar.events || []).map((event) =>
+    cleanString(event.id) === eventId ? googleCalendarEventPublic(updated) : event,
+  );
+  workspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = workspace;
+  await writeStore(store);
+  return { ok: true, event: googleCalendarEventPublic(updated), note, google: googleWorkspacePublicStatus(store, request), packet: dispatchPacketSummary(item, loadout) };
+}
+
+async function createDispatchDriveFolder(request, store, body = {}) {
+  const item = dispatchItemById(store, cleanString(body.id || body.itemId || body.dispatchId));
+  if (!item) throw new Error("Dispatch item not found.");
+  const loadout = await buildJobLoadout(dispatchLoadoutBody(item), store);
+  const folderName = uniqueCleanValues([
+    item.start ? new Date(item.start).toISOString().slice(0, 10) : "",
+    item.customer,
+    item.vehicleLabel,
+    item.vin,
+    item.service,
+  ]).join(" - ");
+  const result = await createGoogleDriveJobFolder(request, store, {
+    name: folderName,
+    jobId: item.id,
+    customer: item.customer,
+    vin: item.vin,
+    vehicle: item.vehicle,
+  });
+  return { ...result, packet: dispatchPacketSummary(item, loadout) };
+}
+
 async function buildWorkspaceBrief(store = {}) {
   const metka = buildMetkaBridgeStatus(store);
   const google = googleWorkspacePublicStatus(store);
@@ -13517,6 +13850,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
   ];
   if (ownerOnlyPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return true;
   if (pathname === "/api/mission-control" || pathname === "/api/training-center" || pathname === "/api/training-center/teach") return true;
+  if (pathname.startsWith("/api/dispatch-intelligence/") && writeMethod) return true;
   if (pathname === "/api/code-desk/library" || pathname === "/api/code-desk/learn") return true;
   if (pathname === "/api/jobs" || pathname.startsWith("/api/jobs/")) return true;
   if (pathname === "/api/jobs/sync" || pathname === "/api/part-outcomes" || pathname === "/api/worked-jobs/import") return true;
@@ -13705,6 +14039,59 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/schedule-jobs") {
     sendJson(response, 200, { jobs: (store.scheduledJobs || []).slice(0, 200), google: googleWorkspacePublicStatus(store, request) });
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/dispatch-intelligence") {
+    try {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const body = request.method === "POST" ? await readJsonBody(request) : {};
+      sendJson(
+        response,
+        200,
+        await buildDispatchIntelligence(
+          request,
+          {
+            ...body,
+            days: body.days || url.searchParams.get("days"),
+            id: body.id || url.searchParams.get("id"),
+            q: body.q || url.searchParams.get("q"),
+            syncCalendar: body.syncCalendar || url.searchParams.get("syncCalendar") === "true",
+          },
+          store,
+          { canSyncCalendar: auth.role === "owner" },
+        ),
+      );
+    } catch (error) {
+      sendError(response, 400, `Dispatch Intelligence failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/dispatch-intelligence/promote") {
+    try {
+      sendJson(response, 201, await promoteDispatchItemToCalendar(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Dispatch promote failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/dispatch-intelligence/writeback") {
+    try {
+      sendJson(response, 200, await writeDispatchPacketToCalendar(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Dispatch writeback failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/dispatch-intelligence/drive-folder") {
+    try {
+      sendJson(response, 201, await createDispatchDriveFolder(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Dispatch Drive folder failed: ${error.message}`);
+    }
     return;
   }
 

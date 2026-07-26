@@ -60,6 +60,10 @@
             <span>Start Job</span>
             <small>VIN / YMM first</small>
           </button>
+          <button class="nav-item" data-view="dispatch">
+            <span>Dispatch</span>
+            <small>Calendar + QUO</small>
+          </button>
           <button class="nav-item" data-view="workbench">
             <span>Job Packet</span>
             <small>One field answer</small>
@@ -171,6 +175,7 @@
                 </div>
               </div>
               <div class="start-menu-grid">
+                <button type="button" data-view-target="dispatch"><span>Dispatch</span><small>Calendar + QUO</small></button>
                 <button type="button" data-view-target="workbench"><span>Job Packet</span><small>One answer</small></button>
                 <button type="button" data-view-target="loadout"><span>What To Bring</span><small>Field kit</small></button>
                 <button type="button" data-view-target="proof-vault"><span>Proof Center</span><small>History + save</small></button>
@@ -318,6 +323,39 @@
           </form>
           <div class="form-status" id="globalSearchStatus"></div>
           <div class="global-search-result" id="globalSearchResult" hidden></div>
+        </section>
+
+        <section class="view" id="dispatch">
+          <section class="panel wide dispatch-intelligence-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Dispatch Intelligence</p>
+                <h3>Google, QUO, and AI packets in one queue</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="refreshDispatchIntelligence">Refresh</button>
+                <button class="primary-action small" type="button" id="syncDispatchCalendar" data-owner-only>Sync Calendar</button>
+              </div>
+            </div>
+            <form class="field-os-form compact dispatch-filter-form" id="dispatchIntelligenceForm">
+              <label>
+                Window
+                <input name="days" type="number" min="1" max="90" value="14" />
+              </label>
+              <label>
+                Search
+                <input name="query" placeholder="Customer, VIN, vehicle, service, address" autocomplete="off" />
+              </label>
+              <button class="secondary-action" type="submit">Build Queue</button>
+            </form>
+            <div class="form-status" id="dispatchIntelligenceStatus">Calendar and QUO dispatch brain is ready.</div>
+            <div class="dispatch-intelligence-result" id="dispatchIntelligenceResult">
+              <article class="assistant-card">
+                <strong>Dispatch queue waiting</strong>
+                <p>Sync Google Calendar or import QUO jobs, then TimLock will build one field packet per dispatch item.</p>
+              </article>
+            </div>
+          </section>
         </section>
 
         <section class="view" id="mission-control">
