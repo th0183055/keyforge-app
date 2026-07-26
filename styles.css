@@ -10868,3 +10868,425 @@ body.is-start-screen #startJobStatus[data-tone="warn"] {
     min-width: 0;
   }
 }
+
+/* Unified red/black app skin beyond the launch screen. */
+body:not(.is-start-screen) {
+  --ink: #f8fafc;
+  --muted: #b7beca;
+  --line: rgba(255, 255, 255, 0.13);
+  --panel: rgba(13, 15, 20, 0.96);
+  --soft: rgba(255, 255, 255, 0.055);
+  --accent: #e02430;
+  --accent-dark: #8f0d17;
+  --gold: #ffb3b8;
+  --danger: #ff5964;
+  --charcoal: #07080b;
+  --shadow: 0 22px 52px rgba(0, 0, 0, 0.36);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(224, 36, 48, 0.2), transparent 30rem),
+    radial-gradient(circle at 92% 8%, rgba(255, 255, 255, 0.1), transparent 24rem),
+    linear-gradient(135deg, #050607 0%, #12151b 52%, #27050a 100%);
+  color: var(--ink);
+}
+
+body:not(.is-start-screen) .app-shell {
+  background: transparent;
+}
+
+body:not(.is-start-screen) main {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0)),
+    transparent;
+  color: var(--ink);
+}
+
+body:not(.is-start-screen) .sidebar {
+  background:
+    linear-gradient(180deg, rgba(5, 6, 8, 0.98), rgba(17, 20, 27, 0.98) 58%, rgba(47, 5, 11, 0.98)),
+    #07080b;
+  border-right-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 12px 0 42px rgba(0, 0, 0, 0.25);
+}
+
+body:not(.is-start-screen) .brand-mark {
+  border-color: rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(135deg, #e02430, #07080b 68%),
+    #111318;
+  box-shadow: 0 14px 30px rgba(224, 36, 48, 0.18);
+}
+
+body:not(.is-start-screen) .brand .eyebrow,
+body:not(.is-start-screen) .eyebrow,
+body:not(.is-start-screen) .topbar .eyebrow,
+body:not(.is-start-screen) .nav-section-label span,
+body:not(.is-start-screen) .nav-group summary span {
+  color: #ffb3b8;
+}
+
+body:not(.is-start-screen) .nav-item {
+  border: 1px solid transparent;
+  color: rgba(248, 250, 252, 0.82);
+}
+
+body:not(.is-start-screen) .nav-item:hover {
+  border-color: rgba(224, 36, 48, 0.24);
+  background: rgba(224, 36, 48, 0.1);
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .nav-item.active {
+  border-color: rgba(255, 255, 255, 0.14);
+  border-left: 4px solid #e02430;
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.2), rgba(255, 255, 255, 0.035)),
+    #0c0e13;
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .nav-item small,
+body:not(.is-start-screen) .nav-group summary small,
+body:not(.is-start-screen) .nav-section-label small {
+  color: rgba(248, 250, 252, 0.58);
+}
+
+body:not(.is-start-screen) .nav-group,
+body:not(.is-start-screen) .operator-panel {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+body:not(.is-start-screen) .topbar {
+  position: relative;
+  margin-bottom: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.18), rgba(255, 255, 255, 0.04) 48%, rgba(0, 0, 0, 0.22)),
+    rgba(10, 12, 16, 0.8);
+  color: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+body:not(.is-start-screen) .topbar::after {
+  position: absolute;
+  right: 18px;
+  bottom: -1px;
+  left: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, #e02430, transparent);
+  content: "";
+}
+
+body:not(.is-start-screen) .topbar h2,
+body:not(.is-start-screen) h2,
+body:not(.is-start-screen) h3,
+body:not(.is-start-screen) h4,
+body:not(.is-start-screen) strong {
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .app-status-banner span {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .app-status-banner.online span {
+  background: rgba(34, 197, 94, 0.14);
+  color: #bff7cf;
+}
+
+body:not(.is-start-screen) .app-status-banner.busy span,
+body:not(.is-start-screen) .app-status-banner.degraded span,
+body:not(.is-start-screen) .app-status-banner.offline span {
+  background: rgba(224, 36, 48, 0.14);
+  color: #ffd6d9;
+}
+
+body:not(.is-start-screen) .primary-action,
+body:not(.is-start-screen) .scan-action,
+body:not(.is-start-screen) .code-action-button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, #e02430, #8f0d17),
+    #b3121d;
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(224, 36, 48, 0.2);
+}
+
+body:not(.is-start-screen) .primary-action:hover,
+body:not(.is-start-screen) .scan-action:hover,
+body:not(.is-start-screen) .code-action-button:hover {
+  background:
+    linear-gradient(135deg, #ff3140, #a5101b),
+    #d41624;
+}
+
+body:not(.is-start-screen) .secondary-action,
+body:not(.is-start-screen) .mode-toggle button,
+body:not(.is-start-screen) .ai-route-actions button,
+body:not(.is-start-screen) .ai-message-actions button,
+body:not(.is-start-screen) .ai-command-tools button,
+body:not(.is-start-screen) .global-result-open,
+body:not(.is-start-screen) .job-row button,
+body:not(.is-start-screen) .source-open-button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, #171a21, #07080b),
+    #0d0f14;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+body:not(.is-start-screen) .secondary-action:hover,
+body:not(.is-start-screen) .mode-toggle button:hover,
+body:not(.is-start-screen) .ai-route-actions button:hover,
+body:not(.is-start-screen) .ai-message-actions button:hover,
+body:not(.is-start-screen) .ai-command-tools button:hover,
+body:not(.is-start-screen) .global-result-open:hover,
+body:not(.is-start-screen) .job-row button:hover,
+body:not(.is-start-screen) .source-open-button:hover {
+  border-color: rgba(224, 36, 48, 0.42);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.22), #101219),
+    #101219;
+}
+
+body:not(.is-start-screen) .mode-toggle button.active,
+body:not(.is-start-screen) .mode-toggle button[aria-pressed="true"] {
+  background: #ffffff;
+  color: #090a0d;
+}
+
+body:not(.is-start-screen) input,
+body:not(.is-start-screen) select,
+body:not(.is-start-screen) textarea {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #f9fafb;
+  color: #08090c;
+  caret-color: #e02430;
+}
+
+body:not(.is-start-screen) input:focus,
+body:not(.is-start-screen) select:focus,
+body:not(.is-start-screen) textarea:focus {
+  border-color: #e02430;
+  outline: 3px solid rgba(224, 36, 48, 0.24);
+}
+
+body:not(.is-start-screen) input::placeholder,
+body:not(.is-start-screen) textarea::placeholder {
+  color: #6b7280;
+}
+
+body:not(.is-start-screen) .panel,
+body:not(.is-start-screen) .metric,
+body:not(.is-start-screen) .assistant-card,
+body:not(.is-start-screen) .ai-route-card,
+body:not(.is-start-screen) .field-os-panel,
+body:not(.is-start-screen) .field-packet-panel,
+body:not(.is-start-screen) .global-result-card,
+body:not(.is-start-screen) .history-job-card,
+body:not(.is-start-screen) .history-reference-panel,
+body:not(.is-start-screen) .workbench-decision-panel,
+body:not(.is-start-screen) .code-source-panel,
+body:not(.is-start-screen) .reference-row-card,
+body:not(.is-start-screen) .loadout-card,
+body:not(.is-start-screen) .storage-sync-panel,
+body:not(.is-start-screen) .storage-status-panel,
+body:not(.is-start-screen) .storage-diagnostics-panel,
+body:not(.is-start-screen) .proof-migration-panel,
+body:not(.is-start-screen) .truth-check-panel,
+body:not(.is-start-screen) .bridge-flow-grid article,
+body:not(.is-start-screen) .bridge-sample-section,
+body:not(.is-start-screen) .ai-bench-panel,
+body:not(.is-start-screen) .ai-context-panel,
+body:not(.is-start-screen) .ai-opportunity-panel,
+body:not(.is-start-screen) .ai-commander-panel,
+body:not(.is-start-screen) .ai-commander-card,
+body:not(.is-start-screen) .ai-command-grid article,
+body:not(.is-start-screen) .ai-command-scorecards article,
+body:not(.is-start-screen) .ai-personality-strip,
+body:not(.is-start-screen) .ai-memory-metrics article,
+body:not(.is-start-screen) .ai-learning-strip,
+body:not(.is-start-screen) .ai-advisor-overview,
+body:not(.is-start-screen) .ai-opportunity-card,
+body:not(.is-start-screen) .ai-opportunity-list article,
+body:not(.is-start-screen) .ai-context-body article,
+body:not(.is-start-screen) .ai-alert-grid article,
+body:not(.is-start-screen) .ai-two-column article,
+body:not(.is-start-screen) .ai-route-plan article,
+body:not(.is-start-screen) .vehicle-card,
+body:not(.is-start-screen) .vehicle-reference-card,
+body:not(.is-start-screen) .key-choice,
+body:not(.is-start-screen) .part-choice,
+body:not(.is-start-screen) .programmer-choice,
+body:not(.is-start-screen) .job-row,
+body:not(.is-start-screen) .source-card,
+body:not(.is-start-screen) .source-card-row,
+body:not(.is-start-screen) .source-list article,
+body:not(.is-start-screen) .lookup-loading article {
+  border-color: rgba(255, 255, 255, 0.13);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02)),
+    rgba(12, 14, 19, 0.94);
+  color: #f8fafc;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+}
+
+body:not(.is-start-screen) .assistant-card,
+body:not(.is-start-screen) .metric,
+body:not(.is-start-screen) .global-result-card,
+body:not(.is-start-screen) .history-job-card,
+body:not(.is-start-screen) .reference-row-card,
+body:not(.is-start-screen) .loadout-card,
+body:not(.is-start-screen) .job-row {
+  border-radius: 8px;
+}
+
+body:not(.is-start-screen) .panel-header,
+body:not(.is-start-screen) .deep-search-head,
+body:not(.is-start-screen) .reference-head,
+body:not(.is-start-screen) .start-menu-head {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+body:not(.is-start-screen) .field-os-panel.ready,
+body:not(.is-start-screen) .ai-command-scorecards article.ready,
+body:not(.is-start-screen) .ai-score.ready {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+body:not(.is-start-screen) .field-os-panel.warn,
+body:not(.is-start-screen) .ai-command-scorecards article.warn,
+body:not(.is-start-screen) .ai-score.warn {
+  border-color: rgba(250, 204, 21, 0.38);
+  background: rgba(250, 204, 21, 0.1);
+}
+
+body:not(.is-start-screen) .field-os-panel.danger,
+body:not(.is-start-screen) .ai-command-scorecards article.danger,
+body:not(.is-start-screen) .ai-score.danger,
+body:not(.is-start-screen) .ai-alert-grid article.danger {
+  border-color: rgba(224, 36, 48, 0.5);
+  background: rgba(224, 36, 48, 0.12);
+}
+
+body:not(.is-start-screen) p,
+body:not(.is-start-screen) small,
+body:not(.is-start-screen) li,
+body:not(.is-start-screen) .metric p,
+body:not(.is-start-screen) .assistant-card p,
+body:not(.is-start-screen) .global-result-card p,
+body:not(.is-start-screen) .global-result-card small,
+body:not(.is-start-screen) .ai-route-card span,
+body:not(.is-start-screen) .ai-context-body span,
+body:not(.is-start-screen) .ai-opportunity-card span,
+body:not(.is-start-screen) .reference-head p,
+body:not(.is-start-screen) .reference-grid p {
+  color: var(--muted);
+}
+
+body:not(.is-start-screen) .field-os-score,
+body:not(.is-start-screen) .ai-score,
+body:not(.is-start-screen) .programmer-score,
+body:not(.is-start-screen) .confidence-badge,
+body:not(.is-start-screen) .result-count-badge {
+  border-color: rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, #e02430, #07080b),
+    #111318;
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .global-command-panel:not(#command),
+body:not(.is-start-screen) .view.active {
+  color: var(--ink);
+}
+
+body:not(.is-start-screen) .global-command-panel .deep-search-form,
+body:not(.is-start-screen) .field-os-form,
+body:not(.is-start-screen) .vin-form,
+body:not(.is-start-screen) .part-history-form,
+body:not(.is-start-screen) .proof-vault-form,
+body:not(.is-start-screen) .code-desk-form,
+body:not(.is-start-screen) .lishi-form,
+body:not(.is-start-screen) .workbench-form,
+body:not(.is-start-screen) .loadout-form,
+body:not(.is-start-screen) .reference-list-form {
+  align-items: end;
+}
+
+body:not(.is-start-screen) table,
+body:not(.is-start-screen) th,
+body:not(.is-start-screen) td {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--ink);
+}
+
+body:not(.is-start-screen) th {
+  background: rgba(224, 36, 48, 0.14);
+}
+
+body:not(.is-start-screen) .loadout-hero,
+body:not(.is-start-screen) .workbench-hero,
+body:not(.is-start-screen) .ai-field-packet {
+  border-color: rgba(224, 36, 48, 0.28);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.2), rgba(255, 255, 255, 0.035) 46%, rgba(0, 0, 0, 0.28)),
+    rgba(10, 12, 16, 0.95);
+  color: #ffffff;
+}
+
+body:not(.is-start-screen) .mobile-menu-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(135deg, #e02430, #07080b),
+    #111318;
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+body:not(.is-start-screen) .mobile-menu-toggle span,
+body:not(.is-start-screen) .mobile-menu-toggle span::before,
+body:not(.is-start-screen) .mobile-menu-toggle span::after {
+  background: #ffffff;
+}
+
+body:not(.is-start-screen) .mobile-menu-backdrop {
+  background: rgba(5, 6, 8, 0.62);
+}
+
+body:not(.is-start-screen) ::selection {
+  background: rgba(224, 36, 48, 0.45);
+  color: #ffffff;
+}
+
+@media (max-width: 760px) {
+  body:not(.is-start-screen) main {
+    padding: calc(58px + env(safe-area-inset-top)) 10px calc(84px + env(safe-area-inset-bottom));
+  }
+
+  body:not(.is-start-screen) .panel,
+  body:not(.is-start-screen) .assistant-card,
+  body:not(.is-start-screen) .metric,
+  body:not(.is-start-screen) .field-os-panel,
+  body:not(.is-start-screen) .global-result-card,
+  body:not(.is-start-screen) .history-job-card,
+  body:not(.is-start-screen) .reference-row-card,
+  body:not(.is-start-screen) .loadout-card {
+    border-radius: 8px;
+  }
+
+  body:not(.is-start-screen) .app-status-banner {
+    justify-content: stretch;
+  }
+
+  body:not(.is-start-screen) .app-status-banner span {
+    width: 100%;
+    text-align: center;
+  }
+}

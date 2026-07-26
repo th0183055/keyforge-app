@@ -596,7 +596,89 @@ function setStartJobStatus(message, tone = "ready") {
   startJobStatus.dataset.tone = tone;
 }
 
-function startVinWalkthroughFromValue(value) {
+function resetLookupSelectionState() {
+  vinWorkflowStep = "vehicle";
+  selectedKeyFamily = "";
+  selectedKeyPackage = "";
+  selectedPartChoiceKey = "";
+  selectedProgrammerKey = "";
+  Object.values(liveProductFilters).forEach((selected) => selected.clear());
+}
+
+async function runVinLookup(vin, submitButton = null) {
+  try {
+    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+      throw new Error("Enter a valid 17-character VIN. VINs do not use I, O, or Q.");
+    }
+    if (vinForm?.elements.vin) vinForm.elements.vin.value = vin;
+    if (submitButton) submitButton.disabled = true;
+    resetLookupSelectionState();
+    vinResult.innerHTML = `
+      <div class="lookup-loading">
+        <article class="active"><strong>1. Decoding VIN</strong><p>Reading vehicle identity with a server timeout guard.</p></article>
+        <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
+        <article><strong>3. Preparing parts search</strong><p>Parts load after the vehicle is shown.</p></article>
+      </div>
+    `;
+    setAppStatus("Decoding VIN", "busy", "The request will fail fast instead of hanging.");
+    const profile = await api(`/api/vin/${encodeURIComponent(vin)}`, { timeoutMs: 15000 });
+    cacheLookupProfile(lookupCacheKeyFromVin(vin), profile);
+    renderVinProfile(profile);
+    startSupplierLookup(profile);
+  } catch (error) {
+    const cached = cachedLookupProfile(lookupCacheKeyFromVin(vin), error.message);
+    if (cached) {
+      setAppStatus("Using field cache", "degraded", error.message);
+      renderVinProfile(cached);
+    } else {
+      renderVinError(error.message);
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function runYmmLookup({ year = "", make = "", model = "" } = {}, submitButton = null) {
+  try {
+    if (!/^(19|20)\d{2}$/.test(year) || !make || !model) {
+      throw new Error("Enter year, make, and model to search parts without a VIN.");
+    }
+    if (ymmForm) {
+      ymmForm.elements.year.value = year;
+      ymmForm.elements.make.value = make;
+      ymmForm.elements.model.value = model;
+    }
+    if (submitButton) submitButton.disabled = true;
+    resetLookupSelectionState();
+    vinResult.innerHTML = `
+      <div class="lookup-loading">
+        <article class="active"><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
+        <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
+        <article><strong>3. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
+      </div>
+    `;
+    setAppStatus("Building lookup", "busy", "The request will fail fast instead of hanging.");
+    const profile = await api(
+      `/api/vehicle-lookup?year=${encodeURIComponent(year)}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`,
+      { timeoutMs: 12000 },
+    );
+    cacheLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), profile);
+    renderVinProfile(profile);
+    startSupplierLookup(profile);
+  } catch (error) {
+    const cached = cachedLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), error.message);
+    if (cached) {
+      setAppStatus("Using field cache", "degraded", error.message);
+      renderVinProfile(cached);
+    } else {
+      renderVinError(error.message);
+    }
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function startVinWalkthroughFromValue(value) {
   const vin = normalizeVinInput(value);
   if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
     setStartJobStatus("Enter a valid 17-character VIN.", "warn");
@@ -605,10 +687,10 @@ function startVinWalkthroughFromValue(value) {
   if (vinForm?.elements.vin) vinForm.elements.vin.value = vin;
   setStartJobStatus(`Starting VIN ${vin}.`, "ready");
   showView("vin");
-  window.setTimeout(() => vinForm?.requestSubmit(), 80);
+  await runVinLookup(vin);
 }
 
-function startYmmWalkthroughFromValues({ year = "", make = "", model = "" } = {}) {
+async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" } = {}) {
   const cleanYear = cleanInput(year);
   const cleanMake = cleanInput(make);
   const cleanModel = cleanInput(model);
@@ -623,7 +705,7 @@ function startYmmWalkthroughFromValues({ year = "", make = "", model = "" } = {}
   }
   setStartJobStatus(`Starting ${cleanYear} ${cleanMake} ${cleanModel}.`, "ready");
   showView("vin");
-  window.setTimeout(() => ymmForm?.requestSubmit(), 80);
+  await runYmmLookup({ year: cleanYear, make: cleanMake, model: cleanModel });
 }
 
 function statusClass(status) {
@@ -12417,42 +12499,7 @@ vinForm.addEventListener("submit", async (event) => {
   const data = new FormData(vinForm);
   const vin = normalizeVinInput(data.get("vin"));
   const submitButton = vinForm.querySelector("button[type='submit']");
-
-  try {
-    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
-      throw new Error("Enter a valid 17-character VIN. VINs do not use I, O, or Q.");
-    }
-    vinForm.querySelector("input[name='vin']").value = vin;
-    submitButton.disabled = true;
-    vinWorkflowStep = "vehicle";
-    selectedKeyFamily = "";
-    selectedKeyPackage = "";
-    selectedPartChoiceKey = "";
-    selectedProgrammerKey = "";
-    Object.values(liveProductFilters).forEach((selected) => selected.clear());
-    vinResult.innerHTML = `
-      <div class="lookup-loading">
-        <article class="active"><strong>1. Decoding VIN</strong><p>Reading vehicle identity with a server timeout guard.</p></article>
-        <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
-        <article><strong>3. Preparing parts search</strong><p>Parts load after the vehicle is shown.</p></article>
-      </div>
-    `;
-    setAppStatus("Decoding VIN", "busy", "The request will fail fast instead of hanging.");
-    const profile = await api(`/api/vin/${encodeURIComponent(vin)}`, { timeoutMs: 15000 });
-    cacheLookupProfile(lookupCacheKeyFromVin(vin), profile);
-    renderVinProfile(profile);
-    startSupplierLookup(profile);
-  } catch (error) {
-    const cached = cachedLookupProfile(lookupCacheKeyFromVin(vin), error.message);
-    if (cached) {
-      setAppStatus("Using field cache", "degraded", error.message);
-      renderVinProfile(cached);
-    } else {
-      renderVinError(error.message);
-    }
-  } finally {
-    submitButton.disabled = false;
-  }
+  await runVinLookup(vin, submitButton);
 });
 
 if (ymmForm) {
@@ -12463,44 +12510,7 @@ if (ymmForm) {
     const make = String(data.get("make") || "").trim();
     const model = String(data.get("model") || "").trim();
     const submitButton = ymmForm.querySelector("button[type='submit']");
-
-    try {
-      if (!/^(19|20)\d{2}$/.test(year) || !make || !model) {
-        throw new Error("Enter year, make, and model to search parts without a VIN.");
-      }
-      submitButton.disabled = true;
-      vinWorkflowStep = "vehicle";
-      selectedKeyFamily = "";
-      selectedKeyPackage = "";
-      selectedPartChoiceKey = "";
-      selectedProgrammerKey = "";
-      Object.values(liveProductFilters).forEach((selected) => selected.clear());
-      vinResult.innerHTML = `
-        <div class="lookup-loading">
-          <article class="active"><strong>1. Building vehicle profile</strong><p>Using year, make, and model because VIN cannot prove exact key package.</p></article>
-          <article><strong>2. Building field pack</strong><p>Cached profile will be used if the cloud server is slow.</p></article>
-          <article><strong>3. Preparing parts search</strong><p>Parts will load after the vehicle is shown.</p></article>
-        </div>
-      `;
-      setAppStatus("Building lookup", "busy", "The request will fail fast instead of hanging.");
-      const profile = await api(
-        `/api/vehicle-lookup?year=${encodeURIComponent(year)}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`,
-        { timeoutMs: 12000 },
-      );
-      cacheLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), profile);
-      renderVinProfile(profile);
-      startSupplierLookup(profile);
-    } catch (error) {
-      const cached = cachedLookupProfile(lookupCacheKeyFromVehicle({ year, make, model }), error.message);
-      if (cached) {
-        setAppStatus("Using field cache", "degraded", error.message);
-        renderVinProfile(cached);
-      } else {
-        renderVinError(error.message);
-      }
-    } finally {
-      submitButton.disabled = false;
-    }
+    await runYmmLookup({ year, make, model }, submitButton);
   });
 }
 
