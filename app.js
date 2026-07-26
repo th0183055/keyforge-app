@@ -154,6 +154,7 @@ const globalSearchStatus = document.querySelector("#globalSearchStatus");
 const globalSearchResult = document.querySelector("#globalSearchResult");
 const quickVinStartForm = document.querySelector("#quickVinStartForm");
 const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
+const quickScheduleJobForm = document.querySelector("#quickScheduleJobForm");
 const startJobStatus = document.querySelector("#startJobStatus");
 const workspaceBridgeSummary = document.querySelector("#workspaceBridgeSummary");
 const startMenuButton = document.querySelector("#startMenuButton");
@@ -259,6 +260,9 @@ const metkaBridgeImportInput = document.querySelector("#metkaBridgeImportInput")
 const googleSheetSyncForm = document.querySelector("#googleSheetSyncForm");
 const googleSheetSyncStatus = document.querySelector("#googleSheetSyncStatus");
 const googleSheetSyncResult = document.querySelector("#googleSheetSyncResult");
+const serviceIntakeImportForm = document.querySelector("#serviceIntakeImportForm");
+const serviceIntakeStatus = document.querySelector("#serviceIntakeStatus");
+const serviceIntakeResult = document.querySelector("#serviceIntakeResult");
 const vinForm = document.querySelector("#vinForm");
 const ymmForm = document.querySelector("#ymmForm");
 const ymmDropdownForms = [quickYmmStartForm, ymmForm].filter(Boolean);
@@ -428,6 +432,7 @@ function showView(id, options = {}) {
   if (id === "reference-lists" && !latestReferenceList) loadReferenceList();
   if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
   if (id === "metka-bridge" && !latestGoogleWorkspace) loadGoogleWorkspace({ quiet: true });
+  if (id === "metka-bridge") loadServiceIntake({ quiet: true });
   if (id === "settings") {
     loadStorageStatus({ quiet: true });
     loadGoogleWorkspace({ quiet: true });
@@ -624,6 +629,28 @@ const fallbackVehicleOptions = {
   makes: ["Ford", "Chevrolet", "GMC", "Toyota", "Lexus", "Honda", "Acura", "Nissan", "Infiniti", "Hyundai", "Kia", "Mazda", "Subaru", "Volkswagen", "Audi", "BMW", "Jeep", "Dodge", "Ram"],
   models: [],
 };
+const fallbackModelsByMake = {
+  ACURA: ["MDX", "RDX", "TLX", "ILX", "Integra"],
+  AUDI: ["A3", "A4", "A5", "A6", "Q3", "Q5", "Q7", "Q8"],
+  BMW: ["3 Series", "4 Series", "5 Series", "X1", "X3", "X5", "X7"],
+  CHEVROLET: ["Silverado", "Equinox", "Traverse", "Tahoe", "Suburban", "Malibu", "Camaro", "Colorado", "Trailblazer"],
+  DODGE: ["Charger", "Challenger", "Durango", "Journey", "Grand Caravan"],
+  FORD: ["F-150", "F-150 Lightning", "F-250/F-350 Super Duty", "Maverick", "Ranger", "Explorer", "Expedition", "Escape", "Bronco", "Bronco Sport", "Transit", "Edge", "Mustang"],
+  GMC: ["Sierra", "Yukon", "Terrain", "Acadia", "Canyon", "Savana"],
+  HONDA: ["Accord", "Civic", "CR-V", "HR-V", "Pilot", "Odyssey", "Ridgeline", "Passport"],
+  HYUNDAI: ["Elantra", "Sonata", "Tucson", "Santa Fe", "Palisade", "Kona", "Venue", "Accent"],
+  INFINITI: ["Q50", "Q60", "QX50", "QX55", "QX60", "QX80"],
+  JEEP: ["Wrangler", "Grand Cherokee", "Cherokee", "Compass", "Renegade", "Gladiator", "Wagoneer"],
+  KIA: ["Forte", "K5", "Optima", "Soul", "Sportage", "Sorento", "Telluride", "Seltos", "Carnival", "Rio"],
+  LEXUS: ["RX", "NX", "ES", "IS", "GX", "LX", "UX", "TX"],
+  MAZDA: ["Mazda3", "Mazda6", "CX-3", "CX-5", "CX-9", "CX-30", "CX-50", "MX-5 Miata"],
+  NISSAN: ["Altima", "Sentra", "Maxima", "Rogue", "Murano", "Pathfinder", "Armada", "Frontier", "Titan", "Kicks"],
+  RAM: ["1500", "2500", "3500", "ProMaster", "ProMaster City"],
+  SUBARU: ["Outback", "Forester", "Crosstrek", "Impreza", "Legacy", "Ascent", "WRX"],
+  TOYOTA: ["Camry", "Corolla", "RAV4", "Highlander", "Tacoma", "Tundra", "4Runner", "Sienna", "Prius", "Avalon", "Venza"],
+  VOLKSWAGEN: ["Jetta", "Passat", "Tiguan", "Atlas", "Golf", "Taos", "Arteon", "ID.4"],
+};
+const vehicleOptionsCache = new Map();
 let latestVehicleOptions = fallbackVehicleOptions;
 let vehicleOptionsRequestId = 0;
 
@@ -637,6 +664,20 @@ function selectedYmmValues(form) {
     make: cleanInput(ymmSelect(form, "make")?.value || ""),
     model: cleanInput(ymmSelect(form, "model")?.value || ""),
   };
+}
+
+function ymmMakeKey(value = "") {
+  const key = cleanInput(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const aliases = {
+    CHEVY: "CHEVROLET",
+    CHEV: "CHEVROLET",
+    VW: "VOLKSWAGEN",
+  };
+  return aliases[key] || key;
+}
+
+function fallbackModelsForMake(make = "") {
+  return fallbackModelsByMake[ymmMakeKey(make)] || [];
 }
 
 function fillYmmSelect(select, values = [], placeholder = "Select", selected = "") {
@@ -656,7 +697,8 @@ function renderYmmDropdownForm(form, options = latestVehicleOptions, values = se
   fillYmmSelect(ymmSelect(form, "year"), options.years || fallbackVehicleOptions.years, "Year", values.year);
   fillYmmSelect(ymmSelect(form, "make"), options.makes || fallbackVehicleOptions.makes, "Make", values.make);
   const modelSelect = ymmSelect(form, "model");
-  fillYmmSelect(modelSelect, values.make ? options.models || [] : [], values.make ? "Model" : "Pick make first", values.model);
+  const modelOptions = values.make ? options.models?.length ? options.models : fallbackModelsForMake(values.make) : [];
+  fillYmmSelect(modelSelect, modelOptions, values.make ? "Model" : "Pick make first", values.model);
   if (modelSelect) modelSelect.disabled = !values.make;
 }
 
@@ -692,17 +734,33 @@ async function refreshYmmDropdownOptions(sourceForm = null, { clearModel = false
   const params = new URLSearchParams();
   if (values.year) params.set("year", values.year);
   if (values.make) params.set("make", values.make);
+  const cacheKey = `${values.year || "*"}|${ymmMakeKey(values.make) || "*"}`;
+  const fallbackNow = {
+    ...latestVehicleOptions,
+    years: latestVehicleOptions.years?.length ? latestVehicleOptions.years : fallbackVehicleOptions.years,
+    makes: latestVehicleOptions.makes?.length ? latestVehicleOptions.makes : fallbackVehicleOptions.makes,
+    models: values.make ? fallbackModelsForMake(values.make) : [],
+  };
+  for (const form of ymmDropdownForms) renderYmmDropdownForm(form, vehicleOptionsCache.get(cacheKey) || fallbackNow, form === sourceForm ? values : selectedYmmValues(form));
+  if (sourceForm) mirrorYmmDropdowns(sourceForm);
+  const cached = vehicleOptionsCache.get(cacheKey);
+  if (cached) {
+    latestVehicleOptions = cached;
+    return;
+  }
   try {
-    const payload = await api(`/api/vehicle-options?${params.toString()}`, { timeoutMs: 10000, noStatus: true, noFallback: true });
+    const payload = await api(`/api/vehicle-options?${params.toString()}`, { timeoutMs: 6000, noStatus: true, noFallback: true });
     if (requestId !== vehicleOptionsRequestId) return;
     latestVehicleOptions = {
       years: payload.years?.length ? payload.years : fallbackVehicleOptions.years,
       makes: payload.makes?.length ? payload.makes : fallbackVehicleOptions.makes,
-      models: payload.models || [],
+      models: payload.models?.length ? payload.models : values.make ? fallbackModelsForMake(values.make) : [],
     };
+    vehicleOptionsCache.set(cacheKey, latestVehicleOptions);
+    if (vehicleOptionsCache.size > 50) vehicleOptionsCache.delete(vehicleOptionsCache.keys().next().value);
   } catch {
     if (requestId !== vehicleOptionsRequestId) return;
-    latestVehicleOptions = fallbackVehicleOptions;
+    latestVehicleOptions = fallbackNow;
     if (!quiet) setStartJobStatus("Vehicle dropdowns are using the built-in fallback list.", "warn");
   }
   for (const form of ymmDropdownForms) renderYmmDropdownForm(form, latestVehicleOptions, form === sourceForm ? values : selectedYmmValues(form));
@@ -6241,6 +6299,135 @@ async function syncGoogleSheetToBridge() {
   } catch (error) {
     if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = `Google Sheet sync failed: ${error.message}`;
     if (googleSheetSyncResult) googleSheetSyncResult.innerHTML = `<article class="assistant-card"><strong>Sheets sync unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+function startSchedulePayload() {
+  const data = new FormData(quickScheduleJobForm);
+  const ymm = selectedYmmValues(quickYmmStartForm);
+  return {
+    source: "Start screen",
+    start: cleanInput(data.get("scheduledAt")),
+    customer: cleanInput(data.get("customer")),
+    phone: cleanInput(data.get("phone")),
+    location: cleanInput(data.get("location")),
+    notes: cleanInput(data.get("notes")),
+    vin: cleanInput(quickVinStartForm?.elements.quickVin?.value || ""),
+    year: ymm.year,
+    make: ymm.make,
+    model: ymm.model,
+    service: cleanInput(data.get("service")) || "Locksmith service",
+  };
+}
+
+async function scheduleJobFromStart() {
+  if (!quickScheduleJobForm) return;
+  const payload = startSchedulePayload();
+  if (!payload.customer && !payload.phone && !payload.location && !payload.notes && !payload.vin && !payload.year && !payload.make && !payload.model) {
+    setStartJobStatus("Add at least a customer, phone, location, VIN, YMM, or job note.", "warn");
+    return;
+  }
+  try {
+    setStartJobStatus("Creating job schedule...", "ready");
+    const result = await api("/api/schedule-job", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 18000,
+      noStatus: true,
+    });
+    const eventText = result.event?.htmlLink ? "Calendar event created." : result.calendarError || "Job saved in TimLock.";
+    setStartJobStatus(`Scheduled: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, result.event ? "ready" : "warn");
+    if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
+    quickScheduleJobForm.reset();
+    latestWorkspaceBrief = null;
+    await loadWorkspaceBrief();
+  } catch (error) {
+    setStartJobStatus(`Schedule failed: ${error.message}`, "warn");
+  }
+}
+
+function renderServiceIntake(payload = {}) {
+  if (!serviceIntakeResult) return;
+  const sources = payload.sources || [];
+  const recent = payload.recent || [];
+  serviceIntakeResult.innerHTML = `
+    <section class="storage-file-list">
+      <article>
+        <span>Intake records</span>
+        <strong>${escapeHtml(payload.records || 0)}</strong>
+        <p>${escapeHtml(payload.updatedAt ? formatWorkspaceDate(payload.updatedAt) : "No imports yet")}</p>
+      </article>
+      ${sources
+        .slice(0, 5)
+        .map(
+          (item) => `
+            <article>
+              <span>${escapeHtml(item.source)}</span>
+              <strong>${escapeHtml(item.count || 0)}</strong>
+              <p>Imported jobs</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+    ${
+      recent.length
+        ? `<section class="reference-list-cards compact-reference-list">
+            ${recent
+              .slice(0, 6)
+              .map(
+                (record) => `
+                  <article class="reference-row-card">
+                    <strong>${escapeHtml(record.title || record.service || "Service intake")}</strong>
+                    <p>${escapeHtml([record.customer, record.phone, record.vehicle || record.vin, record.location].filter(Boolean).join(" | "))}</p>
+                  </article>
+                `,
+              )
+              .join("")}
+          </section>`
+        : `<article class="assistant-card"><strong>No intake records yet</strong><p>Paste a CSV, TSV, or JSON export from QUO or another service app.</p></article>`
+    }
+  `;
+}
+
+async function loadServiceIntake({ quiet = false } = {}) {
+  if (!serviceIntakeResult) return null;
+  try {
+    if (serviceIntakeStatus && !quiet) serviceIntakeStatus.textContent = "Loading service intake...";
+    const payload = await api("/api/service-intake", { timeoutMs: 12000, noStatus: true });
+    renderServiceIntake(payload);
+    if (serviceIntakeStatus && !quiet) serviceIntakeStatus.textContent = `${payload.records || 0} intake record${payload.records === 1 ? "" : "s"} ready.`;
+    return payload;
+  } catch (error) {
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Service intake unavailable: ${error.message}`;
+    serviceIntakeResult.innerHTML = `<article class="assistant-card"><strong>Service intake unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+async function importServiceIntake() {
+  if (!serviceIntakeImportForm) return;
+  const data = new FormData(serviceIntakeImportForm);
+  const source = cleanInput(data.get("source"));
+  const rawText = cleanInput(data.get("rawText"));
+  if (!rawText) {
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = "Paste a CSV, TSV, or JSON export first.";
+    return;
+  }
+  try {
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Importing ${source || "service"} intake...`;
+    const payload = await api("/api/service-intake/import", {
+      method: "POST",
+      body: JSON.stringify({ source, rawText }),
+      timeoutMs: 22000,
+      noStatus: true,
+    });
+    renderServiceIntake(payload.status);
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Imported ${payload.added || 0}; updated ${payload.updated || 0}; skipped ${payload.skipped || 0}.`;
+    serviceIntakeImportForm.elements.rawText.value = "";
+    latestReferenceList = null;
+  } catch (error) {
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Intake import failed: ${error.message}`;
   }
 }
 
@@ -11910,6 +12097,11 @@ quickYmmStartForm?.addEventListener("submit", (event) => {
   });
 });
 
+quickScheduleJobForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  scheduleJobFromStart();
+});
+
 for (const form of ymmDropdownForms) {
   renderYmmDropdownForm(form, fallbackVehicleOptions);
   ymmSelect(form, "year")?.addEventListener("change", () => refreshYmmDropdownOptions(form, { clearModel: true }));
@@ -12023,6 +12215,11 @@ clearMetkaBridgeButton?.addEventListener("click", clearMetkaBridge);
 googleSheetSyncForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   syncGoogleSheetToBridge();
+});
+
+serviceIntakeImportForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  importServiceIntake();
 });
 
 if (supplierSelect) {

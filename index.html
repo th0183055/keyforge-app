@@ -233,6 +233,47 @@
                 </div>
                 <button class="primary-action" type="submit">Start YMM</button>
               </form>
+
+              <form id="quickScheduleJobForm" class="start-job-card schedule-start">
+                <div>
+                  <p class="eyebrow">Schedule</p>
+                  <strong>Create job</strong>
+                </div>
+                <div class="schedule-start-fields">
+                  <label>
+                    When
+                    <input name="scheduledAt" type="datetime-local" />
+                  </label>
+                  <label>
+                    Customer
+                    <input name="customer" placeholder="Name" autocomplete="name" />
+                  </label>
+                  <label>
+                    Phone
+                    <input name="phone" placeholder="Phone" autocomplete="tel" inputmode="tel" />
+                  </label>
+                  <label>
+                    Service
+                    <select name="service">
+                      <option value="All keys lost">All keys lost</option>
+                      <option value="Add key">Add key</option>
+                      <option value="Duplicate key">Duplicate key</option>
+                      <option value="Lockout">Lockout</option>
+                      <option value="Ignition / lock work">Ignition / lock work</option>
+                      <option value="Diagnostic">Diagnostic</option>
+                    </select>
+                  </label>
+                  <label>
+                    Location
+                    <input name="location" placeholder="Job address" autocomplete="street-address" />
+                  </label>
+                  <label class="wide-field">
+                    Job notes
+                    <textarea name="notes" rows="2" placeholder="VIN, YMM, service type, gate code, special instructions"></textarea>
+                  </label>
+                </div>
+                <button class="primary-action" type="submit">Schedule Job</button>
+              </form>
             </div>
 
             <div class="start-job-status" id="startJobStatus">Ready.</div>
@@ -1299,6 +1340,34 @@
               </form>
               <div class="form-status" id="googleSheetSyncStatus"></div>
               <div class="google-sheet-sync-result" id="googleSheetSyncResult"></div>
+            </section>
+            <section class="assistant-card service-intake-card">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Service intake add-in</p>
+                  <h3>Pull QUO or phone-app jobs into TimLock.</h3>
+                </div>
+              </div>
+              <form class="field-os-form" id="serviceIntakeImportForm">
+                <label>
+                  Source
+                  <select name="source">
+                    <option value="QUO">QUO</option>
+                    <option value="Housecall Pro">Housecall Pro</option>
+                    <option value="ServiceTitan">ServiceTitan</option>
+                    <option value="Jobber">Jobber</option>
+                    <option value="Google Forms">Google Forms</option>
+                    <option value="Custom phone app">Custom phone app</option>
+                  </select>
+                </label>
+                <label>
+                  Export text
+                  <textarea name="rawText" rows="5" placeholder="Paste CSV, TSV, or JSON export with customer, phone, address, service, VIN, year, make, model, scheduled time"></textarea>
+                </label>
+                <button class="primary-action" type="submit">Import Intake</button>
+              </form>
+              <div class="form-status" id="serviceIntakeStatus">Ready for QUO or service-app export text.</div>
+              <div class="service-intake-result" id="serviceIntakeResult"></div>
             </section>
             <div class="form-status" id="metkaBridgeStatus"></div>
             <div class="metka-bridge-result" id="metkaBridgeResult">

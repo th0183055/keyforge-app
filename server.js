@@ -153,6 +153,13 @@ const emptyStore = {
   fieldPacketFeedback: [],
   metkaBridge: metkaBridgeEmpty,
   googleWorkspace: googleWorkspaceEmpty,
+  scheduledJobs: [],
+  serviceIntake: {
+    version: 1,
+    updatedAt: "",
+    records: [],
+    connectors: [],
+  },
   codeDeskRecords: [],
   codeDeskSystems: [],
   codeDeskLessons: [],
@@ -188,6 +195,8 @@ function normalizeStore(store = {}) {
     inventoryLocations: Array.isArray(store.inventoryLocations) ? store.inventoryLocations : [],
     metkaBridge: normalizeMetkaBridgeStore(store.metkaBridge),
     googleWorkspace: normalizeGoogleWorkspaceStore(store.googleWorkspace),
+    scheduledJobs: Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [],
+    serviceIntake: normalizeServiceIntakeStore(store.serviceIntake),
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
     codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
@@ -4081,6 +4090,22 @@ function normalizeGoogleWorkspaceStore(workspace = {}) {
   };
 }
 
+function normalizeServiceIntakeStore(intake = {}) {
+  const empty = {
+    version: 1,
+    updatedAt: "",
+    records: [],
+    connectors: [],
+  };
+  if (!intake || typeof intake !== "object") return empty;
+  return {
+    ...empty,
+    ...intake,
+    records: Array.isArray(intake.records) ? intake.records : [],
+    connectors: Array.isArray(intake.connectors) ? intake.connectors : [],
+  };
+}
+
 function normalizeMetkaBridgeStore(bridge = {}) {
   const empty = metkaBridgeCloneEmpty();
   if (!bridge || typeof bridge !== "object") return empty;
@@ -4861,6 +4886,214 @@ async function createGoogleCalendarEvent(request, store, body = {}) {
     body: JSON.stringify(event),
   });
   return { event: googleCalendarEventPublic(created), google: googleWorkspacePublicStatus(store, request) };
+}
+
+function scheduleDateTime(value) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date : null;
+}
+
+function normalizeScheduleJobInput(input = {}) {
+  const vehicle = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
+  const year = vehicleOptionYear(input.year || vehicle.year);
+  const make = vehicleOptionMakeLabel(input.make || vehicle.make);
+  const model = vehicleOptionModelLabel(input.model || vehicle.model);
+  const vin = normalizeVinCandidate(input.vin || vehicle.vin);
+  const service = cleanString(input.service || input.serviceType || "Locksmith service");
+  const customer = cleanString(input.customer || input.customerName || input.name);
+  const phone = cleanString(input.phone || input.customerPhone || input.contact);
+  const location = cleanString(input.location || input.address || input.jobAddress);
+  const notes = cleanString(input.notes || input.description);
+  const startDate = scheduleDateTime(input.start || input.scheduledAt || input.datetime || input.dateTime);
+  const minutes = Math.max(30, Math.min(Number(input.durationMinutes) || 90, 480));
+  const start = startDate || new Date(Date.now() + 60 * 60 * 1000);
+  const end = scheduleDateTime(input.end) || new Date(start.getTime() + minutes * 60 * 1000);
+  const vehicleLabel = uniqueCleanValues([year, make, model]).join(" ");
+  return {
+    id: cleanString(input.id) || randomUUID(),
+    source: cleanString(input.source || "TimLock Start"),
+    createdAt: cleanString(input.createdAt) || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    status: cleanString(input.status || "scheduled"),
+    service,
+    customer,
+    phone,
+    location,
+    notes,
+    vin,
+    year,
+    make,
+    model,
+    vehicle: vehicleLabel,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
+  };
+}
+
+function scheduleJobCalendarBody(job = {}) {
+  const summaryParts = ["TimLock", job.service, job.vehicle || job.vin || job.customer].filter(Boolean);
+  const descriptionLines = [
+    job.customer ? `Customer: ${job.customer}` : "",
+    job.phone ? `Phone: ${job.phone}` : "",
+    job.vehicle ? `Vehicle: ${job.vehicle}` : "",
+    job.vin ? `VIN: ${job.vin}` : "",
+    job.service ? `Service: ${job.service}` : "",
+    job.notes ? `Notes: ${job.notes}` : "",
+    `Created from TimLock Field OS${job.source ? ` (${job.source})` : ""}.`,
+  ].filter(Boolean);
+  return {
+    summary: summaryParts.join(" - ").slice(0, 160) || "TimLock job",
+    location: job.location,
+    description: descriptionLines.join("\n"),
+    start: job.start,
+    end: job.end,
+  };
+}
+
+async function createScheduledJob(request, store, input = {}) {
+  const job = normalizeScheduleJobInput(input);
+  let calendarEvent = null;
+  let calendarError = "";
+  if (googleWorkspaceConnected(store.googleWorkspace)) {
+    try {
+      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job));
+      calendarEvent = created.event || null;
+      job.calendarEventId = calendarEvent?.id || "";
+      job.calendarHtmlLink = calendarEvent?.htmlLink || "";
+      job.status = job.calendarEventId ? "calendar-created" : job.status;
+    } catch (error) {
+      calendarError = error.message;
+    }
+  } else {
+    calendarError = "Google Workspace is not connected yet. The job was saved in TimLock and can be sent to Calendar after setup.";
+  }
+  store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+  await writeStore(store);
+  return {
+    ok: true,
+    job,
+    event: calendarEvent,
+    google: googleWorkspacePublicStatus(store, request),
+    calendarError,
+  };
+}
+
+function parseServiceDelimitedRows(text = "") {
+  const lines = cleanString(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const delimiter = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
+  const parseLine = (line) => {
+    const cells = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      if (char === '"' && line[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+      } else if (char === delimiter && !quoted) {
+        cells.push(cell);
+        cell = "";
+      } else {
+        cell += char;
+      }
+    }
+    cells.push(cell);
+    return cells.map(cleanString);
+  };
+  const headers = parseLine(lines[0]);
+  return lines.slice(1).map((line) => metkaCleanRow(Object.fromEntries(headers.map((header, index) => [header || `Column ${index + 1}`, parseLine(line)[index]])))).filter(Boolean);
+}
+
+function serviceIntakeRowsFromPayload(payload = {}) {
+  if (Array.isArray(payload.records)) return payload.records.map(metkaCleanRow).filter(Boolean);
+  if (Array.isArray(payload.rows)) return metkaRowsFromPayload(payload.rows);
+  if (payload.data) return metkaRowsFromPayload(payload.data);
+  const rawText = cleanString(payload.rawText || payload.text || payload.csv || payload.tsv || payload.export);
+  if (rawText) {
+    try {
+      const parsed = JSON.parse(rawText);
+      const rows = metkaRowsFromPayload(parsed.records || parsed.rows || parsed.data || parsed);
+      if (rows.length) return rows;
+    } catch {}
+    return parseServiceDelimitedRows(rawText);
+  }
+  return [];
+}
+
+function normalizeServiceIntakeRecord(row = {}, source = "Custom") {
+  const year = vehicleOptionYear(metkaValue(row, ["Year", "Vehicle Year", "Y"]));
+  const make = vehicleOptionMakeLabel(metkaValue(row, ["Make", "Vehicle Make", "Manufacturer"]));
+  const model = vehicleOptionModelLabel(metkaValue(row, ["Model", "Vehicle Model"]));
+  const vin = normalizeVinCandidate(metkaValue(row, ["VIN", "Vin", "Vehicle VIN"]));
+  const customer = metkaValue(row, ["Customer", "Customer Name", "Name", "Client", "Caller"]);
+  const phone = metkaValue(row, ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone"]);
+  const location = metkaValue(row, ["Address", "Location", "Job Address", "Service Address"]);
+  const service = metkaValue(row, ["Service", "Service Type", "Job Type", "Call Type", "Description"]) || "Locksmith service";
+  const notes = metkaValue(row, ["Notes", "Details", "Memo", "Comments", "Description"]);
+  const scheduledAt = metkaValue(row, ["Scheduled", "Scheduled At", "Start", "Start Time", "Appointment", "Date"]);
+  const title = metkaValue(row, ["Title", "Summary", "Job", "Job Name"]) || uniqueCleanValues([service, year, make, model]).join(" ");
+  return {
+    id: metkaStableId("intake", [source, title, customer, phone, location, scheduledAt, vin]),
+    source,
+    importedAt: new Date().toISOString(),
+    title,
+    customer,
+    phone,
+    location,
+    service,
+    notes,
+    scheduledAt,
+    vin,
+    year,
+    make,
+    model,
+    vehicle: uniqueCleanValues([year, make, model]).join(" "),
+    raw: metkaCleanRow(row) || {},
+  };
+}
+
+function serviceIntakePublicStatus(store = {}) {
+  const intake = normalizeServiceIntakeStore(store.serviceIntake);
+  const sources = new Map();
+  for (const record of intake.records) {
+    const key = cleanString(record.source || "Custom");
+    sources.set(key, (sources.get(key) || 0) + 1);
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    updatedAt: intake.updatedAt,
+    records: intake.records.length,
+    sources: Array.from(sources.entries()).map(([source, count]) => ({ source, count })),
+    recent: intake.records.slice(0, 12),
+    scheduledJobs: Array.isArray(store.scheduledJobs) ? store.scheduledJobs.slice(0, 12) : [],
+  };
+}
+
+function importServiceIntakePayload(store, payload = {}) {
+  const source = cleanString(payload.source || payload.system || "Custom phone app");
+  const rows = serviceIntakeRowsFromPayload(payload);
+  const records = rows.map((row) => normalizeServiceIntakeRecord(row, source)).filter((record) => record.customer || record.phone || record.vehicle || record.vin || record.location || record.service);
+  const existing = new Map((store.serviceIntake?.records || []).map((record) => [record.id, record]));
+  let added = 0;
+  let updated = 0;
+  for (const record of records) {
+    if (existing.has(record.id)) updated += 1;
+    else added += 1;
+    existing.set(record.id, { ...(existing.get(record.id) || {}), ...record });
+  }
+  const intake = normalizeServiceIntakeStore(store.serviceIntake);
+  intake.records = Array.from(existing.values()).sort((a, b) => (Date.parse(b.importedAt) || 0) - (Date.parse(a.importedAt) || 0)).slice(0, 5000);
+  intake.connectors = [
+    { source, type: cleanString(payload.type || "import"), updatedAt: new Date().toISOString(), records: records.length },
+    ...(intake.connectors || []).filter((item) => cleanString(item.source).toUpperCase() !== source.toUpperCase()),
+  ].slice(0, 50);
+  intake.updatedAt = new Date().toISOString();
+  store.serviceIntake = intake;
+  return { added, updated, skipped: Math.max(0, rows.length - records.length), parsed: rows.length, status: serviceIntakePublicStatus(store) };
 }
 
 function googleSheetRange(sheetName) {
@@ -9755,6 +9988,9 @@ const vehicleOptionSourceWeight = {
   vpic: 35,
   reference: 25,
 };
+const vehicleOptionsCacheMs = 10 * 60 * 1000;
+let vehicleOptionBaseRowsCache = { at: 0, rows: [] };
+const vehicleOptionsResponseCache = new Map();
 
 function vehicleOptionRowScore(row = {}) {
   let score = vehicleOptionSourceWeight[row.source] || 0;
@@ -9781,21 +10017,43 @@ function uniqueVehicleOptionValues(rows = [], field, ranked = false) {
     .map((item) => item.value);
 }
 
-async function buildVehicleOptions(options = {}, store = { jobs: [] }) {
-  const selectedYear = vehicleOptionYear(options.year);
-  const selectedMake = normalizeVehicleText(options.make);
+async function buildVehicleOptionBaseRows() {
+  if (vehicleOptionBaseRowsCache.rows.length && Date.now() - vehicleOptionBaseRowsCache.at < vehicleOptionsCacheMs) {
+    return vehicleOptionBaseRowsCache.rows;
+  }
   const rows = [];
   const [programming, vpic, profiles] = await Promise.all([
     readJsonCached(programmingReferencePath, { rows: [] }),
     readJsonCached(vpicCatalogPath, { rows: [] }),
     readVehicleProfiles().catch(() => ({ profiles: [] })),
   ]);
-
   for (const row of programming.rows || []) addVehicleOptionRow(rows, row, "programming");
   for (const row of vpic.rows || []) addVehicleOptionRow(rows, row, "vpic");
   for (const profile of profiles.profiles || []) addVehicleOptionRow(rows, profile.match || profile.vehicle || profile, "vehicle-profile");
-  for (const job of storeFieldJobs(store).slice(0, 5000)) addVehicleOptionRow(rows, coverageVehicleForJob(job), "proof");
   for (const seed of vehicleOptionSeedRows) addVehicleOptionRow(rows, seed, "seed");
+  const deduped = new Map();
+  for (const row of rows) {
+    const key = `${row.year}|${normalizeVehicleText(row.make)}|${normalizeVehicleText(row.model)}`;
+    if (!deduped.has(key) || vehicleOptionRowScore(row) > vehicleOptionRowScore(deduped.get(key))) deduped.set(key, row);
+  }
+  vehicleOptionBaseRowsCache = { at: Date.now(), rows: Array.from(deduped.values()) };
+  return vehicleOptionBaseRowsCache.rows;
+}
+
+async function buildVehicleOptions(options = {}, store = { jobs: [] }) {
+  const selectedYear = vehicleOptionYear(options.year);
+  const selectedMake = normalizeVehicleText(options.make);
+  const storeSignature = [
+    store.jobs?.length || 0,
+    store.metkaBridge?.importedAt || "",
+    store.metkaBridge?.updatedAt || "",
+    store.serviceIntake?.updatedAt || "",
+  ].join("|");
+  const cacheKey = `${selectedYear}|${selectedMake}|${storeSignature}`;
+  const cached = vehicleOptionsResponseCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < vehicleOptionsCacheMs) return cached.payload;
+  const rows = [...(await buildVehicleOptionBaseRows())];
+  for (const job of storeFieldJobs(store).slice(0, 2500)) addVehicleOptionRow(rows, coverageVehicleForJob(job), "proof");
 
   const deduped = new Map();
   for (const row of rows) {
@@ -9809,7 +10067,7 @@ async function buildVehicleOptions(options = {}, store = { jobs: [] }) {
     .filter((row) => !selectedYear || row.year === selectedYear)
     .filter((row) => !selectedMake || normalizeVehicleText(row.make) === selectedMake);
 
-  return {
+  const payload = {
     generatedAt: new Date().toISOString(),
     selected: {
       year: selectedYear,
@@ -9820,6 +10078,9 @@ async function buildVehicleOptions(options = {}, store = { jobs: [] }) {
     makes: uniqueVehicleOptionValues(makeRows, "make"),
     models: selectedMake ? uniqueVehicleOptionValues(modelRows, "model", true).slice(0, 350) : [],
   };
+  vehicleOptionsResponseCache.set(cacheKey, { at: Date.now(), payload });
+  if (vehicleOptionsResponseCache.size > 80) vehicleOptionsResponseCache.delete(vehicleOptionsResponseCache.keys().next().value);
+  return payload;
 }
 
 function compactReferenceValue(value) {
@@ -9873,6 +10134,8 @@ function referenceListSources() {
     { id: "reference-vault", label: "Reference Vault", note: "Owner-created vehicle/keyway/programmer notes." },
     { id: "jobs", label: "Saved jobs", note: "Server saved and imported worked-job records." },
     { id: "field-jobs", label: "Field jobs", note: "Saved jobs plus Metka WorkLog jobs used by subscriber decisions." },
+    { id: "scheduled-jobs", label: "Scheduled jobs", note: "TimLock start-screen dispatch jobs and Google Calendar handoff records." },
+    { id: "service-intake", label: "Service intake", note: "Normalized QUO/phone-app exports ready for scheduling and field packets." },
     { id: "metka-parts", label: "Metka part bridge", note: "ProductAliasLog, wkst, PartReference, Log, and tbl_Products normalized into field aliases." },
     { id: "metka-inventory", label: "Metka inventory", note: "InventoryLedger rolled up by master part and location." },
     { id: "metka-worklog", label: "Metka WorkLog", note: "WorkLog rows normalized into proof jobs." },
@@ -9951,6 +10214,12 @@ async function buildReferenceList(options = {}, store = { jobs: [] }) {
     rows = storeFieldJobs(store);
     const counts = metkaBridgeCounts(store.metkaBridge);
     sourceNote = `${store.jobs?.length || 0} saved jobs + ${counts.workLogJobs} Metka WorkLog jobs.`;
+  } else if (source === "scheduled-jobs") {
+    rows = store.scheduledJobs || [];
+    sourceNote = "TimLock scheduled jobs and Calendar event handoff records.";
+  } else if (source === "service-intake") {
+    rows = normalizeServiceIntakeStore(store.serviceIntake).records;
+    sourceNote = "Normalized QUO/phone-app export records.";
   } else if (source === "metka-parts") {
     rows = metkaNormalizedRows(store, "parts");
     sourceNote = "Owner-side Metka part bridge rows powering alias and field-kit decisions.";
@@ -13172,6 +13441,8 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/metka-bridge",
     "/api/workspace-brief",
     "/api/google",
+    "/api/service-intake",
+    "/api/schedule-jobs",
     "/api/supplier-accounts",
     "/api/audit-log",
   ];
@@ -13358,6 +13629,20 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "GET" && pathname === "/api/schedule-jobs") {
+    sendJson(response, 200, { jobs: (store.scheduledJobs || []).slice(0, 200), google: googleWorkspacePublicStatus(store, request) });
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/schedule-job") {
+    try {
+      sendJson(response, 201, await createScheduledJob(request, store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Schedule job failed: ${error.message}`);
+    }
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/global-search") {
     const body = await readJsonBody(request);
     sendJson(response, 200, await buildGlobalSearch(body, store));
@@ -13404,6 +13689,22 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/google/status") {
     sendJson(response, 200, googleWorkspacePublicStatus(store, request));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/api/service-intake") {
+    sendJson(response, 200, serviceIntakePublicStatus(store));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/service-intake/import") {
+    try {
+      const result = importServiceIntakePayload(store, await readJsonBody(request));
+      await writeStore(store);
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendError(response, 400, `Service intake import failed: ${error.message}`);
+    }
     return;
   }
 
