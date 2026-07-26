@@ -6121,7 +6121,7 @@ function renderGoogleWorkspace(payload = latestGoogleWorkspace) {
   const sheets = payload.sheets || {};
   const drive = payload.drive || {};
   const cards = [
-    ["Connection", payload.connected ? "Connected" : payload.configured ? "Ready" : "Setup", profile.email || "Google Workspace"],
+    ["Connection", payload.unavailable ? "Waiting" : payload.connected ? "Connected" : payload.configured ? "Ready" : "Setup", profile.email || "Google Workspace"],
     ["Calendar", calendar.events || 0, calendar.lastSyncAt ? `Synced ${formatWorkspaceDate(calendar.lastSyncAt)}` : payload.connected ? "Ready to preview" : "Connect first"],
     ["Sheets", sheets.sheetStats?.length || 0, sheets.lastSyncAt ? `Synced ${formatWorkspaceDate(sheets.lastSyncAt)}` : "Field Data Bridge"],
     ["Drive", drive.jobFolders || 0, drive.parentFolderConfigured ? "Parent folder set" : "Job folders ready"],
@@ -6169,7 +6169,7 @@ async function loadGoogleWorkspace({ quiet = false } = {}) {
   if (!googleWorkspaceStatusPanel) return null;
   try {
     if (googleWorkspaceStatus && !quiet) googleWorkspaceStatus.textContent = "Checking Google Workspace...";
-    const payload = await api("/api/google/status", { timeoutMs: 10000, noStatus: true });
+    const payload = await api("/api/google/status", { timeoutMs: 25000, retryOnTimeout: true, noStatus: true });
     renderGoogleWorkspace(payload);
     if (googleWorkspaceStatus && !quiet) {
       googleWorkspaceStatus.textContent = payload.connected
@@ -6180,8 +6180,21 @@ async function loadGoogleWorkspace({ quiet = false } = {}) {
     }
     return payload;
   } catch (error) {
-    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Google check failed: ${error.message}`;
-    googleWorkspaceStatusPanel.innerHTML = `<article class="assistant-card"><strong>Google unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    const fallback = {
+      ...(latestGoogleWorkspace || {}),
+      generatedAt: new Date().toISOString(),
+      unavailable: true,
+      configured: latestGoogleWorkspace?.configured || false,
+      connected: latestGoogleWorkspace?.connected || false,
+      profile: latestGoogleWorkspace?.profile || null,
+      warnings: [`Workspace check is waiting on the app server: ${error.message}`],
+      calendar: latestGoogleWorkspace?.calendar || { connected: false, lastSyncAt: "", events: 0, sample: [] },
+      sheets: latestGoogleWorkspace?.sheets || { connected: false, lastSyncAt: "", spreadsheetId: "", importedSheets: [], sheetStats: [] },
+      drive: latestGoogleWorkspace?.drive || { connected: false, parentFolderConfigured: false, jobFolders: 0, sample: [] },
+      setup: latestGoogleWorkspace?.setup || {},
+    };
+    renderGoogleWorkspace(fallback);
+    if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = "Google Workspace is waiting on the app server. You can keep working and retry shortly.";
     return null;
   }
 }

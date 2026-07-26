@@ -237,6 +237,7 @@ async function readJsonCached(filePath, fallback = {}) {
 async function writeStore(store) {
   await mkdir(mutableDataDir, { recursive: true });
   await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`);
+  googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
 }
 
 async function readVehicleProfiles() {
@@ -4633,6 +4634,59 @@ function googleWorkspacePublicStatus(store = {}, request = null) {
   };
 }
 
+function jsonObjectProperty(raw = "", propertyName = "") {
+  const key = `"${propertyName}"`;
+  const keyIndex = raw.indexOf(key);
+  if (keyIndex < 0) return null;
+  const colonIndex = raw.indexOf(":", keyIndex + key.length);
+  if (colonIndex < 0) return null;
+  let index = colonIndex + 1;
+  while (index < raw.length && /\s/.test(raw[index])) index += 1;
+  if (raw[index] !== "{") return null;
+  const start = index;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(raw.slice(start, index + 1));
+    }
+  }
+  return null;
+}
+
+async function fastGoogleWorkspacePublicStatus(request = null) {
+  const origin = requestOrigin(request);
+  if (googleWorkspaceStatusCache.status && googleWorkspaceStatusCache.origin === origin && Date.now() - googleWorkspaceStatusCache.at < googleWorkspaceStatusCacheMs) {
+    return { ...googleWorkspaceStatusCache.status, generatedAt: new Date().toISOString() };
+  }
+  let workspace = googleWorkspaceCloneEmpty();
+  try {
+    await ensureStore();
+    const raw = await readFile(storePath, "utf8");
+    workspace = normalizeGoogleWorkspaceStore(jsonObjectProperty(raw, "googleWorkspace") || {});
+  } catch {}
+  const status = googleWorkspacePublicStatus({ googleWorkspace: workspace }, request);
+  googleWorkspaceStatusCache = { at: Date.now(), status, origin };
+  return status;
+}
+
 async function signGoogleState(request) {
   const payload = {
     type: "google-workspace-oauth",
@@ -4786,9 +4840,7 @@ async function googleUserProfile(accessToken) {
 async function handleGoogleOAuthStart(request, response) {
   const config = googleClientConfig(request);
   if (!config.configured) {
-    sendError(response, 400, "Google Workspace OAuth is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render.", {
-      setup: googleWorkspacePublicStatus({}, request).setup,
-    });
+    redirectTo(response, `/?google=error&message=${encodeURIComponent("Google Workspace is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on Render, then connect again.")}#settings`);
     return;
   }
   const state = await signGoogleState(request);
@@ -9991,6 +10043,8 @@ const vehicleOptionSourceWeight = {
 const vehicleOptionsCacheMs = 10 * 60 * 1000;
 let vehicleOptionBaseRowsCache = { at: 0, rows: [] };
 const vehicleOptionsResponseCache = new Map();
+const googleWorkspaceStatusCacheMs = 15 * 1000;
+let googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
 
 function vehicleOptionRowScore(row = {}) {
   let score = vehicleOptionSourceWeight[row.source] || 0;
@@ -13533,6 +13587,11 @@ async function handleApi(request, response, pathname) {
   const auth = await enforceApiAuth(request, response, pathname);
   if (!auth) return;
 
+  if (request.method === "GET" && pathname === "/api/google/status") {
+    sendJson(response, 200, await fastGoogleWorkspacePublicStatus(request), { "Cache-Control": "private, max-age=15" });
+    return;
+  }
+
   if (request.method === "GET" && pathname === "/api/storage/status") {
     sendJson(response, 200, await buildStorageStatus());
     return;
@@ -13684,11 +13743,6 @@ async function handleApi(request, response, pathname) {
 
   if (request.method === "GET" && pathname === "/api/metka-bridge") {
     sendJson(response, 200, buildMetkaBridgeStatus(store));
-    return;
-  }
-
-  if (request.method === "GET" && pathname === "/api/google/status") {
-    sendJson(response, 200, googleWorkspacePublicStatus(store, request));
     return;
   }
 
