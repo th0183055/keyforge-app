@@ -155,6 +155,10 @@ const quickVinStartForm = document.querySelector("#quickVinStartForm");
 const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
 const startJobStatus = document.querySelector("#startJobStatus");
 const workspaceBridgeSummary = document.querySelector("#workspaceBridgeSummary");
+const startMenuButton = document.querySelector("#startMenuButton");
+const startMenuPanel = document.querySelector("#startMenuPanel");
+const startMenuBackdrop = document.querySelector("#startMenuBackdrop");
+const closeStartMenuButton = document.querySelector("#closeStartMenuButton");
 const missionControlResult = document.querySelector("#missionControlResult");
 const missionControlStatus = document.querySelector("#missionControlStatus");
 const refreshMissionControlButton = document.querySelector("#refreshMissionControl");
@@ -388,6 +392,7 @@ function showView(id, options = {}) {
   });
   activeViewId = id;
   document.body.classList.toggle("is-start-screen", id === "command");
+  if (id !== "command") closeStartMenu();
   updateRouteChrome(id);
   if (push && previousViewId && previousViewId !== id) {
     appRouteStack.push(previousViewId);
@@ -467,6 +472,18 @@ function setMobileMenu(open) {
 
 function closeMobileMenu() {
   setMobileMenu(false);
+}
+
+function setStartMenu(open) {
+  const shouldOpen = Boolean(open && activeViewId === "command");
+  document.body.classList.toggle("start-menu-open", shouldOpen);
+  if (startMenuButton) startMenuButton.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+  if (startMenuPanel) startMenuPanel.hidden = !shouldOpen;
+  if (startMenuBackdrop) startMenuBackdrop.hidden = !shouldOpen;
+}
+
+function closeStartMenu() {
+  setStartMenu(false);
 }
 
 function setAppStatus(label, tone = "online", detail = "") {
@@ -11437,9 +11454,17 @@ mobileMenuToggle?.addEventListener("click", () => {
 });
 
 mobileMenuBackdrop?.addEventListener("click", closeMobileMenu);
+startMenuButton?.addEventListener("click", () => {
+  setStartMenu(!document.body.classList.contains("start-menu-open"));
+});
+startMenuBackdrop?.addEventListener("click", closeStartMenu);
+closeStartMenuButton?.addEventListener("click", closeStartMenu);
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeMobileMenu();
+  if (event.key === "Escape") {
+    closeMobileMenu();
+    closeStartMenu();
+  }
 });
 
 window.addEventListener("popstate", () => {

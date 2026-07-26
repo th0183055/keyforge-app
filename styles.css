@@ -10546,6 +10546,12 @@ body.mode-subscriber #command .global-search-form {
 }
 
 /* Red/black launch screen: VIN or YMM only */
+.start-menu-button,
+.start-menu-backdrop,
+.start-menu-panel {
+  display: none;
+}
+
 body.is-start-screen {
   background:
     linear-gradient(135deg, #050607 0%, #101216 48%, #30080d 100%),
@@ -10571,6 +10577,152 @@ body.is-start-screen #command #globalSearchForm,
 body.is-start-screen #command #globalSearchStatus,
 body.is-start-screen #command #globalSearchResult {
   display: none !important;
+}
+
+body.is-start-screen #command .start-menu-button {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 74;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  min-height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background:
+    linear-gradient(135deg, #e02430, #850b14),
+    #b3121d;
+  color: #ffffff;
+  font-weight: 900;
+  text-transform: uppercase;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.34);
+}
+
+body.is-start-screen #command .start-menu-backdrop:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: block;
+  background: rgba(0, 0, 0, 0.46);
+}
+
+body.is-start-screen #command .start-menu-panel:not([hidden]) {
+  position: fixed;
+  top: max(70px, calc(env(safe-area-inset-top) + 64px));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 73;
+  display: grid;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 92px);
+  gap: 12px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(145deg, #16181e 0%, #090a0d 72%),
+    #090a0d;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.48);
+  color: #ffffff;
+}
+
+body.is-start-screen .start-menu-head,
+body.is-start-screen .start-menu-mode {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body.is-start-screen .start-menu-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+}
+
+body.is-start-screen .start-menu-head strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
+body.is-start-screen .start-menu-mode {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+body.is-start-screen .start-menu-mode > span {
+  color: #ffb3b8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.is-start-screen .start-menu-mode .mode-toggle {
+  min-width: 190px;
+}
+
+body.is-start-screen .start-menu-mode .mode-toggle button {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+body.is-start-screen .start-menu-mode .mode-toggle button.active {
+  background: #ffffff;
+  color: #0b0c10;
+}
+
+body.is-start-screen .start-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen .start-menu-grid button {
+  display: grid;
+  min-height: 72px;
+  gap: 4px;
+  align-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-left: 4px solid #b3121d;
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #ffffff;
+  text-align: left;
+}
+
+body.is-start-screen .start-menu-grid button:hover {
+  border-left-color: #ff3140;
+  background: rgba(224, 36, 48, 0.18);
+}
+
+body.is-start-screen .start-menu-grid span,
+body.is-start-screen .start-menu-grid small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen .start-menu-grid span {
+  font-weight: 900;
+  line-height: 1.08;
+}
+
+body.is-start-screen .start-menu-grid small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+body.is-start-screen .owner-menu-grid {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
 }
 
 body.is-start-screen main {
@@ -10678,7 +10830,7 @@ body.is-start-screen #startJobStatus[data-tone="warn"] {
 
 @media (max-width: 760px) {
   body.is-start-screen main {
-    padding: 14px;
+    padding: 72px 14px 14px;
   }
 
   body.is-start-screen #command .start-job-grid {
@@ -10687,5 +10839,32 @@ body.is-start-screen #startJobStatus[data-tone="warn"] {
 
   body.is-start-screen #command .start-job-card {
     min-height: 0;
+  }
+
+  body.is-start-screen #command .start-menu-button {
+    top: 12px;
+    right: 12px;
+    min-width: 82px;
+  }
+
+  body.is-start-screen #command .start-menu-panel:not([hidden]) {
+    top: 64px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-height: calc(100dvh - 78px);
+  }
+
+  body.is-start-screen .start-menu-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen .start-menu-mode {
+    display: grid;
+  }
+
+  body.is-start-screen .start-menu-mode .mode-toggle {
+    width: 100%;
+    min-width: 0;
   }
 }

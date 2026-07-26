@@ -10,7 +10,7 @@
     <title>TimLock-App</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=red-black-start-20260726" />
+    <link rel="stylesheet" href="styles.css?v=red-black-start-menu-20260726" />
   </head>
   <body>
     <section class="auth-gate" id="authGate" hidden>
@@ -204,6 +204,40 @@
         </section>
         <section class="view active global-command-panel" id="command">
           <div class="start-job-shell">
+            <button class="start-menu-button" id="startMenuButton" type="button" aria-expanded="false" aria-controls="startMenuPanel">Menu</button>
+            <div class="start-menu-backdrop" id="startMenuBackdrop" hidden></div>
+            <aside class="start-menu-panel" id="startMenuPanel" aria-label="Start screen menu" hidden>
+              <div class="start-menu-head">
+                <div>
+                  <p class="eyebrow">Menu</p>
+                  <strong>Open tool</strong>
+                </div>
+                <button class="secondary-action small" id="closeStartMenuButton" type="button">Close</button>
+              </div>
+              <div class="start-menu-mode">
+                <span>View</span>
+                <div class="mode-toggle inline" aria-label="App mode">
+                  <button type="button" data-set-mode="subscriber">Subscriber</button>
+                  <button type="button" data-set-mode="owner">Owner</button>
+                </div>
+              </div>
+              <div class="start-menu-grid">
+                <button type="button" data-view-target="workbench"><span>Job Workbench</span><small>One packet</small></button>
+                <button type="button" data-view-target="loadout"><span>Job Loadout</span><small>What to bring</small></button>
+                <button type="button" data-view-target="part-history"><span>Part History</span><small>Used proof</small></button>
+                <button type="button" data-view-target="proof-vault"><span>Proof Vault</span><small>Evidence</small></button>
+                <button type="button" data-view-target="code-desk"><span>Code Desk</span><small>Codes and cuts</small></button>
+                <button type="button" data-view-target="lishi"><span>Lishi Lookup</span><small>Tool match</small></button>
+                <button type="button" data-view-target="coverage"><span>Coverage</span><small>Programmers</small></button>
+                <button type="button" data-view-target="ai"><span>AI Bench</span><small>Ask copilot</small></button>
+                <button type="button" data-view-target="learn"><span>Save Worked Job</span><small>Teach app</small></button>
+              </div>
+              <div class="start-menu-grid owner-menu-grid" data-owner-only>
+                <button type="button" data-view-target="metka-bridge"><span>Field Data Bridge</span><small>Metka / Sheets</small></button>
+                <button type="button" data-view-target="mission-control"><span>Mission Control</span><small>Owner health</small></button>
+                <button type="button" data-view-target="settings"><span>Settings</span><small>Storage / sources</small></button>
+              </div>
+            </aside>
             <div class="start-job-head">
               <div>
                 <p class="eyebrow">Start job</p>
