@@ -65,6 +65,7 @@ const apiTelemetry = {
 };
 const partHistoryRecentsKey = "timlockPartHistoryRecentSearches";
 const localJobArchiveKey = "timlockSavedJobsArchiveV1";
+const localScheduledJobsKey = "timlockScheduledJobsOutboxV1";
 const proofVaultAttachmentsKey = "timlockProofVaultAttachmentsV1";
 const codeDeskImportKey = "timlockCodeDeskImportsV1";
 const codeDeskSystemKey = "timlockCodeDeskSystemsV1";
@@ -4096,7 +4097,7 @@ function cleanInput(value) {
 }
 
 function jobSortTime(job = {}) {
-  return Date.parse(job.createdAt || job.importedAt || job.schedule || "") || 0;
+  return Date.parse(job.start || job.scheduledAt || job.schedule || job.createdAt || job.importedAt || "") || 0;
 }
 
 function mergeJobLists(...lists) {
@@ -4122,6 +4123,61 @@ function localArchivedJobs() {
 function rememberJobs(items = []) {
   const merged = mergeJobLists(localArchivedJobs(), items).slice(0, 1000);
   localStorage.setItem(localJobArchiveKey, JSON.stringify(merged));
+  return merged;
+}
+
+function normalizeLocalScheduledJob(job = {}) {
+  const start = cleanInput(job.start || job.scheduledAt || job.schedule);
+  const end = cleanInput(job.end);
+  const year = cleanInput(job.year || job.vehicle?.year || "");
+  const make = cleanInput(job.make || job.vehicle?.make || "");
+  const model = cleanInput(job.model || job.vehicle?.model || "");
+  const vehicle = cleanInput(job.vehicle && typeof job.vehicle === "string" ? job.vehicle : [year, make, model].filter(Boolean).join(" "));
+  const id =
+    cleanInput(job.id) ||
+    `local-${[start, job.customer, job.phone, job.location, job.vin, job.service].map((value) => cleanInput(value).replace(/\W+/g, "")).filter(Boolean).join("-")}` ||
+    `local-${Date.now()}`;
+  return {
+    ...job,
+    id,
+    source: cleanInput(job.source || "Start screen"),
+    createdAt: cleanInput(job.createdAt) || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    status: cleanInput(job.status || "scheduled"),
+    calendarSyncStatus: cleanInput(job.calendarSyncStatus || "pending"),
+    calendarError: cleanInput(job.calendarError),
+    service: cleanInput(job.service || "Locksmith service"),
+    customer: cleanInput(job.customer),
+    phone: cleanInput(job.phone),
+    location: cleanInput(job.location),
+    notes: cleanInput(job.notes),
+    vin: normalizeVinInput(job.vin || ""),
+    year,
+    make,
+    model,
+    vehicle,
+    start,
+    end,
+  };
+}
+
+function localScheduledJobs() {
+  const stored = readLocalObject(localScheduledJobsKey, { jobs: [] });
+  const jobsList = Array.isArray(stored.jobs) ? stored.jobs : Array.isArray(stored) ? stored : [];
+  return jobsList.map(normalizeLocalScheduledJob).filter((job) => job.id);
+}
+
+function rememberScheduledJob(job = {}) {
+  const normalized = normalizeLocalScheduledJob(job);
+  const merged = mergeJobLists([normalized], localScheduledJobs()).slice(0, 100);
+  writeLocalObject(localScheduledJobsKey, { version: 1, updatedAt: new Date().toISOString(), jobs: merged });
+  return normalized;
+}
+
+function rememberSyncedScheduledJobs(items = []) {
+  if (!items.length) return localScheduledJobs();
+  const merged = mergeJobLists(items.map(normalizeLocalScheduledJob), localScheduledJobs()).slice(0, 100);
+  writeLocalObject(localScheduledJobsKey, { version: 1, updatedAt: new Date().toISOString(), jobs: merged });
   return merged;
 }
 
@@ -6368,9 +6424,15 @@ async function scheduleJobFromStart() {
       timeoutMs: 9000,
       noStatus: true,
     });
+    rememberScheduledJob({
+      ...payload,
+      ...(result.job || {}),
+      calendarError: result.calendarError || result.job?.calendarError || "",
+    });
     const eventText = result.event?.htmlLink ? "Calendar event created." : result.calendarError || "Job saved in TimLock.";
     setStartJobStatus(`Saved: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, "ready");
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
+    if (!result.event?.htmlLink && result.job?.id) syncScheduledJobCalendar(result.job.id, { quiet: true });
     delete quickScheduleJobForm.dataset.pendingId;
     quickScheduleJobForm.reset();
     latestWorkspaceBrief = null;
@@ -6378,7 +6440,62 @@ async function scheduleJobFromStart() {
     await loadWorkspaceBrief();
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
-    setStartJobStatus(`Schedule pending: ${error.message} Check Dispatch before sending it again.`, "warn");
+    const localJob = rememberScheduledJob({
+      ...payload,
+      status: "scheduled",
+      calendarSyncStatus: "pending-server",
+      calendarError: error.message,
+    });
+    setStartJobStatus(`Saved on this device: ${localJob.customer || localJob.vehicle || localJob.service || "job"}. Calendar sync is retrying.`, "ready");
+    retryScheduledJobServerSync(localJob);
+    delete quickScheduleJobForm.dataset.pendingId;
+    quickScheduleJobForm.reset();
+    latestDispatchIntelligence = null;
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
+  }
+}
+
+async function syncScheduledJobCalendar(id = "", options = {}) {
+  const cleanId = cleanInput(id);
+  if (!cleanId) return null;
+  try {
+    const payload = await api("/api/schedule-job/sync-calendar", {
+      method: "POST",
+      body: JSON.stringify({ id: cleanId, localScheduledJobs: localScheduledJobs() }),
+      timeoutMs: 35000,
+      noStatus: true,
+    });
+    rememberSyncedScheduledJobs(payload.jobs || []);
+    const synced = (payload.jobs || []).find((job) => job.id === cleanId);
+    if (!options.quiet && synced?.calendarHtmlLink) setStartJobStatus("Calendar event created.", "ready");
+    latestDispatchIntelligence = null;
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
+    return payload;
+  } catch (error) {
+    const existing = localScheduledJobs().find((job) => job.id === cleanId);
+    if (existing) rememberScheduledJob({ ...existing, calendarSyncStatus: "delayed", calendarError: error.message });
+    if (!options.quiet) setStartJobStatus(`Calendar sync delayed: ${error.message}`, "warn");
+    return null;
+  }
+}
+
+async function retryScheduledJobServerSync(job = {}) {
+  const localJob = normalizeLocalScheduledJob(job);
+  try {
+    const result = await api("/api/schedule-job", {
+      method: "POST",
+      body: JSON.stringify(localJob),
+      timeoutMs: 35000,
+      noStatus: true,
+    });
+    rememberScheduledJob({
+      ...localJob,
+      ...(result.job || {}),
+      calendarError: result.calendarError || result.job?.calendarError || "",
+    });
+    if (!result.event?.htmlLink) await syncScheduledJobCalendar(localJob.id, { quiet: true });
+  } catch (error) {
+    rememberScheduledJob({ ...localJob, calendarSyncStatus: "pending-server", calendarError: error.message });
   }
 }
 
@@ -6469,6 +6586,63 @@ async function importServiceIntake() {
   }
 }
 
+function localDispatchItemFromScheduledJob(job = {}) {
+  const localJob = normalizeLocalScheduledJob(job);
+  const vehicleLabel = cleanInput(localJob.vehicle || [localJob.year, localJob.make, localJob.model].filter(Boolean).join(" "));
+  const title = cleanInput([localJob.service, vehicleLabel, localJob.customer].filter(Boolean).join(" ") || "Scheduled job");
+  return {
+    id: `scheduled:${localJob.id}`,
+    source: "timlock-schedule",
+    sourceLabel: "TimLock Schedule",
+    sourceId: localJob.id,
+    title,
+    customer: localJob.customer,
+    phone: localJob.phone,
+    service: localJob.service,
+    location: localJob.location,
+    start: localJob.start,
+    vin: localJob.vin,
+    vehicleLabel,
+    status: localJob.calendarSyncStatus === "created" ? "calendar-created" : "local-saved",
+    calendarHtmlLink: localJob.calendarHtmlLink,
+    calendarSyncStatus: localJob.calendarSyncStatus,
+  };
+}
+
+function localDispatchFallbackPayload(error = null) {
+  const queue = localScheduledJobs().map(localDispatchItemFromScheduledJob).slice(0, 40);
+  const selected = queue[0] || null;
+  return {
+    generatedAt: new Date().toISOString(),
+    days: 14,
+    google: latestGoogleWorkspace || {},
+    sources: { calendar: 0, intake: 0, scheduled: queue.length },
+    summary: {
+      total: queue.length,
+      connectedCalendar: Boolean(latestGoogleWorkspace?.connected),
+      selectedId: selected?.id || "",
+      readyPackets: selected ? 1 : 0,
+    },
+    queue,
+    selected,
+    packet: selected
+      ? {
+          title: selected.title,
+          confidencePercent: 35,
+          confidenceLabel: "Local queue",
+          primary: "Verify in Dispatch",
+          backup: "Server sync pending",
+          programmer: "Verify",
+          lishi: "Verify",
+          checklist: ["Job is saved on this device.", "Retry Dispatch or Calendar sync when the server answers.", "Confirm vehicle and proof before dispatch."],
+          gaps: [error?.message || "Server did not return a full dispatch packet yet."],
+        }
+      : null,
+    loadout: null,
+    next: queue.length ? ["Retry Dispatch sync.", "Open the saved job when the server responds."] : ["Schedule a job from the start screen."],
+  };
+}
+
 function dispatchFormPayload(overrides = {}) {
   const data = dispatchIntelligenceForm ? new FormData(dispatchIntelligenceForm) : new FormData();
   const days = Math.max(1, Math.min(90, Number(data.get("days") || overrides.days || 14)));
@@ -6478,6 +6652,7 @@ function dispatchFormPayload(overrides = {}) {
     q,
     id: cleanInput(overrides.id || ""),
     syncCalendar: Boolean(overrides.syncCalendar),
+    localScheduledJobs: localScheduledJobs(),
     limit: 40,
   };
 }
@@ -6634,6 +6809,12 @@ async function loadDispatchIntelligence(options = {}) {
     }
     return result;
   } catch (error) {
+    const fallback = localDispatchFallbackPayload(error);
+    if (fallback.queue.length) {
+      renderDispatchIntelligence(fallback);
+      if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = `Dispatch showing ${fallback.queue.length} local saved job${fallback.queue.length === 1 ? "" : "s"} while server sync catches up.`;
+      return fallback;
+    }
     if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = `Dispatch unavailable: ${error.message}`;
     dispatchIntelligenceResult.innerHTML = `<article class="assistant-card"><strong>Dispatch unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
     return null;
@@ -6667,6 +6848,19 @@ async function dispatchAction(id = "", action = "", button = null) {
   }
   if (action === "calendar") {
     if (item.calendarHtmlLink) window.open(item.calendarHtmlLink, "_blank", "noopener");
+    return;
+  }
+  if (action === "promote" && item.source === "timlock-schedule") {
+    const scheduleId = cleanInput(item.sourceId || item.id.replace(/^scheduled:/, ""));
+    if (dispatchIntelligenceStatus) dispatchIntelligenceStatus.textContent = "Sending TimLock job to Google Calendar...";
+    const result = await syncScheduledJobCalendar(scheduleId, { quiet: true });
+    const synced = (result?.jobs || []).find((job) => job.id === scheduleId);
+    if (dispatchIntelligenceStatus) {
+      dispatchIntelligenceStatus.textContent = synced?.calendarHtmlLink
+        ? "Calendar event created."
+        : synced?.calendarError || result?.message || "Calendar sync queued.";
+    }
+    if (synced?.calendarHtmlLink) window.open(synced.calendarHtmlLink, "_blank", "noopener");
     return;
   }
   const endpointByAction = {

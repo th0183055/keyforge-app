@@ -1,4 +1,4 @@
-const CACHE_NAME = "timlock-shell-v25";
+const CACHE_NAME = "timlock-shell-v26";
 const SHELL_ASSETS = [
   "/",
   "/index.html",

@@ -5016,6 +5016,10 @@ function normalizeScheduleJobInput(input = {}) {
     start: start.toISOString(),
     end: end.toISOString(),
     durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
+    calendarEventId: cleanString(input.calendarEventId),
+    calendarHtmlLink: cleanString(input.calendarHtmlLink),
+    calendarSyncStatus: cleanString(input.calendarSyncStatus),
+    calendarError: cleanString(input.calendarError),
   };
 }
 
@@ -5082,6 +5086,96 @@ function queueScheduledJobCalendarSync(request, jobId) {
       }
     }
   }, 0);
+}
+
+function scheduledJobKey(job = {}) {
+  return cleanString(job.id) || metkaStableId("scheduled-job", [job.start, job.customer, job.phone, job.location, job.vin, job.service]);
+}
+
+function scheduledJobSortValue(job = {}) {
+  return Date.parse(job.start || job.scheduledAt || job.schedule || job.createdAt || "") || 0;
+}
+
+function mergeScheduledJobs(...lists) {
+  const merged = new Map();
+  for (const job of lists.flat()) {
+    if (!job || typeof job !== "object") continue;
+    const normalized = normalizeScheduleJobInput(job);
+    const key = scheduledJobKey(normalized);
+    merged.set(key, { ...(merged.get(key) || {}), ...normalized, id: key });
+  }
+  return Array.from(merged.values()).sort((a, b) => scheduledJobSortValue(a) - scheduledJobSortValue(b));
+}
+
+async function syncScheduledJobsToCalendar(request, store, input = {}) {
+  const incoming = [];
+  if (input.job && typeof input.job === "object") incoming.push(input.job);
+  if (Array.isArray(input.localScheduledJobs)) incoming.push(...input.localScheduledJobs);
+  if (incoming.length) {
+    store.scheduledJobs = mergeScheduledJobs(incoming, store.scheduledJobs || []).slice(0, 2000);
+  }
+
+  const requestedId = cleanString(input.id || input.jobId);
+  const jobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
+  if (!googleWorkspaceConnected(store.googleWorkspace)) {
+    await writeStore(store);
+    return {
+      ok: false,
+      synced: 0,
+      delayed: jobs.filter((job) => !job.calendarEventId).length,
+      jobs: jobs.slice(0, 200),
+      google: googleWorkspacePublicStatus(store, request),
+      message: "Google Workspace is not connected yet.",
+    };
+  }
+
+  const candidates = jobs
+    .filter((job) => !job.calendarEventId)
+    .filter((job) => !requestedId || job.id === requestedId)
+    .slice(0, requestedId ? 1 : 10);
+  const results = [];
+
+  for (const job of candidates) {
+    try {
+      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
+        signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
+      });
+      const calendarEvent = created.event || null;
+      if (!calendarEvent?.id) throw new Error("Google Calendar did not return an event id.");
+      const updatedJob = {
+        ...job,
+        calendarEventId: calendarEvent.id,
+        calendarHtmlLink: calendarEvent.htmlLink || "",
+        calendarSyncStatus: "created",
+        calendarError: "",
+        status: "calendar-created",
+        updatedAt: new Date().toISOString(),
+      };
+      store.scheduledJobs = [updatedJob, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+      results.push({ id: job.id, ok: true, event: calendarEvent });
+    } catch (error) {
+      const updatedJob = {
+        ...job,
+        calendarSyncStatus: "delayed",
+        calendarError: googleBestEffortError(error, googleCalendarWriteTimeoutMs),
+        updatedAt: new Date().toISOString(),
+      };
+      store.scheduledJobs = [updatedJob, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+      results.push({ id: job.id, ok: false, error: updatedJob.calendarError });
+    }
+  }
+
+  await writeStore(store);
+  const latestJobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
+  return {
+    ok: results.some((result) => result.ok),
+    synced: results.filter((result) => result.ok).length,
+    delayed: results.filter((result) => !result.ok).length,
+    results,
+    jobs: latestJobs.slice(0, 200),
+    google: googleWorkspacePublicStatus(store, request),
+    message: results.length ? "Calendar sync attempted." : "No pending scheduled jobs needed Calendar sync.",
+  };
 }
 
 async function createScheduledJob(request, store, input = {}) {
@@ -5519,6 +5613,12 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   const days = Math.max(1, Math.min(90, Number(body.days || body.windowDays || 14)));
   if (body.syncCalendar && options.canSyncCalendar && googleWorkspaceConnected(store.googleWorkspace)) {
     await syncGoogleCalendarEvents(request, store, { days });
+  }
+  if (Array.isArray(body.localScheduledJobs) && body.localScheduledJobs.length) {
+    store = {
+      ...store,
+      scheduledJobs: mergeScheduledJobs(body.localScheduledJobs, store.scheduledJobs || []),
+    };
   }
   const requestedId = cleanString(body.id || body.dispatchId || body.itemId);
   const requestedQuery = cleanString(body.q || body.query);
@@ -14012,6 +14112,16 @@ async function handleApi(request, response, pathname) {
       sendJson(response, 201, await createScheduledJob(request, scheduleStore, await readJsonBody(request)));
     } catch (error) {
       sendError(response, 400, `Schedule job failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/schedule-job/sync-calendar") {
+    try {
+      const scheduleStore = await readStore();
+      sendJson(response, 200, await syncScheduledJobsToCalendar(request, scheduleStore, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Schedule Calendar sync failed: ${error.message}`);
     }
     return;
   }
