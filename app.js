@@ -6333,7 +6333,12 @@ async function syncGoogleSheetToBridge() {
 function startSchedulePayload() {
   const data = new FormData(quickScheduleJobForm);
   const ymm = selectedYmmValues(quickYmmStartForm);
+  if (quickScheduleJobForm && !quickScheduleJobForm.dataset.pendingId) {
+    const suffix = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    quickScheduleJobForm.dataset.pendingId = `start-${suffix}`;
+  }
   return {
+    id: cleanInput(quickScheduleJobForm?.dataset.pendingId || ""),
     source: "Start screen",
     start: cleanInput(data.get("scheduledAt")),
     customer: cleanInput(data.get("customer")),
@@ -6360,19 +6365,20 @@ async function scheduleJobFromStart() {
     const result = await api("/api/schedule-job", {
       method: "POST",
       body: JSON.stringify(payload),
-      timeoutMs: 18000,
+      timeoutMs: 9000,
       noStatus: true,
     });
     const eventText = result.event?.htmlLink ? "Calendar event created." : result.calendarError || "Job saved in TimLock.";
     setStartJobStatus(`Saved: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, "ready");
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
+    delete quickScheduleJobForm.dataset.pendingId;
     quickScheduleJobForm.reset();
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
     await loadWorkspaceBrief();
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
-    setStartJobStatus(`Schedule failed: ${error.message}`, "warn");
+    setStartJobStatus(`Schedule pending: ${error.message} Check Dispatch before sending it again.`, "warn");
   }
 }
 

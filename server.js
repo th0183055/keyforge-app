@@ -5039,29 +5039,66 @@ function scheduleJobCalendarBody(job = {}) {
   };
 }
 
+function queueScheduledJobCalendarSync(request, jobId) {
+  setTimeout(async () => {
+    try {
+      const store = await readStore();
+      if (!googleWorkspaceConnected(store.googleWorkspace)) return;
+      const jobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
+      const job = jobs.find((item) => item.id === jobId);
+      if (!job || job.calendarEventId) return;
+      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
+        signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
+      });
+      const calendarEvent = created.event || null;
+      if (!calendarEvent?.id) return;
+      const updatedJob = {
+        ...job,
+        calendarEventId: calendarEvent.id,
+        calendarHtmlLink: calendarEvent.htmlLink || "",
+        calendarSyncStatus: "created",
+        calendarError: "",
+        status: "calendar-created",
+        updatedAt: new Date().toISOString(),
+      };
+      store.scheduledJobs = [updatedJob, ...jobs.filter((item) => item.id !== jobId)].slice(0, 2000);
+      await writeStore(store);
+    } catch (error) {
+      try {
+        const store = await readStore();
+        const jobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
+        const job = jobs.find((item) => item.id === jobId);
+        if (!job || job.calendarEventId) return;
+        const updatedJob = {
+          ...job,
+          calendarSyncStatus: "delayed",
+          calendarError: googleBestEffortError(error, googleCalendarWriteTimeoutMs),
+          updatedAt: new Date().toISOString(),
+        };
+        store.scheduledJobs = [updatedJob, ...jobs.filter((item) => item.id !== jobId)].slice(0, 2000);
+        await writeStore(store);
+      } catch (writeError) {
+        console.warn("Scheduled job Calendar sync status failed", writeError);
+      }
+    }
+  }, 0);
+}
+
 async function createScheduledJob(request, store, input = {}) {
   const job = normalizeScheduleJobInput(input);
   let calendarEvent = null;
   let calendarError = "";
-  store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
-  await writeStore(store);
-  if (googleWorkspaceConnected(store.googleWorkspace)) {
-    try {
-      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
-        signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
-      });
-      calendarEvent = created.event || null;
-      job.calendarEventId = calendarEvent?.id || "";
-      job.calendarHtmlLink = calendarEvent?.htmlLink || "";
-      job.status = job.calendarEventId ? "calendar-created" : job.status;
-      store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
-      await writeStore(store);
-    } catch (error) {
-      calendarError = googleBestEffortError(error, googleCalendarWriteTimeoutMs);
-    }
+  const calendarQueued = googleWorkspaceConnected(store.googleWorkspace);
+  if (calendarQueued) {
+    job.calendarSyncStatus = "queued";
+    calendarError = "Calendar sync queued. Dispatch will show the event link after Google finishes.";
   } else {
+    job.calendarSyncStatus = "not-connected";
     calendarError = "Google Workspace is not connected yet. The job was saved in TimLock and can be sent to Calendar after setup.";
   }
+  store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
+  await writeStore(store);
+  if (calendarQueued) queueScheduledJobCalendarSync(request, job.id);
   return {
     ok: true,
     job,
@@ -13969,6 +14006,16 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/schedule-job") {
+    try {
+      const scheduleStore = await readStore();
+      sendJson(response, 201, await createScheduledJob(request, scheduleStore, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Schedule job failed: ${error.message}`);
+    }
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/storage/diagnostics") {
     sendJson(response, 200, await runStorageDiagnostics());
     return;
@@ -14114,15 +14161,6 @@ async function handleApi(request, response, pathname) {
       sendJson(response, 201, await createDispatchDriveFolder(request, store, await readJsonBody(request)));
     } catch (error) {
       sendError(response, 400, `Dispatch Drive folder failed: ${error.message}`);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/api/schedule-job") {
-    try {
-      sendJson(response, 201, await createScheduledJob(request, store, await readJsonBody(request)));
-    } catch (error) {
-      sendError(response, 400, `Schedule job failed: ${error.message}`);
     }
     return;
   }
