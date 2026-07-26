@@ -262,75 +262,75 @@ const refreshAiCommanderButton = document.querySelector("#refreshAiCommander");
 const routeMeta = {
   command: {
     eyebrow: "Command center",
-    title: "Search everything. Open the exact tool as a clean page.",
+    title: "Search the job. Open the answer.",
   },
   "mission-control": {
     eyebrow: "Owner command",
-    title: "Run the platform from backend health to field readiness.",
+    title: "Run the platform.",
   },
   "training-center": {
     eyebrow: "Owner training",
-    title: "Backtest saved jobs and teach the Decision Engine.",
+    title: "Train the Decision Engine.",
   },
   vin: {
     eyebrow: "VIN to key",
-    title: "Scan a VIN. See the vehicle, keys, tools, and programming path.",
+    title: "VIN to key path.",
   },
   workbench: {
     eyebrow: "Unified job context",
-    title: "Build one packet for parts, proof, tools, and the next move.",
+    title: "One packet. One next move.",
   },
   loadout: {
     eyebrow: "Field inventory",
-    title: "Build the truck kit for this job.",
+    title: "What to bring.",
   },
   "part-history": {
     eyebrow: "Proof trail",
-    title: "Search part numbers against cross-reference and saved jobs.",
+    title: "Part proof history.",
   },
   "proof-vault": {
     eyebrow: "Evidence locker",
-    title: "Find job proof, attachments, authorization, and coverage evidence.",
+    title: "Proof, authorization, and outcomes.",
   },
   "code-desk": {
     eyebrow: "Lock decode",
-    title: "Look up code systems, bitting, cuts, and automotive code baseline.",
+    title: "Codes, cuts, and bitting.",
   },
   lishi: {
     eyebrow: "Pick / decode reference",
-    title: "Find Lishi tools and vehicle applications from your master list.",
+    title: "Lishi tool match.",
   },
   "reference-lists": {
     eyebrow: "Owner reference shelf",
-    title: "Inspect the raw lists that power the app.",
+    title: "Raw data shelf.",
   },
   "metka-bridge": {
     eyebrow: "Owner data room",
-    title: "Bridge Metka operations into TimLock field decisions.",
+    title: "Metka into field decisions.",
   },
   coverage: {
     eyebrow: "Observed proof",
-    title: "See programmer and part coverage from saved work.",
+    title: "Programmer coverage proof.",
   },
   learn: {
     eyebrow: "Teach TimLock-App",
-    title: "Save worked jobs so the app gets sharper.",
+    title: "Save worked proof.",
   },
   settings: {
     eyebrow: "Parts setup",
-    title: "Connect suppliers and app data sources.",
+    title: "Sources and storage.",
   },
   launch: {
     eyebrow: "Sell TimLock",
-    title: "Launch TimLock Field OS as a paid locksmith product.",
+    title: "Launch the product.",
   },
   about: {
     eyebrow: "TimLock-App",
-    title: "Professional locksmith intelligence, built around verified work.",
+    title: "Built around verified work.",
   },
   ai: {
     eyebrow: "Professional assistant",
-    title: "Ask for safe prep, quote, and technician workflow help.",
+    title: "AI for the current job.",
   },
 };
 let activeViewId = document.querySelector(".view.active")?.id || "command";
