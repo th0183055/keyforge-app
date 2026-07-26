@@ -387,6 +387,7 @@ function showView(id, options = {}) {
     if (hasActiveRoute) group.open = true;
   });
   activeViewId = id;
+  document.body.classList.toggle("is-start-screen", id === "command");
   updateRouteChrome(id);
   if (push && previousViewId && previousViewId !== id) {
     appRouteStack.push(previousViewId);

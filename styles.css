@@ -10544,3 +10544,148 @@ body.mode-subscriber #command .global-search-form {
     min-height: 0;
   }
 }
+
+/* Red/black launch screen: VIN or YMM only */
+body.is-start-screen {
+  background:
+    linear-gradient(135deg, #050607 0%, #101216 48%, #30080d 100%),
+    #050607;
+}
+
+body.is-start-screen .app-shell {
+  grid-template-columns: 1fr;
+}
+
+body.is-start-screen .sidebar,
+body.is-start-screen .mobile-menu-toggle,
+body.is-start-screen .mobile-menu-backdrop,
+body.is-start-screen main > .topbar,
+body.is-start-screen main > .app-status-banner,
+body.is-start-screen main > .ai-route-card,
+body.is-start-screen main > .field-os-panel,
+body.is-start-screen #command .start-job-head,
+body.is-start-screen #command .workspace-bridge-summary,
+body.is-start-screen #command .subscriber-path-strip,
+body.is-start-screen #command .deep-search-head,
+body.is-start-screen #command #globalSearchForm,
+body.is-start-screen #command #globalSearchStatus,
+body.is-start-screen #command #globalSearchResult {
+  display: none !important;
+}
+
+body.is-start-screen main {
+  justify-content: center;
+  padding: clamp(18px, 4vw, 44px);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0)),
+    transparent;
+}
+
+body.is-start-screen #command.global-command-panel,
+body.is-start-screen main > .view.active {
+  width: min(100%, 980px);
+}
+
+body.is-start-screen #command .start-job-shell {
+  gap: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: clamp(14px, 2.5vw, 24px);
+  background:
+    linear-gradient(145deg, rgba(15, 17, 21, 0.98), rgba(4, 5, 7, 0.98)),
+    #07080b;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+}
+
+body.is-start-screen #command .start-job-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(12px, 2vw, 18px);
+}
+
+body.is-start-screen #command .start-job-card {
+  min-height: 230px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 5px solid #b3121d;
+  border-radius: 8px;
+  padding: clamp(16px, 2vw, 22px);
+  background:
+    linear-gradient(180deg, #17191f, #0b0c10),
+    #0b0c10;
+  color: #f7f8fa;
+}
+
+body.is-start-screen #command .start-job-card.primary-start {
+  border-color: rgba(224, 36, 48, 0.38);
+  border-left-color: #e02430;
+  background:
+    linear-gradient(145deg, #2b070c 0%, #111318 62%, #07080b 100%),
+    #0b0c10;
+}
+
+body.is-start-screen #command .start-job-card .eyebrow,
+body.is-start-screen #command .start-job-card label,
+body.is-start-screen #command .start-job-card.primary-start .eyebrow,
+body.is-start-screen #command .start-job-card.primary-start label {
+  color: #ffb3b8;
+}
+
+body.is-start-screen #command .start-job-card strong {
+  color: #ffffff;
+  font-size: clamp(1.35rem, 2.4vw, 2rem);
+}
+
+body.is-start-screen #command .start-job-card input {
+  min-height: 52px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: #f9fafb;
+  color: #08090c;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+body.is-start-screen #command .start-job-card input:focus {
+  border-color: #e02430;
+  outline: 3px solid rgba(224, 36, 48, 0.24);
+}
+
+body.is-start-screen #command .primary-action {
+  min-height: 50px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    linear-gradient(135deg, #e02430, #8f0d17),
+    #b3121d;
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(179, 18, 29, 0.24);
+}
+
+body.is-start-screen #command .primary-action:hover {
+  background:
+    linear-gradient(135deg, #ff3140, #a5101b),
+    #d41624;
+}
+
+body.is-start-screen #startJobStatus {
+  display: none;
+  border-color: rgba(224, 36, 48, 0.34);
+  background: rgba(224, 36, 48, 0.12);
+  color: #ffd6d9;
+}
+
+body.is-start-screen #startJobStatus[data-tone="warn"] {
+  display: block;
+}
+
+@media (max-width: 760px) {
+  body.is-start-screen main {
+    padding: 14px;
+  }
+
+  body.is-start-screen #command .start-job-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .start-job-card {
+    min-height: 0;
+  }
+}
