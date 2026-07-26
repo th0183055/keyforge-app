@@ -4981,28 +4981,66 @@ function scheduleDateTime(value) {
   return date && Number.isFinite(date.getTime()) ? date : null;
 }
 
+function scheduleNoteField(notes = "", label = "") {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return cleanString(notes.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+)$`, "im"))?.[1] || "");
+}
+
+function parseScheduleJobNotes(notes = "") {
+  const text = cleanString(notes);
+  if (!text) return {};
+  const partProgrammer = text.match(/^\s*([A-Z0-9][A-Z0-9#/_ -]{2,40})\s*\+\s*([A-Z][A-Z0-9 ._-]{1,30})\s*$/im);
+  const totalLine = text.match(/(?:TOTAL STOP AMOUNT|TOTAL|AMOUNT)\s*:\s*\$?\s*([0-9,.]+)/i);
+  const amountWithBilling = text.match(/^\s*\$?\s*([0-9,.]+)\s*\[([a-z0-9 -]+)\]\s*$/im);
+  const chargeBreakdown = text.match(/^\s*([0-9,.]+\s*\+\s*[0-9,.]+(?:\s*[A-Z0-9./ -]+)?)\s*$/im);
+  const invoice = text.match(/\b(?:Sq\.?\s*Inv\.?|Invoice|Inv\.?)\s*#?\s*([A-Z0-9-]+)/i);
+  const billingLine = scheduleNoteField(text, "BILLING");
+  return {
+    status: scheduleNoteField(text, "STATUS"),
+    vin: extractVinsFromText(text)[0] || normalizeVinCandidate(text),
+    vehicle: scheduleNoteField(text, "Vehicle"),
+    service: scheduleNoteField(text, "Service"),
+    sourceId: scheduleNoteField(text, "Source ID") || cleanString(partProgrammer?.[1]),
+    addOns: scheduleNoteField(text, "Add-Ons"),
+    pricingLevel: scheduleNoteField(text, "PRICING LEVEL"),
+    billing: billingLine,
+    billingCode: cleanString(billingLine.match(/\[([^\]]+)\]/)?.[1] || amountWithBilling?.[2]),
+    price: cleanString(totalLine?.[1] || amountWithBilling?.[1]),
+    subtotal: cleanString(scheduleNoteField(text, "Subtotal").replace(/^\$/, "")),
+    payment: scheduleNoteField(text, "Payment") || (invoice ? `Sq. Inv. ${invoice[1]}` : ""),
+    partsUsed: scheduleNoteField(text, "Part(s) Used"),
+    programmer: cleanString(partProgrammer?.[2]),
+    programmerPath: cleanString(partProgrammer?.[0]),
+    chargeBreakdown: cleanString(chargeBreakdown?.[1]),
+    amountDue: cleanString(amountWithBilling?.[1]),
+    amountDueCode: cleanString(amountWithBilling?.[2]),
+  };
+}
+
 function normalizeScheduleJobInput(input = {}) {
   const vehicle = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
+  const rawNotes = cleanString(input.notes || input.description);
+  const parsedNotes = parseScheduleJobNotes(rawNotes);
   const year = vehicleOptionYear(input.year || vehicle.year);
   const make = vehicleOptionMakeLabel(input.make || vehicle.make);
   const model = vehicleOptionModelLabel(input.model || vehicle.model);
-  const vin = normalizeVinCandidate(input.vin || vehicle.vin);
-  const service = cleanString(input.service || input.serviceType || "Locksmith service");
+  const vin = normalizeVinCandidate(input.vin || vehicle.vin || parsedNotes.vin);
+  const service = cleanString(input.service || input.serviceType || parsedNotes.service || "Locksmith service");
   const customer = cleanString(input.customer || input.customerName || input.name);
   const phone = cleanString(input.phone || input.customerPhone || input.contact);
   const location = cleanString(input.location || input.address || input.jobAddress);
-  const notes = cleanString(input.notes || input.description);
+  const notes = rawNotes;
   const startDate = scheduleDateTime(input.start || input.scheduledAt || input.datetime || input.dateTime);
   const minutes = Math.max(30, Math.min(Number(input.durationMinutes) || 90, 480));
   const start = startDate || new Date(Date.now() + 60 * 60 * 1000);
   const end = scheduleDateTime(input.end) || new Date(start.getTime() + minutes * 60 * 1000);
-  const vehicleLabel = uniqueCleanValues([year, make, model]).join(" ");
+  const vehicleLabel = uniqueCleanValues([year, make, model]).join(" ") || parsedNotes.vehicle;
   return {
     id: cleanString(input.id) || randomUUID(),
     source: cleanString(input.source || "TimLock Start"),
     createdAt: cleanString(input.createdAt) || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    status: cleanString(input.status || "scheduled"),
+    status: cleanString(input.status || parsedNotes.status || "scheduled"),
     service,
     customer,
     phone,
@@ -5020,27 +5058,200 @@ function normalizeScheduleJobInput(input = {}) {
     calendarHtmlLink: cleanString(input.calendarHtmlLink),
     calendarSyncStatus: cleanString(input.calendarSyncStatus),
     calendarError: cleanString(input.calendarError),
+    sourceId: cleanString(input.sourceId || input.partSourceId || input.lrId || input.lr_id || parsedNotes.sourceId),
+    addOns: cleanString(input.addOns || input.addons || input.addOnCharges || parsedNotes.addOns),
+    pricingLevel: cleanString(input.pricingLevel || input.tier || input.priceTier || parsedNotes.pricingLevel),
+    billing: cleanString(input.billing || input.billingTerms || input.paymentTerms || parsedNotes.billing),
+    billingCode: cleanString(input.billingCode || input.paymentCode || parsedNotes.billingCode),
+    price: cleanString(input.price || input.total || input.totalStopAmount || parsedNotes.price || input.subtotal),
+    subtotal: cleanString(input.subtotal || parsedNotes.subtotal || input.price),
+    payment: cleanString(input.payment || input.invoice || input.paymentRef || parsedNotes.payment),
+    partsUsed: uniqueCleanValues([input.partsUsed || input.parts || input.partNumber || input.part || parsedNotes.partsUsed || []]).join(", "),
+    programmer: cleanString(input.programmer || input.programmerUsed || input.tool || parsedNotes.programmer),
+    programmerPath: cleanString(input.programmerPath || input.toolPath || parsedNotes.programmerPath),
+    chargeBreakdown: cleanString(input.chargeBreakdown || input.priceBreakdown || parsedNotes.chargeBreakdown),
+    amountDue: cleanString(input.amountDue || input.due || parsedNotes.amountDue),
+    amountDueCode: cleanString(input.amountDueCode || input.dueCode || parsedNotes.amountDueCode),
   };
 }
 
-function scheduleJobCalendarBody(job = {}) {
-  const summaryParts = ["TimLock", job.service, job.vehicle || job.vin || job.customer].filter(Boolean);
-  const descriptionLines = [
-    job.customer ? `Customer: ${job.customer}` : "",
-    job.phone ? `Phone: ${job.phone}` : "",
-    job.vehicle ? `Vehicle: ${job.vehicle}` : "",
-    job.vin ? `VIN: ${job.vin}` : "",
-    job.service ? `Service: ${job.service}` : "",
-    job.notes ? `Notes: ${job.notes}` : "",
-    `Created from TimLock Field OS${job.source ? ` (${job.source})` : ""}.`,
-  ].filter(Boolean);
+function calendarLine(label, value, fallback = "") {
+  const text = cleanString(value || fallback);
+  return text ? `${label}: ${text}` : "";
+}
+
+function calendarMoney(value) {
+  const text = cleanString(value);
+  if (!text) return "";
+  const numeric = Number(text.replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(numeric) || numeric <= 0) return text;
+  return `$${numeric.toFixed(2)}`;
+}
+
+function calendarHasRealValue(value = "") {
+  const text = cleanString(value);
+  return Boolean(text && !/^(?:none|n\/a|na|null|undefined)$/i.test(text));
+}
+
+function calendarBillingCode(job = {}) {
+  const explicit = cleanString(job.billingCode);
+  if (explicit) return explicit.replace(/^\[|\]$/g, "");
+  const text = cleanString([job.billing, job.payment].filter(Boolean).join(" ")).toLowerCase();
+  if (/net\s*30|n30/.test(text)) return "n30";
+  if (/square|sq\.?|sqi/.test(text)) return "sqi";
+  if (/cash/.test(text)) return "cash";
+  if (/card|credit/.test(text)) return "card";
+  return "";
+}
+
+function calendarBillingText(job = {}) {
+  const billing = cleanString(job.billing);
+  const code = calendarBillingCode(job);
+  if (!billing) return code ? `[${code}]` : "";
+  if (code && billing.toLowerCase().includes(`[${code.toLowerCase()}]`)) return billing;
+  return [billing, code ? `[${code}]` : ""].filter(Boolean).join(" ");
+}
+
+function calendarServiceCode(service = "") {
+  const text = cleanString(service).toUpperCase();
+  if (/ALL KEY|AKL|LOST/.test(text)) return "AKL";
+  if (/\bADD\b|DUP|DUPLICATE|SPARE/.test(text)) return "DK";
+  if (/LOCKOUT|UNLOCK/.test(text)) return "LO";
+  if (/IGNITION|IGN\b/.test(text)) return "IGN";
+  if (/REMOTE|RHK/.test(text)) return "RHK";
+  if (/PROX|SMART/.test(text)) return "PROX";
+  return text.split(/\s+/)[0] || "JOB";
+}
+
+function calendarStatusLabel(job = {}) {
+  const text = cleanString(job.status || job.calendarSyncStatus || "").toUpperCase();
+  if (/SOLD/.test(text)) return "SOLD JOB";
+  if (/COMPLETE|WORKED|DONE|CALENDAR-CREATED/.test(text)) return "SCHEDULED JOB";
+  if (/CANCEL/.test(text)) return "CANCELLED";
+  return "SCHEDULED JOB";
+}
+
+function calendarPacketChoice(loadout = {}, id = "") {
+  const packet = loadout.fieldPacket || {};
+  const choice = (packet.choices || []).find((item) => item.id === id) || {};
+  return cleanString(choice.label || choice.value);
+}
+
+function calendarPacketChoices(loadout = {}) {
   return {
-    summary: summaryParts.join(" - ").slice(0, 160) || "TimLock job",
+    primary: calendarPacketChoice(loadout, "primary"),
+    backup: calendarPacketChoice(loadout, "backup"),
+    programmer: calendarPacketChoice(loadout, "programmer"),
+    lishi: calendarPacketChoice(loadout, "lishi"),
+    proof: calendarPacketChoice(loadout, "proof"),
+  };
+}
+
+function calendarPartLine(job = {}, packet = {}) {
+  const part = cleanString(job.partsUsed || packet.primary || job.sourceId);
+  const programmer = cleanString(job.programmer || packet.programmer);
+  if (part && programmer) return `${part} + ${programmer}`;
+  return part || programmer || "";
+}
+
+function calendarDisplayNotes(notes = "") {
+  const text = cleanString(notes);
+  if (!text) return "";
+  const looksStructured = /(?:^|\n)\s*(?:STATUS|CONTACT INFO|TOTAL STOP AMOUNT|--- AUTO DETAILS ---|PRICING LEVEL|BILLING|Part\(s\) Used|VIN)\s*:?/i.test(text);
+  if (!looksStructured) return text;
+  const explicitNotes = scheduleNoteField(text, "Notes");
+  const narrative = text
+    .split(/\r?\n/)
+    .map(cleanString)
+    .find((line) => line.length > 20 && (/requested by/i.test(line) || / - /.test(line)));
+  return uniqueCleanValues([
+    narrative,
+    calendarHasRealValue(explicitNotes) ? explicitNotes : "",
+  ]).join("\n");
+}
+
+function scheduleJobCalendarSummary(job = {}, packet = {}) {
+  const billing = calendarBillingCode(job);
+  const programmer = cleanString(job.programmer || packet.programmer || "TimLock");
+  const model = cleanString(job.model || job.vehicle || job.vin || job.customer);
+  const vehicleShort = uniqueCleanValues([job.year, job.make, model]).join(" ");
+  const title = `|${programmer}| ${calendarServiceCode(job.service)} ${vehicleShort || cleanString(job.service || "Job")}${billing ? ` [${billing}]` : ""}`;
+  return title.replace(/\s+/g, " ").slice(0, 160);
+}
+
+function scheduleJobCalendarBody(job = {}, context = {}) {
+  const loadout = context.loadout || {};
+  const packet = calendarPacketChoices(loadout);
+  const billingCode = calendarBillingCode(job);
+  const billingText = calendarBillingText(job);
+  const total = calendarMoney(job.price || job.totalStopAmount);
+  const subtotal = calendarMoney(job.subtotal || job.price);
+  const amountDue = calendarMoney(job.amountDue);
+  const amountDueCode = cleanString(job.amountDueCode);
+  const amountDueLine = amountDue
+    ? `${amountDue}${amountDueCode ? ` [${amountDueCode}]` : ""}`
+    : total
+      ? `${total}${billingCode ? ` [${billingCode}]` : ""}`
+      : "";
+  const vehicle = cleanString(job.vehicle || uniqueCleanValues([job.year, job.make, job.model]).join(" "));
+  const addOns = calendarHasRealValue(job.addOns) ? cleanString(job.addOns) : "";
+  const displayNotes = calendarDisplayNotes(job.notes);
+  const completionText = job.status && /complete|worked|done/i.test(job.status)
+    ? `COMPLETED ON ${new Date(job.updatedAt || Date.now()).toLocaleString("en-US")}`
+    : "";
+  const descriptionLines = [
+    `STATUS: ${calendarStatusLabel(job)}`,
+    "",
+    "CONTACT INFO:",
+    calendarLine("Name", job.customer, "N/A"),
+    calendarLine("Call", job.phone, "N/A"),
+    "",
+    total ? `TOTAL STOP AMOUNT: ${total}` : "",
+    "",
+    "--- AUTO DETAILS ---",
+    calendarLine("Vehicle", vehicle, "Verify vehicle"),
+    calendarLine("Service", job.service, "Locksmith service"),
+    calendarLine("Source ID", job.sourceId),
+    calendarLine("Add-Ons", addOns, "None"),
+    job.vin ? `Context: Vin: ${job.vin}` : "",
+    "",
+    calendarLine("PRICING LEVEL", job.pricingLevel),
+    calendarLine("BILLING", billingText),
+    "",
+    job.vin || "",
+    cleanString(job.programmerPath) || calendarPartLine(job, packet),
+    cleanString(job.chargeBreakdown) || (subtotal && addOns ? `${subtotal} + ${addOns}` : ""),
+    amountDueLine,
+    job.payment || "",
+    "",
+    displayNotes || "",
+    "",
+    completionText,
+    calendarLine("Part(s) Used", job.partsUsed || packet.primary),
+    subtotal ? `Subtotal: ${subtotal}` : "",
+    calendarLine("Payment", job.payment),
+    calendarLine("Notes", displayNotes || "None"),
+    calendarLine("VIN", job.vin),
+    "",
+    `Created from TimLock Field OS${job.source ? ` (${job.source})` : ""}.`,
+  ].map((line) => (line === "" ? "" : cleanString(line))).filter((line, index, lines) => line || lines[index - 1]).join("\n").replace(/\n{3,}/g, "\n\n");
+  return {
+    summary: scheduleJobCalendarSummary(job, packet),
     location: job.location,
-    description: descriptionLines.join("\n"),
+    description: descriptionLines,
     start: job.start,
     end: job.end,
   };
+}
+
+async function scheduleJobCalendarBodyWithPacket(job = {}, store = {}) {
+  try {
+    const item = dispatchItemFromScheduledJob(job);
+    const loadout = await buildJobLoadout(dispatchLoadoutBody(item), store);
+    return scheduleJobCalendarBody(job, { loadout });
+  } catch {
+    return scheduleJobCalendarBody(job);
+  }
 }
 
 function queueScheduledJobCalendarSync(request, jobId) {
@@ -5051,7 +5262,7 @@ function queueScheduledJobCalendarSync(request, jobId) {
       const jobs = Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [];
       const job = jobs.find((item) => item.id === jobId);
       if (!job || job.calendarEventId) return;
-      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
+      const created = await createGoogleCalendarEvent(request, store, await scheduleJobCalendarBodyWithPacket(job, store), {
         signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
       });
       const calendarEvent = created.event || null;
@@ -5137,7 +5348,7 @@ async function syncScheduledJobsToCalendar(request, store, input = {}) {
 
   for (const job of candidates) {
     try {
-      const created = await createGoogleCalendarEvent(request, store, scheduleJobCalendarBody(job), {
+      const created = await createGoogleCalendarEvent(request, store, await scheduleJobCalendarBodyWithPacket(job, store), {
         signal: googleTimeoutSignal(googleCalendarWriteTimeoutMs),
       });
       const calendarEvent = created.event || null;
@@ -14122,6 +14333,17 @@ async function handleApi(request, response, pathname) {
       sendJson(response, 200, await syncScheduledJobsToCalendar(request, scheduleStore, await readJsonBody(request)));
     } catch (error) {
       sendError(response, 400, `Schedule Calendar sync failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/schedule-job/calendar-preview") {
+    try {
+      const scheduleStore = await readStore();
+      const job = normalizeScheduleJobInput(await readJsonBody(request));
+      sendJson(response, 200, { job, event: await scheduleJobCalendarBodyWithPacket(job, scheduleStore) });
+    } catch (error) {
+      sendError(response, 400, `Schedule Calendar preview failed: ${error.message}`);
     }
     return;
   }
