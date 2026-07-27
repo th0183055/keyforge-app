@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, unlink, stat, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -220,9 +220,84 @@ async function ensureStore() {
   }
 }
 
+function jsonBackupStamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function backupMalformedJsonFile(filePath, raw, label = "corrupt") {
+  try {
+    const backupPath = `${filePath}.${label}-${jsonBackupStamp()}.bak`;
+    await writeFile(backupPath, raw || "");
+    return backupPath;
+  } catch {
+    return "";
+  }
+}
+
+function stripJsonTrailingCommas(raw = "") {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (escaped) {
+      output += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      output += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      output += char;
+      inString = !inString;
+      continue;
+    }
+    if (!inString && char === ",") {
+      let next = index + 1;
+      while (next < raw.length && /\s/.test(raw[next])) next += 1;
+      if (raw[next] === "}" || raw[next] === "]") continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function parseJsonWithRepair(raw = "") {
+  try {
+    return { payload: JSON.parse(raw), repaired: false };
+  } catch (error) {
+    const repairedRaw = stripJsonTrailingCommas(raw);
+    if (repairedRaw !== raw) {
+      try {
+        return { payload: JSON.parse(repairedRaw), repaired: true, error };
+      } catch {}
+    }
+    throw error;
+  }
+}
+
 async function readStore() {
   await ensureStore();
-  return normalizeStore(JSON.parse(await readFile(storePath, "utf8")));
+  const raw = await readFile(storePath, "utf8");
+  try {
+    const parsed = parseJsonWithRepair(raw);
+    const normalized = normalizeStore(parsed.payload);
+    if (parsed.repaired) {
+      const backupPath = await backupMalformedJsonFile(storePath, raw, "repaired");
+      console.warn(`TimLock store JSON had trailing-comma damage and was repaired.${backupPath ? ` Backup: ${backupPath}` : ""}`);
+      await writeStore(normalized);
+    }
+    return normalized;
+  } catch (error) {
+    const backupPath = await backupMalformedJsonFile(storePath, raw, "corrupt");
+    const seed = await readStoreSeed();
+    await writeStore(seed);
+    console.error(`TimLock store JSON was malformed and had to be reset from the safe seed.${backupPath ? ` Backup: ${backupPath}` : ""}`, error);
+    return seed;
+  }
 }
 
 async function readJsonCached(filePath, fallback = {}) {
@@ -238,7 +313,9 @@ async function readJsonCached(filePath, fallback = {}) {
 
 async function writeStore(store) {
   await mkdir(mutableDataDir, { recursive: true });
-  await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`);
+  const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`);
+  await rename(tempPath, storePath);
   googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
 }
 
