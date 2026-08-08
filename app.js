@@ -6688,12 +6688,15 @@ function renderDispatchQueueItem(item = {}, selectedId = "") {
   const active = item.id === selectedId;
   const when = item.start ? formatWorkspaceDate(item.start) : "Unscheduled";
   const meta = [when, item.customer, item.location].filter(Boolean).join(" | ");
+  const preview = item.packetPreview || {};
+  const packetLine = [preview.primary, preview.programmer, preview.lishi].filter(Boolean).join(" | ");
   return `
     <button class="dispatch-queue-card ${active ? "active" : ""}" type="button" data-dispatch-select="${escapeHtml(item.id)}">
-      <span>${escapeHtml(dispatchSourceBadge(item.source))}</span>
+      <span>${escapeHtml(dispatchSourceBadge(item.source))}${preview.confidencePercent ? ` | ${escapeHtml(preview.confidencePercent)}%` : ""}</span>
       <strong>${escapeHtml(dispatchItemTitle(item))}</strong>
       <small>${escapeHtml(meta || item.service || "Review job")}</small>
-      ${item.vin ? `<em>${escapeHtml(item.vin)}</em>` : ""}
+      ${packetLine ? `<small class="dispatch-queue-packet">${escapeHtml(packetLine)}</small>` : ""}
+      ${item.vin ? `<em>${escapeHtml(item.vin)}</em>` : item.packetStatus === "queued" ? `<em>Packet queued</em>` : ""}
     </button>
   `;
 }
@@ -6719,6 +6722,11 @@ function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
   }
   const confidence = Number(packet.confidencePercent || 0);
   const tone = dispatchPacketTone(confidence);
+  const fieldDecision = packet.fieldDecision || {};
+  const choices = fieldDecision.choices || [];
+  const choiceValue = (id, fallback = "") => cleanInput((choices.find((choice) => choice.id === id) || {}).value || fallback);
+  const checklist = fieldDecision.checklist?.length ? fieldDecision.checklist : packet.checklist || [];
+  const warnings = fieldDecision.warnings?.length ? fieldDecision.warnings : packet.gaps || [];
   const next = payload.next || [];
   const canWriteCalendar = selected.hasCalendarEvent || selected.calendarEventId || selected.source === "google-calendar";
   const canPromote = selected.source === "service-intake" || (selected.source === "timlock-schedule" && !selected.hasCalendarEvent);
@@ -6727,25 +6735,26 @@ function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
       <div class="dispatch-packet-hero">
         <div>
           <p class="eyebrow">AI Dispatch Packet</p>
-          <h3>${escapeHtml(packet.title || dispatchItemTitle(selected))}</h3>
+          <h3>${escapeHtml(fieldDecision.title || packet.title || dispatchItemTitle(selected))}</h3>
           <p>${escapeHtml([selected.customer, selected.phone, selected.location, selected.vin].filter(Boolean).join(" | "))}</p>
+          ${fieldDecision.bestMove ? `<small>${escapeHtml(fieldDecision.bestMove)}</small>` : ""}
         </div>
         <strong><span>${escapeHtml(confidence || 0)}%</span><small>${escapeHtml(packet.confidenceLabel || "Packet")}</small></strong>
       </div>
       <section class="dispatch-packet-grid">
-        ${renderDispatchChoice("Key", packet.primary)}
-        ${renderDispatchChoice("Backup", packet.backup)}
-        ${renderDispatchChoice("Programmer", packet.programmer)}
-        ${renderDispatchChoice("Lishi", packet.lishi)}
+        ${renderDispatchChoice("Vehicle", choiceValue("vehicle", packet.title || selected.vehicleLabel))}
+        ${renderDispatchChoice("Part", choiceValue("primary", packet.primary))}
+        ${renderDispatchChoice("Programmer", choiceValue("programmer", packet.programmer))}
+        ${renderDispatchChoice("Lishi", choiceValue("lishi", packet.lishi))}
       </section>
       <section class="dispatch-packet-columns">
         <article>
           <span>Checklist</span>
-          ${(packet.checklist || []).length ? `<ol>${packet.checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Open What To Bring for the full field kit.</p>`}
+          ${checklist.length ? `<ol>${checklist.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Open What To Bring for the full field kit.</p>`}
         </article>
         <article>
-          <span>Next</span>
-          ${next.length ? `<ol>${next.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Verify authorization, perform the work, and save proof.</p>`}
+          <span>${warnings.length ? "Verify" : "Next"}</span>
+          ${(warnings.length ? warnings : next).length ? `<ol>${(warnings.length ? warnings : next).slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>` : `<p>Verify authorization, perform the work, and save proof.</p>`}
         </article>
       </section>
       <div class="dispatch-action-bar">

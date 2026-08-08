@@ -6203,6 +6203,66 @@ function dispatchPacketSummary(item = {}, loadout = {}) {
   };
 }
 
+function dispatchPacketPreview(summary = {}) {
+  if (!summary || !Number(summary.confidencePercent || 0)) return null;
+  return {
+    title: cleanString(summary.title),
+    confidencePercent: Number(summary.confidencePercent || 0),
+    confidenceLabel: cleanString(summary.confidenceLabel),
+    primary: cleanString(summary.primary),
+    programmer: cleanString(summary.programmer),
+    lishi: cleanString(summary.lishi),
+  };
+}
+
+function dispatchPublicItem(item = {}, packetSummary = null, error = "") {
+  return {
+    id: item.id,
+    source: item.source,
+    sourceLabel: item.sourceLabel,
+    sourceId: item.sourceId,
+    title: item.title,
+    customer: item.customer,
+    phone: item.phone,
+    service: item.service,
+    location: item.location,
+    start: item.start,
+    vin: item.vin,
+    vehicleLabel: item.vehicleLabel,
+    status: item.status,
+    timlockSignature: item.timlockSignature,
+    hasCalendarEvent: Boolean(item.calendarEventId || item.source === "google-calendar"),
+    calendarHtmlLink: item.calendarHtmlLink,
+    packetStatus: packetSummary ? "ready" : error ? "verify" : "queued",
+    packetError: cleanString(error),
+    packetPreview: dispatchPacketPreview(packetSummary),
+  };
+}
+
+async function buildDispatchPacketBundle(item = {}, store = {}, options = {}) {
+  if (!item?.id) return { item, summary: null, loadout: null, workflow: null, error: "Dispatch item missing." };
+  try {
+    const body = dispatchLoadoutBody(item);
+    if (options.full) {
+      const workflow = await buildFieldWorkflow(body, store);
+      return {
+        item,
+        workflow,
+        loadout: workflow.loadout,
+        summary: {
+          ...dispatchPacketSummary(item, workflow.loadout),
+          fieldDecision: workflow.subscriber || null,
+        },
+        error: "",
+      };
+    }
+    const loadout = await buildJobLoadout(body, store);
+    return { item, workflow: null, loadout, summary: dispatchPacketSummary(item, loadout), error: "" };
+  } catch (error) {
+    return { item, summary: null, loadout: null, workflow: null, error: error.message };
+  }
+}
+
 function dispatchPacketNote(item = {}, loadout = {}) {
   const summary = dispatchPacketSummary(item, loadout);
   return uniqueCleanValues([
@@ -6241,7 +6301,21 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
     (requestedQuery && items.find((item) => normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizeVehicleText(requestedQuery)))) ||
     items[0] ||
     null;
-  const loadout = selected ? await buildJobLoadout(dispatchLoadoutBody(selected), store) : null;
+  const requestedPrebuildLimit = Number(body.packetPrebuildLimit || body.prebuildLimit || 8);
+  const packetPrebuildLimit = Number.isFinite(requestedPrebuildLimit)
+    ? Math.max(1, Math.min(20, Math.round(requestedPrebuildLimit)))
+    : 8;
+  const selectedBundle = selected ? await buildDispatchPacketBundle(selected, store, { full: true }) : null;
+  const packetBundles = new Map();
+  if (selectedBundle?.item?.id) packetBundles.set(selectedBundle.item.id, selectedBundle);
+  const previewItems = items
+    .slice(0, packetPrebuildLimit)
+    .filter((item) => item.id && !packetBundles.has(item.id));
+  const previewBundles = await Promise.all(previewItems.map((item) => buildDispatchPacketBundle(item, store)));
+  for (const bundle of previewBundles) {
+    if (bundle?.item?.id) packetBundles.set(bundle.item.id, bundle);
+  }
+  const queue = items.map((item) => dispatchPublicItem(item, packetBundles.get(item.id)?.summary, packetBundles.get(item.id)?.error));
   const sources = {
     calendar: items.filter((item) => item.source === "google-calendar").length,
     intake: items.filter((item) => item.source === "service-intake").length,
@@ -6256,29 +6330,15 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
       total: items.length,
       connectedCalendar: googleWorkspaceConnected(store.googleWorkspace),
       selectedId: selected?.id || "",
-      readyPackets: selected && loadout ? 1 : 0,
+      readyPackets: queue.filter((item) => item.packetStatus === "ready").length,
+      prebuiltPackets: packetBundles.size,
+      packetPrebuildLimit,
     },
-    queue: items.map((item) => ({
-      id: item.id,
-      source: item.source,
-      sourceLabel: item.sourceLabel,
-      sourceId: item.sourceId,
-      title: item.title,
-      customer: item.customer,
-      phone: item.phone,
-      service: item.service,
-      location: item.location,
-      start: item.start,
-      vin: item.vin,
-      vehicleLabel: item.vehicleLabel,
-      status: item.status,
-      timlockSignature: item.timlockSignature,
-      hasCalendarEvent: Boolean(item.calendarEventId || item.source === "google-calendar"),
-      calendarHtmlLink: item.calendarHtmlLink,
-    })),
+    queue,
     selected,
-    packet: selected && loadout ? dispatchPacketSummary(selected, loadout) : null,
-    loadout,
+    packet: selectedBundle?.summary || null,
+    fieldWorkflow: selectedBundle?.workflow || null,
+    loadout: selectedBundle?.loadout || null,
     next: selected
       ? uniqueCleanValues([
           selected.source === "service-intake" ? "Promote QUO intake to Calendar" : "",

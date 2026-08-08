@@ -11476,6 +11476,15 @@ body:not(.is-start-screen) ::selection {
   font-style: normal;
 }
 
+.dispatch-queue-card .dispatch-queue-packet {
+  margin-top: 4px;
+  border-left: 3px solid rgba(224, 36, 48, 0.74);
+  padding-left: 8px;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
 .dispatch-packet-card {
   display: grid;
   gap: 12px;
@@ -11498,6 +11507,15 @@ body:not(.is-start-screen) ::selection {
 .dispatch-packet-hero h3,
 .dispatch-packet-hero p {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dispatch-packet-hero small {
+  display: block;
+  margin-top: 6px;
+  max-width: 900px;
+  color: rgba(255, 255, 255, 0.74);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
