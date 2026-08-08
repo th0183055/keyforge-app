@@ -50,6 +50,7 @@ let latestMetkaBridge = null;
 let latestWorkspaceBrief = null;
 let latestDispatchIntelligence = null;
 let latestJobInbox = null;
+let latestJobPacketPayload = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestGoogleWorkspace = null;
@@ -163,6 +164,10 @@ const startJobStatus = document.querySelector("#startJobStatus");
 const jobInboxStatus = document.querySelector("#jobInboxStatus");
 const jobInboxResult = document.querySelector("#jobInboxResult");
 const refreshJobInboxButton = document.querySelector("#refreshJobInbox");
+const jobPacketDrawer = document.querySelector("#jobPacketDrawer");
+const jobPacketDrawerBody = document.querySelector("#jobPacketDrawerBody");
+const jobPacketDrawerStatus = document.querySelector("#jobPacketDrawerStatus");
+const closeJobPacketDrawerButton = document.querySelector("#closeJobPacketDrawer");
 const workspaceBridgeSummary = document.querySelector("#workspaceBridgeSummary");
 const startMenuButton = document.querySelector("#startMenuButton");
 const startMenuPanel = document.querySelector("#startMenuPanel");
@@ -426,6 +431,7 @@ function showView(id, options = {}) {
   document.body.classList.toggle("is-start-screen", id === "command");
   document.body.classList.toggle("show-global-intelligence", id === "mission-control");
   if (id !== "command") closeStartMenu();
+  if (id !== "command") closeJobPacketDrawer();
   updateRouteChrome(id);
   if (push && previousViewId && previousViewId !== id) {
     appRouteStack.push(previousViewId);
@@ -526,6 +532,20 @@ function setStartMenu(open) {
 
 function closeStartMenu() {
   setStartMenu(false);
+}
+
+function setJobPacketDrawer(open) {
+  if (!jobPacketDrawer) return;
+  const shouldOpen = Boolean(open);
+  jobPacketDrawer.hidden = !shouldOpen;
+  document.body.classList.toggle("job-packet-open", shouldOpen);
+  if (!shouldOpen) return;
+  closeStartMenu();
+  closeMobileMenu();
+}
+
+function closeJobPacketDrawer() {
+  setJobPacketDrawer(false);
 }
 
 function setAppStatus(label, tone = "online", detail = "") {
@@ -6670,11 +6690,13 @@ function buildClientJobInboxFromDispatch(payload = {}) {
   const tomorrow = items.filter((item) => item.bucket === "tomorrow");
   const upcoming = items.filter((item) => item.bucket === "upcoming" || item.bucket === "unscheduled");
   const attention = items.filter((item) => item.needsAttention);
+  const selectedId = cleanInput(payload.summary?.selectedId || payload.selected?.id || "");
+  const selected = items.find((item) => item.id === selectedId) || (payload.selected ? jobInboxPublicItem(payload.selected) : null) || items[0] || null;
   return {
     generatedAt: payload.generatedAt || new Date().toISOString(),
     google: payload.google || latestGoogleWorkspace || {},
     sources: payload.sources || { calendar: 0, intake: 0, scheduled: items.length },
-    selectedId: payload.summary?.selectedId || payload.selected?.id || "",
+    selectedId: selected?.id || selectedId || "",
     summary: {
       total: items.length,
       today: today.length,
@@ -6691,6 +6713,10 @@ function buildClientJobInboxFromDispatch(payload = {}) {
       { id: "upcoming", title: "Upcoming", count: upcoming.length, items: upcoming.slice(0, 6) },
       { id: "attention", title: "Needs attention", count: attention.length, items: attention.slice(0, 4) },
     ].filter((section) => section.count || section.id === "today"),
+    selected,
+    packet: payload.packet || null,
+    fieldWorkflow: payload.fieldWorkflow || null,
+    next: payload.next || [],
   };
 }
 
@@ -6875,14 +6901,196 @@ async function loadJobInbox(options = {}) {
   }
 }
 
+function selectedJobPacketItem(payload = {}, requestedId = "") {
+  const cleanId = cleanInput(requestedId || payload.selectedId || "");
+  const items = payload.items || [];
+  return (
+    (cleanId ? items.find((item) => item.id === cleanId) : null) ||
+    (payload.selected?.id === cleanId ? payload.selected : null) ||
+    payload.selected ||
+    items[0] ||
+    null
+  );
+}
+
+function seedDispatchFromJobInbox(payload = {}, requestedId = "") {
+  const selected = selectedJobPacketItem(payload, requestedId);
+  const queue = [...(payload.items || [])];
+  if (selected?.id && !queue.some((item) => item.id === selected.id)) queue.unshift(selected);
+  latestDispatchIntelligence = {
+    generatedAt: payload.generatedAt || new Date().toISOString(),
+    days: 14,
+    google: payload.google || latestGoogleWorkspace || {},
+    sources: payload.sources || {},
+    summary: {
+      ...(payload.summary || {}),
+      selectedId: selected?.id || cleanInput(requestedId || payload.selectedId || ""),
+      total: payload.summary?.total || queue.length,
+    },
+    queue,
+    selected,
+    packet: payload.packet || null,
+    fieldWorkflow: payload.fieldWorkflow || null,
+    next: payload.next || [],
+  };
+}
+
+function jobPacketChoiceValue(choices = [], id = "", fallback = "") {
+  return cleanInput((choices.find((choice) => choice.id === id) || {}).value || fallback || "");
+}
+
+function renderJobPacketDecision(label, value, fallback = "Verify") {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || fallback)}</strong>
+    </article>
+  `;
+}
+
+function renderJobPacketList(label, items = [], fallback = "Verify on site.") {
+  const list = items.filter(Boolean).slice(0, 4);
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      ${
+        list.length
+          ? `<ol>${list.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
+          : `<p>${escapeHtml(fallback)}</p>`
+      }
+    </article>
+  `;
+}
+
+function renderJobPacketDrawer(payload = {}, requestedId = "") {
+  if (!jobPacketDrawerBody) return;
+  const selected = selectedJobPacketItem(payload, requestedId);
+  const packet = payload.packet || {};
+  if (!selected?.id) {
+    jobPacketDrawerBody.innerHTML = `
+      <article class="job-packet-empty">
+        <strong>No job selected</strong>
+        <span>Sync Calendar, import QUO, or schedule a TimLock job.</span>
+      </article>
+    `;
+    if (jobPacketDrawerStatus) jobPacketDrawerStatus.textContent = "No packet selected.";
+    return;
+  }
+
+  const fieldDecision = packet.fieldDecision || payload.fieldWorkflow?.subscriber || {};
+  const choices = fieldDecision.choices || [];
+  const confidence = Number(fieldDecision.confidencePercent || packet.confidencePercent || selected.packetPreview?.confidencePercent || 0);
+  const tone = dispatchPacketTone(confidence);
+  const checklist = (fieldDecision.checklist?.length ? fieldDecision.checklist : packet.checklist || []).slice(0, 4);
+  const warnings = (fieldDecision.warnings?.length ? fieldDecision.warnings : packet.gaps || []).slice(0, 4);
+  const next = (payload.next || []).slice(0, 4);
+  const vehicle = jobPacketChoiceValue(choices, "vehicle", packet.title || selected.vehicleLabel || selected.headline);
+  const part = jobPacketChoiceValue(choices, "primary", packet.primary || selected.packetPreview?.primary);
+  const programmer = jobPacketChoiceValue(choices, "programmer", packet.programmer || selected.packetPreview?.programmer);
+  const lishi = jobPacketChoiceValue(choices, "lishi", packet.lishi || selected.packetPreview?.lishi);
+  const meta = [formatWorkspaceDate(selected.start), selected.customer, selected.phone, selected.location, selected.vin].filter(Boolean);
+  const canWriteCalendar = selected.hasCalendarEvent || selected.calendarEventId || selected.source === "google-calendar";
+  const canPromote = selected.source === "service-intake" || (selected.source === "timlock-schedule" && !selected.hasCalendarEvent);
+  const ownerButtons =
+    appMode === "owner"
+      ? `
+        <section class="job-packet-owner" data-owner-only>
+          ${canPromote ? `<button class="secondary-action small" type="button" data-job-packet-action="promote" data-job-packet-id="${escapeHtml(selected.id)}">Add To Calendar</button>` : ""}
+          ${canWriteCalendar ? `<button class="secondary-action small" type="button" data-job-packet-action="writeback" data-job-packet-id="${escapeHtml(selected.id)}">Write AI Note</button>` : ""}
+          <button class="secondary-action small" type="button" data-job-packet-action="complete" data-job-packet-id="${escapeHtml(selected.id)}">Complete + Learn</button>
+          <button class="secondary-action small" type="button" data-job-packet-action="drive" data-job-packet-id="${escapeHtml(selected.id)}">Drive Folder</button>
+          ${selected.calendarHtmlLink ? `<button class="secondary-action small" type="button" data-job-packet-action="calendar" data-job-packet-id="${escapeHtml(selected.id)}">Calendar</button>` : ""}
+        </section>
+      `
+      : "";
+
+  jobPacketDrawerBody.innerHTML = `
+    <section class="job-packet-hero ${escapeHtml(tone)}">
+      <div>
+        <p class="eyebrow">${escapeHtml(dispatchSourceBadge(selected.source))}</p>
+        <h3>${escapeHtml(fieldDecision.title || packet.title || dispatchItemTitle(selected))}</h3>
+        ${meta.length ? `<ul>${meta.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+      </div>
+      <strong><span>${escapeHtml(confidence || 0)}%</span><small>Confidence</small></strong>
+    </section>
+    <section class="job-packet-decisions">
+      ${renderJobPacketDecision("Vehicle", vehicle)}
+      ${renderJobPacketDecision("Part", part)}
+      ${renderJobPacketDecision("Programmer", programmer)}
+      ${renderJobPacketDecision("Lishi", lishi)}
+    </section>
+    <section class="job-packet-columns">
+      ${renderJobPacketList("Do", checklist, "Confirm authorization.")}
+      ${renderJobPacketList(warnings.length ? "Verify" : "Next", warnings.length ? warnings : next, "Save proof after the job.")}
+    </section>
+    <section class="job-packet-actions">
+      <button class="primary-action small" type="button" data-job-packet-action="loadout" data-job-packet-id="${escapeHtml(selected.id)}">What To Bring</button>
+      <button class="secondary-action small" type="button" data-job-packet-action="workbench" data-job-packet-id="${escapeHtml(selected.id)}">Job Packet</button>
+      <button class="secondary-action small" type="button" data-job-packet-action="proof" data-job-packet-id="${escapeHtml(selected.id)}">Proof</button>
+      <button class="secondary-action small" type="button" data-job-packet-action="dispatch" data-job-packet-id="${escapeHtml(selected.id)}">Dispatch</button>
+    </section>
+    ${ownerButtons}
+  `;
+  if (jobPacketDrawerStatus) {
+    jobPacketDrawerStatus.textContent = `${dispatchSourceBadge(selected.source)} | ${confidence || 0}% confidence`;
+  }
+}
+
 async function openJobInboxPacket(id = "") {
   const cleanId = cleanInput(id);
   if (!cleanId) return;
+  setJobPacketDrawer(true);
+  latestJobPacketPayload = null;
   if (jobInboxStatus) jobInboxStatus.textContent = "Opening field packet...";
-  const hadDispatch = Boolean(latestDispatchIntelligence);
-  if (!hadDispatch) latestDispatchIntelligence = { queue: [] };
-  showView("dispatch");
-  await loadDispatchIntelligence({ id: cleanId, quiet: true, packetPrebuildLimit: 10 });
+  if (jobPacketDrawerStatus) jobPacketDrawerStatus.textContent = "Building packet.";
+  if (jobPacketDrawerBody) {
+    jobPacketDrawerBody.innerHTML = `<article class="job-packet-empty"><strong>Building packet</strong><span>Checking proof, parts, tools, and Calendar.</span></article>`;
+  }
+  const payload = await loadJobInbox({ id: cleanId, quiet: true, packetPrebuildLimit: 12, limit: 30 });
+  if (!payload) {
+    if (jobPacketDrawerBody) jobPacketDrawerBody.innerHTML = `<article class="job-packet-empty warn"><strong>Packet unavailable</strong><span>Open Dispatch when the server catches up.</span></article>`;
+    if (jobPacketDrawerStatus) jobPacketDrawerStatus.textContent = "Packet unavailable.";
+    return;
+  }
+  latestJobPacketPayload = payload;
+  seedDispatchFromJobInbox(payload, cleanId);
+  renderJobPacketDrawer(payload, cleanId);
+}
+
+async function handleJobPacketAction(action = "", id = "", button = null) {
+  const cleanAction = cleanInput(action);
+  const cleanId = cleanInput(id);
+  if (!cleanAction || !cleanId) return;
+  if (cleanAction === "dispatch") {
+    closeJobPacketDrawer();
+    showView("dispatch");
+    await loadDispatchIntelligence({ id: cleanId, quiet: true, packetPrebuildLimit: 12 });
+    return;
+  }
+  if (cleanAction === "proof") {
+    const item = selectedDispatchItem(cleanId);
+    closeJobPacketDrawer();
+    showView("proof-vault");
+    const query = dispatchItemQuery(item);
+    const input = document.querySelector("#proofVaultForm input[name='proofQuery'], #proofVaultSearch");
+    if (input && query) input.value = query;
+    if (query) loadProofVault(query);
+    return;
+  }
+  const navigateActions = new Set(["loadout", "workbench", "calendar"]);
+  await dispatchAction(cleanId, cleanAction, button);
+  if (navigateActions.has(cleanAction)) {
+    if (cleanAction !== "calendar") closeJobPacketDrawer();
+    return;
+  }
+  if (!jobPacketDrawer?.hidden) {
+    const payload = await loadJobInbox({ id: cleanId, quiet: true, packetPrebuildLimit: 12, limit: 30 });
+    if (payload) {
+      latestJobPacketPayload = payload;
+      seedDispatchFromJobInbox(payload, cleanId);
+      renderJobPacketDrawer(payload, cleanId);
+    }
+  }
 }
 
 function renderDispatchQueueItem(item = {}, selectedId = "") {
@@ -12825,6 +13033,9 @@ modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     applyAppMode(button.dataset.setMode);
     if (latestJobInbox) renderJobInbox(latestJobInbox);
+    if (latestJobPacketPayload && !jobPacketDrawer?.hidden) {
+      renderJobPacketDrawer(latestJobPacketPayload, latestJobPacketPayload.selectedId);
+    }
     loadAiMemory();
     if (latestGlobalSearch && globalSearchQuery()) runGlobalSearch();
   });
@@ -12868,11 +13079,13 @@ startMenuButton?.addEventListener("click", () => {
 });
 startMenuBackdrop?.addEventListener("click", closeStartMenu);
 closeStartMenuButton?.addEventListener("click", closeStartMenu);
+closeJobPacketDrawerButton?.addEventListener("click", closeJobPacketDrawer);
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeMobileMenu();
     closeStartMenu();
+    closeJobPacketDrawer();
   }
 });
 
@@ -13105,6 +13318,18 @@ document.addEventListener("click", (event) => {
   const jobInboxButton = event.target.closest("[data-job-inbox-open]");
   if (jobInboxButton) {
     openJobInboxPacket(jobInboxButton.dataset.jobInboxOpen);
+    return;
+  }
+
+  const jobPacketCloseButton = event.target.closest("[data-close-job-packet]");
+  if (jobPacketCloseButton) {
+    closeJobPacketDrawer();
+    return;
+  }
+
+  const jobPacketActionButton = event.target.closest("[data-job-packet-action]");
+  if (jobPacketActionButton) {
+    handleJobPacketAction(jobPacketActionButton.dataset.jobPacketAction, jobPacketActionButton.dataset.jobPacketId, jobPacketActionButton);
     return;
   }
 

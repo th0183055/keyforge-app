@@ -11091,6 +11091,239 @@ body.is-start-screen #command .job-inbox-card b {
   font-weight: 900;
 }
 
+.job-packet-drawer[hidden] {
+  display: none !important;
+}
+
+body.is-start-screen #command .job-packet-drawer:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: grid;
+  place-items: center;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+}
+
+body.is-start-screen #command .job-packet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.66);
+  cursor: pointer;
+}
+
+body.is-start-screen #command .job-packet-sheet {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(900px, calc(100vw - 32px));
+  max-height: min(88dvh, 820px);
+  overflow-y: auto;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-left: 5px solid #e02430;
+  border-radius: 8px;
+  padding: clamp(14px, 2vw, 20px);
+  background:
+    linear-gradient(145deg, rgba(24, 27, 35, 0.98), rgba(7, 8, 11, 0.98)),
+    #090a0d;
+  box-shadow: 0 34px 86px rgba(0, 0, 0, 0.58);
+  color: #ffffff;
+}
+
+body.is-start-screen #command .job-packet-head,
+body.is-start-screen #command .job-packet-actions,
+body.is-start-screen #command .job-packet-owner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body.is-start-screen #command .job-packet-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 10px;
+}
+
+body.is-start-screen #command .job-packet-head strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.2rem;
+}
+
+body.is-start-screen #command .job-packet-head span {
+  display: block;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+body.is-start-screen #command .job-packet-body {
+  display: grid;
+  gap: 12px;
+}
+
+body.is-start-screen #command .job-packet-empty {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+body.is-start-screen #command .job-packet-empty.warn {
+  border-color: rgba(255, 176, 32, 0.42);
+  color: #ffe8ba;
+}
+
+body.is-start-screen #command .job-packet-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: clamp(14px, 2vw, 18px);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.22), rgba(255, 255, 255, 0.035)),
+    #101217;
+}
+
+body.is-start-screen #command .job-packet-hero.high {
+  border-color: rgba(36, 209, 143, 0.28);
+}
+
+body.is-start-screen #command .job-packet-hero.verify,
+body.is-start-screen #command .job-packet-hero.low {
+  border-color: rgba(255, 176, 32, 0.3);
+}
+
+body.is-start-screen #command .job-packet-hero h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(1.25rem, 2.4vw, 2.05rem);
+  line-height: 1.05;
+}
+
+body.is-start-screen #command .job-packet-hero ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.is-start-screen #command .job-packet-hero li {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.76rem;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .job-packet-hero > strong {
+  display: grid;
+  min-width: 98px;
+  border-radius: 8px;
+  padding: 12px;
+  background:
+    linear-gradient(135deg, #e02430, #7d0b13),
+    #b3121d;
+  color: #ffffff;
+  text-align: center;
+  box-shadow: 0 14px 30px rgba(224, 36, 48, 0.24);
+}
+
+body.is-start-screen #command .job-packet-hero > strong span {
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+body.is-start-screen #command .job-packet-hero > strong small {
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .job-packet-decisions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .job-packet-decisions article,
+body.is-start-screen #command .job-packet-columns article {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+body.is-start-screen #command .job-packet-decisions span,
+body.is-start-screen #command .job-packet-columns span {
+  display: block;
+  color: #ffb3b8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .job-packet-decisions strong {
+  display: block;
+  margin-top: 6px;
+  color: #ffffff;
+  font-size: 1.03rem;
+  line-height: 1.16;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .job-packet-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .job-packet-columns ol {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+body.is-start-screen #command .job-packet-columns li,
+body.is-start-screen #command .job-packet-columns p {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.28;
+}
+
+body.is-start-screen #command .job-packet-actions,
+body.is-start-screen #command .job-packet-owner {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+body.is-start-screen #command .job-packet-owner {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+
+body.is-start-screen #command .job-packet-actions .primary-action,
+body.is-start-screen #command .job-packet-actions .secondary-action,
+body.is-start-screen #command .job-packet-owner .secondary-action {
+  min-height: 42px;
+}
+
 @media (max-width: 1040px) {
   body.is-start-screen #command .start-job-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -11101,6 +11334,10 @@ body.is-start-screen #command .job-inbox-card b {
   }
 
   body.is-start-screen #command .job-inbox-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.is-start-screen #command .job-packet-decisions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -11174,6 +11411,46 @@ body.is-start-screen #command .job-inbox-card b {
   }
 
   body.is-start-screen #command .job-inbox-list {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .job-packet-drawer:not([hidden]) {
+    align-items: end;
+    padding: 0;
+  }
+
+  body.is-start-screen #command .job-packet-sheet {
+    width: 100%;
+    max-height: 92dvh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 8px 8px 0 0;
+    padding: 14px;
+  }
+
+  body.is-start-screen #command .job-packet-head {
+    display: grid;
+    align-items: start;
+  }
+
+  body.is-start-screen #command .job-packet-hero,
+  body.is-start-screen #command .job-packet-columns {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .job-packet-hero > strong {
+    width: 100%;
+    min-width: 0;
+  }
+
+  body.is-start-screen #command .job-packet-decisions {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .job-packet-actions,
+  body.is-start-screen #command .job-packet-owner {
+    display: grid;
     grid-template-columns: 1fr;
   }
 }

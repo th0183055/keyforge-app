@@ -303,6 +303,21 @@
               </div>
             </section>
 
+            <section class="job-packet-drawer" id="jobPacketDrawer" aria-label="Field Packet" hidden>
+              <button class="job-packet-backdrop" type="button" data-close-job-packet aria-label="Close field packet"></button>
+              <article class="job-packet-sheet" role="dialog" aria-modal="true" aria-labelledby="jobPacketDrawerTitle">
+                <div class="job-packet-head">
+                  <div>
+                    <p class="eyebrow">Field Packet</p>
+                    <strong id="jobPacketDrawerTitle">One-tap job packet</strong>
+                    <span id="jobPacketDrawerStatus">Loading packet.</span>
+                  </div>
+                  <button class="secondary-action small" type="button" id="closeJobPacketDrawer">Close</button>
+                </div>
+                <div class="job-packet-body" id="jobPacketDrawerBody"></div>
+              </article>
+            </section>
+
             <div class="workspace-bridge-summary" id="workspaceBridgeSummary" data-owner-only>
               <article>
                 <p class="eyebrow">Google Workspace</p>
