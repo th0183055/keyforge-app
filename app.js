@@ -37,6 +37,7 @@ let lishiLookupRequestId = 0;
 let vinLishiLookupRequestId = 0;
 let latestWorkbench = null;
 let latestJobLoadout = null;
+let latestFieldWorkflow = null;
 let latestReferenceList = null;
 let latestGlobalSearch = null;
 let latestAiResponse = null;
@@ -435,7 +436,7 @@ function showView(id, options = {}) {
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
-  if (id === "loadout" && !latestJobLoadout) loadJobLoadout();
+  if (id === "loadout" && !latestJobLoadout) loadFieldWorkflow();
   if (id === "code-desk") {
     renderCodeDesk();
     if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
@@ -865,9 +866,10 @@ async function startVinWalkthroughFromValue(value) {
     return;
   }
   if (vinForm?.elements.vin) vinForm.elements.vin.value = vin;
-  setStartJobStatus(`Starting VIN ${vin}.`, "ready");
-  showView("vin");
-  await runVinLookup(vin);
+  if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = vin;
+  setStartJobStatus(`Building field packet for ${vin}.`, "ready");
+  showView("loadout");
+  await loadFieldWorkflow(vin);
 }
 
 async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" } = {}) {
@@ -879,9 +881,11 @@ async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" 
     return;
   }
   setYmmDropdownValues({ year: cleanYear, make: cleanMake, model: cleanModel });
-  setStartJobStatus(`Starting ${cleanYear} ${cleanMake} ${cleanModel}.`, "ready");
-  showView("vin");
-  await runYmmLookup({ year: cleanYear, make: cleanMake, model: cleanModel });
+  const query = `${cleanYear} ${cleanMake} ${cleanModel}`;
+  if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = query;
+  setStartJobStatus(`Building field packet for ${query}.`, "ready");
+  showView("loadout");
+  await loadFieldWorkflow({ year: cleanYear, make: cleanMake, model: cleanModel, q: query });
 }
 
 function statusClass(status) {
@@ -6355,7 +6359,7 @@ async function syncGoogleSheetToBridge() {
     latestProofVault = null;
     latestReferenceList = null;
     latestDispatchIntelligence = null;
-    await Promise.allSettled([loadCoverageDashboard(), loadJobLoadout(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
+    await Promise.allSettled([loadCoverageDashboard(), loadFieldWorkflow(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
     const imported = payload.importedSheets || [];
     if (googleSheetSyncStatus) googleSheetSyncStatus.textContent = `Google Sheet synced: ${imported.length} tab${imported.length === 1 ? "" : "s"}.`;
     if (googleSheetSyncResult) {
@@ -6838,7 +6842,7 @@ async function dispatchAction(id = "", action = "", button = null) {
   if (action === "loadout") {
     showView("loadout");
     if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query;
-    loadJobLoadout(query);
+    loadFieldWorkflow(query);
     return;
   }
   if (action === "workbench") {
@@ -9159,6 +9163,130 @@ function renderJobLoadout(payload = {}) {
   updateAiContextUi();
 }
 
+function renderFieldWorkflowChoice(choice = {}) {
+  return `
+    <article class="field-decision-choice ${escapeHtml(loadoutTone(choice.confidencePercent))}">
+      <span>${escapeHtml(choice.title || "Choice")}</span>
+      <strong>${escapeHtml(choice.value || "Verify manually")}</strong>
+      <small>${escapeHtml([choice.confidencePercent ? `${choice.confidencePercent}%` : "Verify", choice.proofJobs ? `${choice.proofJobs} proof` : "", choice.source].filter(Boolean).join(" | "))}</small>
+    </article>
+  `;
+}
+
+function renderFieldWorkflowOwner(payload = {}) {
+  const owner = payload.owner || {};
+  const overview = owner.workbench?.overview || {};
+  const truth = owner.truthLedger || {};
+  const activeQueries = owner.activeQueries || {};
+  const sourceMap = owner.sourceMap || {};
+  const sourceRows = Object.entries(sourceMap)
+    .map(([label, value]) => `${label}: ${Object.entries(value || {}).map(([key, count]) => `${key} ${count}`).join(", ")}`)
+    .slice(0, 6);
+  return `
+    <details class="field-decision-owner" data-owner-only>
+      <summary>Owner proof</summary>
+      <div class="field-decision-owner-grid">
+        <article><span>Truth</span><strong>${escapeHtml(truth.label || "No grade")}</strong><p>${escapeHtml(truth.summary || "No proof summary yet.")}</p></article>
+        <article><span>Matched</span><strong>${escapeHtml(overview.exactProofMatches || 0)} exact</strong><p>${escapeHtml(`${overview.relatedProfileMatches || 0} related | ${overview.partReferenceRows || 0} part rows`)}</p></article>
+        <article><span>Queries</span><strong>${escapeHtml(activeQueries.part || activeQueries.proof || payload.query || "Packet")}</strong><p>${escapeHtml([activeQueries.lishi, activeQueries.auto].filter(Boolean).join(" | "))}</p></article>
+      </div>
+      ${sourceRows.length ? `<div class="field-decision-source-list">${sourceRows.map((row) => `<span>${escapeHtml(row)}</span>`).join("")}</div>` : ""}
+    </details>
+  `;
+}
+
+function renderFieldWorkflow(payload = {}) {
+  if (!loadoutResult) return;
+  latestFieldWorkflow = payload;
+  latestJobLoadout = payload.loadout || null;
+  const subscriber = payload.subscriber || {};
+  const choices = subscriber.choices || [];
+  const checklist = subscriber.checklist || [];
+  const warnings = subscriber.warnings || [];
+  loadoutResult.innerHTML = `
+    <section class="field-decision-panel ${escapeHtml(loadoutTone(subscriber.confidencePercent))}">
+      <div class="field-decision-head">
+        <div>
+          <p class="eyebrow">Field Decision</p>
+          <h3>${escapeHtml(subscriber.title || payload.query || "Current job")}</h3>
+          <p>${escapeHtml([subscriber.vin, subscriber.bestMove].filter(Boolean).join(" | "))}</p>
+        </div>
+        <strong><span>${escapeHtml(subscriber.confidencePercent || 0)}%</span><small>${escapeHtml(subscriber.confidenceLabel || "Packet")}</small></strong>
+      </div>
+      <div class="field-decision-grid">
+        ${choices.map(renderFieldWorkflowChoice).join("")}
+      </div>
+      <div class="field-decision-checklist">
+        ${checklist.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+      </div>
+      ${
+        warnings.length
+          ? `<div class="field-decision-warnings">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+          : ""
+      }
+      <div class="field-packet-feedback">
+        <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong Part</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong Programmer</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing Info</button>
+      </div>
+    </section>
+    ${renderFieldWorkflowOwner(payload)}
+  `;
+  updateAiContextUi();
+}
+
+function fieldWorkflowPayload(input = loadoutQueryFromForm()) {
+  const isObject = input && typeof input === "object";
+  const vehicle = isObject
+    ? {
+        year: cleanInput(input.year || input.vehicle?.year || ""),
+        make: cleanInput(input.make || input.vehicle?.make || ""),
+        model: cleanInput(input.model || input.vehicle?.model || ""),
+      }
+    : {};
+  const query = isObject
+    ? cleanInput(input.q || input.query || [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "))
+    : cleanInput(input);
+  return {
+    ...loadoutPayload(query),
+    q: query,
+    query,
+    vin: normalizeVinInput(query).length === 17 ? normalizeVinInput(query) : "",
+    vehicle,
+  };
+}
+
+async function loadFieldWorkflow(input = loadoutQueryFromForm()) {
+  if (!loadoutResult) return;
+  const payloadBody = fieldWorkflowPayload(input);
+  if (loadoutForm?.elements.loadoutQuery && payloadBody.query) loadoutForm.elements.loadoutQuery.value = payloadBody.query;
+  if (!payloadBody.query && !payloadBody.vin && !payloadBody.vehicle?.year && !payloadBody.vehicle?.make && !payloadBody.vehicle?.model) {
+    latestFieldWorkflow = null;
+    latestJobLoadout = null;
+    if (loadoutStatus) loadoutStatus.textContent = "Enter a VIN, YMM, part, or job clue to build the field decision.";
+    loadoutResult.innerHTML = `<article class="assistant-card"><strong>Ready for a job clue</strong><p>Start from VIN or YMM on the launch screen, or enter a part/VIN here.</p></article>`;
+    return;
+  }
+  try {
+    if (loadoutStatus) loadoutStatus.textContent = "Building the highest-confidence field decision...";
+    const payload = await api("/api/field-workflow", {
+      method: "POST",
+      body: JSON.stringify(payloadBody),
+      timeoutMs: 30000,
+      retryOnTimeout: true,
+    });
+    renderFieldWorkflow(payload);
+    if (loadoutStatus) {
+      loadoutStatus.textContent = `Field decision ready: ${payload.subscriber?.confidencePercent || 0}% ${payload.subscriber?.confidenceLabel || "confidence"}.`;
+    }
+  } catch (error) {
+    if (loadoutStatus) loadoutStatus.textContent = error.message;
+    loadoutResult.innerHTML = `<article class="assistant-card"><strong>Field decision unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
 async function loadJobLoadout(query = loadoutQueryFromForm()) {
   if (!loadoutResult) return;
   try {
@@ -9220,7 +9348,7 @@ async function submitFieldPacketFeedback(outcome, sectionId = "", button = null)
       noStatus: true,
     });
     if (loadoutStatus) loadoutStatus.textContent = payload.memory?.message || "Field Packet feedback saved.";
-    await loadJobLoadout(loadoutQueryFromForm());
+    await loadFieldWorkflow(loadoutQueryFromForm());
   } catch (error) {
     if (loadoutStatus) loadoutStatus.textContent = `Feedback failed: ${error.message}`;
   } finally {
@@ -9236,19 +9364,13 @@ function openLoadoutTarget(target, query = "") {
   if (target === "loadout") {
     showView("loadout");
     if (loadoutForm) loadoutForm.elements.loadoutQuery.value = cleanQuery;
-    loadJobLoadout(cleanQuery);
+    loadFieldWorkflow(cleanQuery);
     return;
   }
   if (target === "workbench") {
     showView("workbench");
     if (workbenchForm) workbenchForm.elements.workbenchQuery.value = cleanQuery;
     loadJobWorkbench(cleanQuery);
-    return;
-  }
-  if (target === "loadout") {
-    showView("loadout");
-    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = cleanQuery;
-    loadJobLoadout(cleanQuery);
     return;
   }
   if (target === "part-history") {
@@ -9537,7 +9659,7 @@ async function importMetkaBridgeFile(file) {
     latestCoverageDashboard = null;
     latestProofVault = null;
     latestReferenceList = null;
-    await Promise.allSettled([loadCoverageDashboard(), loadJobLoadout(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
+    await Promise.allSettled([loadCoverageDashboard(), loadFieldWorkflow(loadoutQueryFromForm()), loadJobWorkbench(workbenchQueryFromForm())]);
     if (metkaBridgeStatus) {
       const counts = result.counts || {};
       metkaBridgeStatus.textContent = `Bridge imported: ${counts.workLogJobs || 0} jobs, ${counts.inventoryRows || 0} stock rows, ${counts.partMaps || 0} part maps.`;
@@ -9608,7 +9730,7 @@ function openWorkbenchTarget(target) {
     showView("loadout");
     const query = payload.vin || queries.part || queries.proof || payload.query || workbenchQueryFromForm();
     if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query;
-    loadJobLoadout(query);
+    loadFieldWorkflow(query);
     return;
   }
   if (target === "reference-lists") {
@@ -12695,15 +12817,15 @@ clearWorkbenchButton?.addEventListener("click", () => {
 
 loadoutForm?.addEventListener("submit", (event) => {
   event.preventDefault();
-  loadJobLoadout(loadoutQueryFromForm());
+  loadFieldWorkflow(loadoutQueryFromForm());
 });
 
-refreshLoadoutButton?.addEventListener("click", () => loadJobLoadout(loadoutQueryFromForm()));
+refreshLoadoutButton?.addEventListener("click", () => loadFieldWorkflow(loadoutQueryFromForm()));
 
 loadoutUseCurrentButton?.addEventListener("click", () => {
   const query = latestVinProfile?.vin || latestWorkbench?.vin || latestWorkbench?.activeQueries?.part || workbenchQueryFromForm() || globalSearchQuery();
   if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query || "";
-  loadJobLoadout(query || "");
+  loadFieldWorkflow(query || "");
 });
 
 referenceListForm?.addEventListener("submit", (event) => {

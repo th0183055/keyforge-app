@@ -37,6 +37,10 @@ const partsReferenceRowsByIdCache = new WeakMap();
 const jobEvidenceIndexMarker = Symbol("timlock-job-evidence-index");
 const googleWorkspaceStatusCacheMs = 15 * 1000;
 let googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
+const databaseUrl = process.env.TIMLOCK_DATABASE_URL || process.env.DATABASE_URL || "";
+const databaseStoreKey = "store";
+let postgresPoolPromise = null;
+let postgresStoreReady = false;
 
 const supplierRegistry = [
   {
@@ -220,6 +224,100 @@ async function ensureStore() {
   }
 }
 
+function databaseStorageConfigured() {
+  return Boolean(databaseUrl);
+}
+
+function databaseSslOptions(connectionString = "") {
+  const configured = String(process.env.TIMLOCK_DATABASE_SSL || "").toLowerCase();
+  if (configured === "false" || configured === "0" || configured === "off") return undefined;
+  if (configured === "true" || configured === "1" || configured === "on") return { rejectUnauthorized: false };
+  try {
+    const hostName = new URL(connectionString).hostname;
+    if (/^(localhost|127\.0\.0\.1|::1)$/i.test(hostName)) return undefined;
+  } catch {}
+  return { rejectUnauthorized: false };
+}
+
+async function postgresPool() {
+  if (!databaseStorageConfigured()) return null;
+  if (!postgresPoolPromise) {
+    postgresPoolPromise = import("pg").then((module) => {
+      const Pool = module.Pool || module.default?.Pool;
+      if (!Pool) throw new Error("The pg package did not expose a Pool client.");
+      return new Pool({
+        connectionString: databaseUrl,
+        ssl: databaseSslOptions(databaseUrl),
+        connectionTimeoutMillis: Number(process.env.TIMLOCK_DATABASE_CONNECT_TIMEOUT_MS || 5000),
+        idleTimeoutMillis: Number(process.env.TIMLOCK_DATABASE_IDLE_TIMEOUT_MS || 30000),
+      });
+    });
+  }
+  return postgresPoolPromise;
+}
+
+async function ensureDatabaseStore(pool) {
+  if (!pool || postgresStoreReady) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS timlock_kv (
+      key text PRIMARY KEY,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  postgresStoreReady = true;
+}
+
+async function readDatabaseStore() {
+  const pool = await postgresPool();
+  if (!pool) return null;
+  await ensureDatabaseStore(pool);
+  const result = await pool.query("SELECT value FROM timlock_kv WHERE key = $1", [databaseStoreKey]);
+  if (!result.rows.length) {
+    const seed = await readStoreSeed();
+    await writeDatabaseStore(seed);
+    return seed;
+  }
+  return normalizeStore(result.rows[0].value);
+}
+
+async function writeDatabaseStore(store) {
+  const pool = await postgresPool();
+  if (!pool) return false;
+  await ensureDatabaseStore(pool);
+  await pool.query(
+    `
+      INSERT INTO timlock_kv (key, value, updated_at)
+      VALUES ($1, $2::jsonb, now())
+      ON CONFLICT (key)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+    `,
+    [databaseStoreKey, JSON.stringify(normalizeStore(store))],
+  );
+  googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
+  return true;
+}
+
+async function runDatabaseStoreDiagnostic(id, payload) {
+  const pool = await postgresPool();
+  if (!pool) return "Database store is not configured.";
+  await ensureDatabaseStore(pool);
+  const key = `diagnostics:${id}`;
+  await pool.query(
+    `
+      INSERT INTO timlock_kv (key, value, updated_at)
+      VALUES ($1, $2::jsonb, now())
+      ON CONFLICT (key)
+      DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+    `,
+    [key, JSON.stringify({ id, payload: payload.toString("utf8"), checkedAt: new Date().toISOString() })],
+  );
+  const result = await pool.query("SELECT value FROM timlock_kv WHERE key = $1", [key]);
+  await pool.query("DELETE FROM timlock_kv WHERE key = $1", [key]);
+  if (result.rows[0]?.value?.payload !== payload.toString("utf8")) throw new Error("Database read-back mismatch.");
+  return "Postgres JSONB round-trip passed";
+}
+
 function jsonBackupStamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
@@ -280,6 +378,13 @@ function parseJsonWithRepair(raw = "") {
 }
 
 async function readStore() {
+  if (databaseStorageConfigured()) {
+    try {
+      return await readDatabaseStore();
+    } catch (error) {
+      console.error("TimLock database store read failed; falling back to JSON store.", error);
+    }
+  }
   await ensureStore();
   const raw = await readFile(storePath, "utf8");
   try {
@@ -312,6 +417,13 @@ async function readJsonCached(filePath, fallback = {}) {
 }
 
 async function writeStore(store) {
+  if (databaseStorageConfigured()) {
+    try {
+      if (await writeDatabaseStore(store)) return;
+    } catch (error) {
+      console.error("TimLock database store write failed; falling back to JSON store.", error);
+    }
+  }
   await mkdir(mutableDataDir, { recursive: true });
   const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(store, null, 2)}\n`);
@@ -1770,11 +1882,12 @@ async function buildStorageStatus() {
   ]);
   const r2 = r2ConfigStatus();
   const dataDirExternal = Boolean(process.env.TIMLOCK_DATA_DIR);
+  const databaseStore = databaseStorageConfigured();
   const attachmentMode = proofAttachmentStorageMode();
   const proofStorageCounts = proofAttachmentStorageCounts(proofAttachments.attachments);
   const warnings = [];
 
-  if (!dataDirExternal) {
+  if (!dataDirExternal && !databaseStore) {
     warnings.push("TIMLOCK_DATA_DIR is not set, so live jobs are using the repo-local ignored data folder.");
   }
   if (attachmentMode !== "cloudflare-r2") {
@@ -1811,7 +1924,9 @@ async function buildStorageStatus() {
     status: health.status === "ok" && warnings.length === 0 ? "durable" : warnings.length ? "needs-attention" : health.status,
     checkedAt: new Date().toISOString(),
     storage: {
-      dataDirMode: dataDirExternal ? "external-data-dir" : "repo-local",
+      dataDirMode: databaseStore ? "database-backed" : dataDirExternal ? "external-data-dir" : "repo-local",
+      databaseMode: databaseStore ? "postgres-jsonb" : "disabled",
+      databaseConfigured: databaseStore,
       mutableDataDir,
       storePath,
       attachmentMode,
@@ -3316,6 +3431,10 @@ async function runStorageDiagnostics() {
     if (!readBack.equals(testPayload)) throw new Error("Read-back mismatch.");
     return mutableDataDir;
   });
+
+  if (databaseStorageConfigured()) {
+    await capture("Postgres job store round-trip", async () => runDatabaseStoreDiagnostic(id, testPayload));
+  }
 
   if (r2Config()) {
     await capture("Cloudflare R2 proof round-trip", async () => {
@@ -10011,6 +10130,124 @@ async function buildJobLoadout(body = {}, store = { jobs: [] }) {
   return loadout;
 }
 
+function bestWorkflowChoice({ id = "", title = "", value = "", score = 0, confidenceLabel = "", source = "", proofJobs = 0, action = "" } = {}) {
+  const cleanValue = cleanString(value);
+  return {
+    id: cleanString(id),
+    title: cleanString(title),
+    value: cleanValue || "Verify manually",
+    confidencePercent: Math.max(0, Math.min(100, Math.round(Number(score || 0)))),
+    confidenceLabel: cleanString(confidenceLabel || fieldLoadoutConfidenceLabel(score)),
+    source: cleanString(source),
+    proofJobs: Number(proofJobs || 0),
+    action: cleanString(action || (cleanValue ? "Use" : "Verify")),
+  };
+}
+
+function fieldWorkflowChoiceFromPacket(packet = {}, id = "", title = "", fallback = "Verify manually") {
+  const choice = (packet.choices || []).find((item) => item.id === id) || {};
+  return bestWorkflowChoice({
+    id,
+    title,
+    value: choice.label || choice.value || fallback,
+    score: choice.score || 0,
+    confidenceLabel: choice.confidenceLabel,
+    source: choice.source,
+    proofJobs: choice.proofJobs,
+    action: choice.score >= 72 ? "Use" : "Verify",
+  });
+}
+
+function buildFieldWorkflowSubscriber(workbench = {}, loadout = {}) {
+  const packet = loadout.fieldPacket || {};
+  const decisionEngine = workbench.decisionEngine || {};
+  const vehicleLabel = cleanString(loadout.title || workbench.title || [loadout.vehicle?.year, loadout.vehicle?.make, loadout.vehicle?.model].filter(Boolean).join(" "));
+  const vehicleScore = Number(decisionEngine.confidencePercent || loadout.confidencePercent || packet.confidencePercent || 0);
+  const choices = [
+    bestWorkflowChoice({
+      id: "vehicle",
+      title: "Vehicle",
+      value: vehicleLabel || "Verify vehicle",
+      score: vehicleScore,
+      confidenceLabel: decisionEngine.confidenceLabel || loadout.confidenceLabel,
+      source: workbench.truthLedger?.label || "VIN/YMM proof",
+      proofJobs: workbench.overview?.exactProofMatches || workbench.overview?.relatedProfileMatches || 0,
+      action: vehicleScore >= 72 ? "Confirm" : "Verify",
+    }),
+    fieldWorkflowChoiceFromPacket(packet, "primary", "Part", "Verify primary part"),
+    fieldWorkflowChoiceFromPacket(packet, "programmer", "Programmer", "Verify programmer"),
+    fieldWorkflowChoiceFromPacket(packet, "lishi", "Lishi", "Verify keyway"),
+    fieldWorkflowChoiceFromPacket(packet, "backup", "Backup", "Verify backup option"),
+    fieldWorkflowChoiceFromPacket(packet, "proof", "Proof", "Authorization + final proof"),
+  ];
+  const byId = new Map(choices.map((choice) => [choice.id, choice]));
+  const part = byId.get("part") || byId.get("primary");
+  const programmer = byId.get("programmer");
+  const lishi = byId.get("lishi");
+  const proof = byId.get("proof");
+  const checklist = uniqueCleanValues([
+    "Authorize",
+    part?.value && !/verify/i.test(part.value) ? `Bring ${part.value}` : "Verify part",
+    programmer?.value && !/verify/i.test(programmer.value) ? `Use ${programmer.value}` : "Verify programmer",
+    lishi?.value && !/verify/i.test(lishi.value) ? `Pack ${lishi.value}` : "Verify Lishi",
+    proof?.value || "Save proof",
+  ]).slice(0, 5);
+  const warnings = uniqueCleanValues([
+    ...(decisionEngine.blockers || []),
+    ...(packet.gaps || []),
+    ...(workbench.warnings || []),
+  ]).slice(0, 3);
+  const overall = Math.max(
+    Number(loadout.confidencePercent || 0),
+    Math.min(100, Math.round(choices.reduce((total, choice) => total + Number(choice.confidencePercent || 0), 0) / Math.max(choices.length, 1))),
+  );
+  return {
+    title: vehicleLabel || cleanString(loadout.query || workbench.query || "Current job"),
+    vin: cleanString(loadout.vin || workbench.vin),
+    confidencePercent: Math.round(overall),
+    confidenceLabel: fieldLoadoutConfidenceLabel(overall),
+    bestMove: cleanString(decisionEngine.bestMove || workbench.aiBrief?.decision || "Verify the packet, then work from saved proof."),
+    choices,
+    checklist,
+    warnings,
+  };
+}
+
+async function buildFieldWorkflow(body = {}, store = { jobs: [] }) {
+  const workbench = await buildJobWorkbench(body, store);
+  const loadout = await buildJobLoadout(
+    {
+      ...body,
+      q: cleanString(body.q || body.query || workbench.vin || workbench.query || workbench.title),
+      vin: cleanString(workbench.vin || body.vin || ""),
+      vehicle: workbench.vehicle || body.vehicle || {},
+      profile: {
+        ...(body.profile && typeof body.profile === "object" ? body.profile : {}),
+        vin: cleanString(workbench.vin || body.vin || ""),
+        vehicle: workbench.vehicle || body.vehicle || {},
+      },
+    },
+    store,
+  );
+  const subscriber = buildFieldWorkflowSubscriber(workbench, loadout);
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: "field-workflow",
+    query: cleanString(body.q || body.query || loadout.query || workbench.query || ""),
+    vin: cleanString(loadout.vin || workbench.vin || ""),
+    vehicle: loadout.vehicle || workbench.vehicle || {},
+    subscriber,
+    loadout,
+    owner: {
+      workbench,
+      truthLedger: workbench.truthLedger || loadout.truthLedger || null,
+      decisionEngine: workbench.decisionEngine || null,
+      sourceMap: workbench.sourceMap || null,
+      activeQueries: workbench.activeQueries || null,
+    },
+  };
+}
+
 function proofVaultJobRecord(job, partsReference, searchTokens = [], referenceRows = [], options = {}) {
   const includeReferences = options.includeReferences !== false;
   const extractedTokens = extractPartHistoryJobTokens(job);
@@ -14784,6 +15021,12 @@ async function handleApi(request, response, pathname) {
     const query = cleanString(request.method === "POST" ? body.q || body.query : url.searchParams.get("q"));
     const partsReference = await readPartsCrossReference();
     sendJson(response, 200, buildProofVault(query, storeFieldJobs(store, body.jobs || body.localJobs || []), partsReference));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/field-workflow") {
+    const body = await readJsonBody(request);
+    sendJson(response, 200, await buildFieldWorkflow(body, store));
     return;
   }
 
