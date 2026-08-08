@@ -49,6 +49,7 @@ let latestTrainingCenter = null;
 let latestMetkaBridge = null;
 let latestWorkspaceBrief = null;
 let latestDispatchIntelligence = null;
+let latestJobInbox = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestGoogleWorkspace = null;
@@ -159,6 +160,9 @@ const quickVinStartForm = document.querySelector("#quickVinStartForm");
 const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
 const quickScheduleJobForm = document.querySelector("#quickScheduleJobForm");
 const startJobStatus = document.querySelector("#startJobStatus");
+const jobInboxStatus = document.querySelector("#jobInboxStatus");
+const jobInboxResult = document.querySelector("#jobInboxResult");
+const refreshJobInboxButton = document.querySelector("#refreshJobInbox");
 const workspaceBridgeSummary = document.querySelector("#workspaceBridgeSummary");
 const startMenuButton = document.querySelector("#startMenuButton");
 const startMenuPanel = document.querySelector("#startMenuPanel");
@@ -451,7 +455,10 @@ function showView(id, options = {}) {
     loadStorageStatus({ quiet: true });
     loadGoogleWorkspace({ quiet: true });
   }
-  if (id === "command" && !latestWorkspaceBrief) loadWorkspaceBrief();
+  if (id === "command") {
+    if (!latestWorkspaceBrief) loadWorkspaceBrief();
+    if (!latestJobInbox) loadJobInbox({ quiet: true });
+  }
   updateAiContextUi();
 }
 
@@ -6441,7 +6448,9 @@ async function scheduleJobFromStart() {
     quickScheduleJobForm.reset();
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
+    latestJobInbox = null;
     await loadWorkspaceBrief();
+    loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     const localJob = rememberScheduledJob({
@@ -6455,6 +6464,8 @@ async function scheduleJobFromStart() {
     delete quickScheduleJobForm.dataset.pendingId;
     quickScheduleJobForm.reset();
     latestDispatchIntelligence = null;
+    latestJobInbox = null;
+    loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   }
 }
@@ -6473,6 +6484,8 @@ async function syncScheduledJobCalendar(id = "", options = {}) {
     const synced = (payload.jobs || []).find((job) => job.id === cleanId);
     if (!options.quiet && synced?.calendarHtmlLink) setStartJobStatus("Calendar event created.", "ready");
     latestDispatchIntelligence = null;
+    latestJobInbox = null;
+    loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
     return payload;
   } catch (error) {
@@ -6584,6 +6597,8 @@ async function importServiceIntake() {
     serviceIntakeImportForm.elements.rawText.value = "";
     latestReferenceList = null;
     latestDispatchIntelligence = null;
+    latestJobInbox = null;
+    loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Intake import failed: ${error.message}`;
@@ -6611,6 +6626,77 @@ function localDispatchItemFromScheduledJob(job = {}) {
     calendarHtmlLink: localJob.calendarHtmlLink,
     calendarSyncStatus: localJob.calendarSyncStatus,
   };
+}
+
+function jobInboxBucket(item = {}) {
+  const startMs = Date.parse(item.start || item.scheduledAt || item.schedule || "");
+  if (!Number.isFinite(startMs)) return "unscheduled";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const nextDay = new Date(tomorrow);
+  nextDay.setDate(nextDay.getDate() + 1);
+  if (startMs < today.getTime()) return "overdue";
+  if (startMs < tomorrow.getTime()) return "today";
+  if (startMs < nextDay.getTime()) return "tomorrow";
+  return "upcoming";
+}
+
+function jobInboxPublicItem(item = {}) {
+  const preview = item.packetPreview || {};
+  const bucket = item.bucket || jobInboxBucket(item);
+  const fieldReady = Boolean(item.fieldReady || (item.packetStatus === "ready" && (preview.primary || preview.programmer || preview.lishi)));
+  const needsAttention = Boolean(item.needsAttention || !fieldReady || item.packetStatus === "verify" || (!item.vin && !item.vehicleLabel));
+  return {
+    ...item,
+    bucket,
+    fieldReady,
+    needsAttention,
+    headline: cleanInput(item.headline || preview.title || item.vehicleLabel || item.title || item.service || "Dispatch job"),
+    subline: cleanInput(item.subline || [item.customer, item.service, item.location].filter(Boolean).join(" | ")),
+    packetLine: cleanInput(item.packetLine || [preview.primary, preview.programmer, preview.lishi].filter(Boolean).join(" | ")),
+    actionLabel: item.actionLabel || (fieldReady ? "Open Packet" : "Review"),
+    sortTime: Number(item.sortTime || Date.parse(item.start || item.scheduledAt || item.schedule || "")) || Number.MAX_SAFE_INTEGER,
+  };
+}
+
+function buildClientJobInboxFromDispatch(payload = {}) {
+  const items = (payload.queue || []).map(jobInboxPublicItem).sort((a, b) => {
+    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+    return (a.sortTime || Number.MAX_SAFE_INTEGER) - (b.sortTime || Number.MAX_SAFE_INTEGER);
+  });
+  const today = items.filter((item) => item.bucket === "overdue" || item.bucket === "today");
+  const tomorrow = items.filter((item) => item.bucket === "tomorrow");
+  const upcoming = items.filter((item) => item.bucket === "upcoming" || item.bucket === "unscheduled");
+  const attention = items.filter((item) => item.needsAttention);
+  return {
+    generatedAt: payload.generatedAt || new Date().toISOString(),
+    google: payload.google || latestGoogleWorkspace || {},
+    sources: payload.sources || { calendar: 0, intake: 0, scheduled: items.length },
+    selectedId: payload.summary?.selectedId || payload.selected?.id || "",
+    summary: {
+      total: items.length,
+      today: today.length,
+      tomorrow: tomorrow.length,
+      upcoming: upcoming.length,
+      readyPackets: items.filter((item) => item.fieldReady).length,
+      needsAttention: attention.length,
+      connectedCalendar: Boolean(payload.summary?.connectedCalendar || latestGoogleWorkspace?.connected),
+    },
+    items,
+    sections: [
+      { id: "today", title: "Today", count: today.length, items: today.slice(0, 6) },
+      { id: "tomorrow", title: "Tomorrow", count: tomorrow.length, items: tomorrow.slice(0, 6) },
+      { id: "upcoming", title: "Upcoming", count: upcoming.length, items: upcoming.slice(0, 6) },
+      { id: "attention", title: "Needs attention", count: attention.length, items: attention.slice(0, 4) },
+    ].filter((section) => section.count || section.id === "today"),
+  };
+}
+
+function localJobInboxFallbackPayload(error = null) {
+  const fallback = localDispatchFallbackPayload(error);
+  return buildClientJobInboxFromDispatch(fallback);
 }
 
 function localDispatchFallbackPayload(error = null) {
@@ -6658,6 +6744,7 @@ function dispatchFormPayload(overrides = {}) {
     syncCalendar: Boolean(overrides.syncCalendar),
     localScheduledJobs: localScheduledJobs(),
     limit: 40,
+    packetPrebuildLimit: Math.max(1, Math.min(20, Number(overrides.packetPrebuildLimit || 8))),
   };
 }
 
@@ -6682,6 +6769,120 @@ function dispatchItemTitle(item = {}) {
 
 function dispatchItemQuery(item = {}) {
   return cleanInput([item.vin, item.vehicleLabel, item.title, item.service, item.customer].filter(Boolean).join(" "));
+}
+
+function renderJobInboxMetric(label, value, note = "") {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+    </article>
+  `;
+}
+
+function renderJobInboxItem(item = {}) {
+  const when = item.start ? formatWorkspaceDate(item.start) : "No time";
+  const source = dispatchSourceBadge(item.source);
+  const status = item.fieldReady ? "Ready" : item.needsAttention ? "Verify" : "Queued";
+  const tone = item.fieldReady ? "ready" : item.needsAttention ? "warn" : "queued";
+  return `
+    <button class="job-inbox-card ${escapeHtml(tone)}" type="button" data-job-inbox-open="${escapeHtml(item.id)}">
+      <span>${escapeHtml([when, source, status].filter(Boolean).join(" | "))}</span>
+      <strong>${escapeHtml(item.headline || dispatchItemTitle(item))}</strong>
+      <small>${escapeHtml(item.subline || item.customer || item.location || item.service || "Field job")}</small>
+      ${item.packetLine ? `<em>${escapeHtml(item.packetLine)}</em>` : ""}
+      ${appMode === "owner" && item.vin ? `<small class="owner-inline">${escapeHtml(item.vin)}</small>` : ""}
+      <b>${escapeHtml(item.actionLabel || "Open Packet")}</b>
+    </button>
+  `;
+}
+
+function renderJobInboxSection(section = {}) {
+  const items = section.items || [];
+  if (!items.length && section.id !== "today") return "";
+  return `
+    <section class="job-inbox-section ${escapeHtml(section.id || "")}">
+      <div>
+        <p class="eyebrow">${escapeHtml(section.count || 0)} job${section.count === 1 ? "" : "s"}</p>
+        <strong>${escapeHtml(section.title || "Jobs")}</strong>
+      </div>
+      <div class="job-inbox-list">
+        ${
+          items.length
+            ? items.map(renderJobInboxItem).join("")
+            : `<article class="job-inbox-empty"><strong>No jobs due today</strong><span>Schedule a job, sync Calendar, or import QUO/service app work.</span></article>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderJobInbox(payload = {}) {
+  if (!jobInboxResult) return;
+  latestJobInbox = payload;
+  const summary = payload.summary || {};
+  const sections = payload.sections || [];
+  jobInboxResult.innerHTML = `
+    <section class="job-inbox-metrics">
+      ${renderJobInboxMetric("Today", summary.today || 0, "due")}
+      ${renderJobInboxMetric("Ready", summary.readyPackets || 0, "packets")}
+      ${renderJobInboxMetric("Verify", summary.needsAttention || 0, "checks")}
+      ${renderJobInboxMetric("Total", summary.total || 0, "queue")}
+    </section>
+    <section class="job-inbox-sections">
+      ${sections.length ? sections.map(renderJobInboxSection).join("") : renderJobInboxSection({ id: "today", title: "Today", count: 0, items: [] })}
+    </section>
+  `;
+  if (jobInboxStatus) {
+    const sourceCounts = payload.sources || {};
+    jobInboxStatus.textContent = `${summary.total || 0} jobs | ${sourceCounts.calendar || 0} Calendar | ${sourceCounts.intake || 0} QUO | ${sourceCounts.scheduled || 0} TimLock`;
+  }
+}
+
+async function loadJobInbox(options = {}) {
+  if (!jobInboxResult) return null;
+  try {
+    if (jobInboxStatus && !options.quiet) jobInboxStatus.textContent = options.syncCalendar ? "Syncing Calendar and building packets..." : "Building job inbox...";
+    const payload = await api("/api/job-inbox", {
+      method: "POST",
+      body: JSON.stringify({
+        days: options.days || 14,
+        id: cleanInput(options.id || ""),
+        q: cleanInput(options.q || ""),
+        syncCalendar: Boolean(options.syncCalendar),
+        localScheduledJobs: localScheduledJobs(),
+        limit: options.limit || 24,
+        packetPrebuildLimit: options.packetPrebuildLimit || 10,
+      }),
+      timeoutMs: options.syncCalendar ? 65000 : 24000,
+      retryOnTimeout: true,
+      noStatus: true,
+    });
+    renderJobInbox(payload);
+    latestGoogleWorkspace = payload.google || latestGoogleWorkspace;
+    return payload;
+  } catch (error) {
+    const fallback = localJobInboxFallbackPayload(error);
+    if (fallback.summary?.total) {
+      renderJobInbox(fallback);
+      if (jobInboxStatus) jobInboxStatus.textContent = `Showing ${fallback.summary.total} local saved job${fallback.summary.total === 1 ? "" : "s"} while the server catches up.`;
+      return fallback;
+    }
+    if (jobInboxStatus) jobInboxStatus.textContent = `Inbox unavailable: ${error.message}`;
+    jobInboxResult.innerHTML = `<article class="job-inbox-empty warn"><strong>Inbox unavailable</strong><span>${escapeHtml(error.message)}</span></article>`;
+    return null;
+  }
+}
+
+async function openJobInboxPacket(id = "") {
+  const cleanId = cleanInput(id);
+  if (!cleanId) return;
+  if (jobInboxStatus) jobInboxStatus.textContent = "Opening field packet...";
+  const hadDispatch = Boolean(latestDispatchIntelligence);
+  if (!hadDispatch) latestDispatchIntelligence = { queue: [] };
+  showView("dispatch");
+  await loadDispatchIntelligence({ id: cleanId, quiet: true, packetPrebuildLimit: 10 });
 }
 
 function renderDispatchQueueItem(item = {}, selectedId = "") {
@@ -6874,6 +7075,8 @@ async function dispatchAction(id = "", action = "", button = null) {
         ? "Calendar event created."
         : synced?.calendarError || result?.message || "Calendar sync queued.";
     }
+    latestJobInbox = null;
+    loadJobInbox({ quiet: true });
     if (synced?.calendarHtmlLink) window.open(synced.calendarHtmlLink, "_blank", "noopener");
     return;
   }
@@ -6907,7 +7110,8 @@ async function dispatchAction(id = "", action = "", button = null) {
     }
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
-    await Promise.allSettled([loadWorkspaceBrief(), loadDispatchIntelligence({ id: item.id || id, quiet: true })]);
+    latestJobInbox = null;
+    await Promise.allSettled([loadWorkspaceBrief(), loadJobInbox({ quiet: true }), loadDispatchIntelligence({ id: item.id || id, quiet: true })]);
     if (dispatchIntelligenceStatus) {
       dispatchIntelligenceStatus.textContent =
         action === "drive"
@@ -12620,6 +12824,7 @@ applyAppMode(loadAppMode());
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     applyAppMode(button.dataset.setMode);
+    if (latestJobInbox) renderJobInbox(latestJobInbox);
     loadAiMemory();
     if (latestGlobalSearch && globalSearchQuery()) runGlobalSearch();
   });
@@ -12757,6 +12962,7 @@ serverBackupImportInput?.addEventListener("change", async () => {
 connectGoogleWorkspaceButton?.addEventListener("click", connectGoogleWorkspace);
 disconnectGoogleWorkspaceButton?.addEventListener("click", disconnectGoogleWorkspace);
 syncGoogleCalendarButton?.addEventListener("click", syncGoogleCalendarPreview);
+refreshJobInboxButton?.addEventListener("click", () => loadJobInbox());
 dispatchIntelligenceForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   loadDispatchIntelligence();
@@ -12893,6 +13099,12 @@ document.addEventListener("click", (event) => {
   const launchCtaButton = event.target.closest("[data-launch-cta]");
   if (launchCtaButton) {
     handleLaunchCta(launchCtaButton.dataset.launchCta);
+    return;
+  }
+
+  const jobInboxButton = event.target.closest("[data-job-inbox-open]");
+  if (jobInboxButton) {
+    openJobInboxPacket(jobInboxButton.dataset.jobInboxOpen);
     return;
   }
 

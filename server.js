@@ -6239,6 +6239,87 @@ function dispatchPublicItem(item = {}, packetSummary = null, error = "") {
   };
 }
 
+function jobInboxBucket(item = {}) {
+  const startMs = dispatchDateValue(item.start || item.scheduledAt || item.schedule);
+  if (!startMs) return "unscheduled";
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const nextDayStart = new Date(tomorrowStart);
+  nextDayStart.setDate(nextDayStart.getDate() + 1);
+  if (startMs < todayStart.getTime()) return "overdue";
+  if (startMs < tomorrowStart.getTime()) return "today";
+  if (startMs < nextDayStart.getTime()) return "tomorrow";
+  return "upcoming";
+}
+
+function jobInboxPublicItem(item = {}) {
+  const preview = item.packetPreview || {};
+  const bucket = jobInboxBucket(item);
+  const hasVehicle = Boolean(cleanString(item.vehicleLabel || preview.title));
+  const fieldReady = item.packetStatus === "ready" && Boolean(preview.primary || preview.programmer || preview.lishi);
+  const needsAttention = !fieldReady || item.packetStatus === "verify" || !hasVehicle || !cleanString(item.vin);
+  return {
+    ...item,
+    bucket,
+    sortTime: dispatchDateValue(item.start || item.scheduledAt || item.schedule) || Number.MAX_SAFE_INTEGER,
+    headline: cleanString(preview.title || item.vehicleLabel || item.title || item.service || "Dispatch job"),
+    subline: uniqueCleanValues([item.customer, item.service, item.location]).join(" | "),
+    packetLine: uniqueCleanValues([preview.primary, preview.programmer, preview.lishi]).join(" | "),
+    fieldReady,
+    needsAttention,
+    actionLabel: fieldReady ? "Open Packet" : "Review",
+  };
+}
+
+function jobInboxSection(id, title, items = [], limit = 6) {
+  return {
+    id,
+    title,
+    count: items.length,
+    items: items.slice(0, limit),
+  };
+}
+
+function buildJobInboxFromDispatch(dispatch = {}) {
+  const items = (dispatch.queue || []).map(jobInboxPublicItem).sort((a, b) => {
+    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+    return (a.sortTime || Number.MAX_SAFE_INTEGER) - (b.sortTime || Number.MAX_SAFE_INTEGER);
+  });
+  const todayItems = items.filter((item) => item.bucket === "overdue" || item.bucket === "today");
+  const tomorrowItems = items.filter((item) => item.bucket === "tomorrow");
+  const upcomingItems = items.filter((item) => item.bucket === "upcoming" || item.bucket === "unscheduled");
+  const attentionItems = items.filter((item) => item.needsAttention);
+  return {
+    generatedAt: dispatch.generatedAt || new Date().toISOString(),
+    google: dispatch.google,
+    sources: dispatch.sources || {},
+    selectedId: dispatch.summary?.selectedId || dispatch.selected?.id || "",
+    summary: {
+      total: items.length,
+      today: todayItems.length,
+      tomorrow: tomorrowItems.length,
+      upcoming: upcomingItems.length,
+      readyPackets: items.filter((item) => item.fieldReady).length,
+      needsAttention: attentionItems.length,
+      connectedCalendar: Boolean(dispatch.summary?.connectedCalendar),
+    },
+    items,
+    sections: [
+      jobInboxSection("today", "Today", todayItems),
+      jobInboxSection("tomorrow", "Tomorrow", tomorrowItems),
+      jobInboxSection("upcoming", "Upcoming", upcomingItems),
+      jobInboxSection("attention", "Needs attention", attentionItems, 4),
+    ].filter((section) => section.count || section.id === "today"),
+    selected: items.find((item) => item.id === (dispatch.summary?.selectedId || dispatch.selected?.id)) || items[0] || null,
+    packet: dispatch.packet,
+    fieldWorkflow: dispatch.fieldWorkflow?.subscriber ? { subscriber: dispatch.fieldWorkflow.subscriber } : null,
+    next: dispatch.next || [],
+  };
+}
+
 async function buildDispatchPacketBundle(item = {}, store = {}, options = {}) {
   if (!item?.id) return { item, summary: null, loadout: null, workflow: null, error: "Dispatch item missing." };
   try {
@@ -6321,6 +6402,16 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
     intake: items.filter((item) => item.source === "service-intake").length,
     scheduled: items.filter((item) => item.source === "timlock-schedule").length,
   };
+  const ownerMode = options.role === "owner";
+  const publicSelected = selected ? dispatchPublicItem(selected, selectedBundle?.summary, selectedBundle?.error) : null;
+  const publicWorkflow = selectedBundle?.workflow
+    ? {
+        generatedAt: selectedBundle.workflow.generatedAt,
+        query: selectedBundle.workflow.query,
+        vin: selectedBundle.workflow.vin,
+        subscriber: selectedBundle.workflow.subscriber,
+      }
+    : null;
   return {
     generatedAt: new Date().toISOString(),
     days,
@@ -6335,10 +6426,10 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
       packetPrebuildLimit,
     },
     queue,
-    selected,
+    selected: ownerMode ? selected : publicSelected,
     packet: selectedBundle?.summary || null,
-    fieldWorkflow: selectedBundle?.workflow || null,
-    loadout: selectedBundle?.loadout || null,
+    fieldWorkflow: ownerMode ? selectedBundle?.workflow || null : publicWorkflow,
+    loadout: ownerMode ? selectedBundle?.loadout || null : null,
     next: selected
       ? uniqueCleanValues([
           selected.source === "service-intake" ? "Promote QUO intake to Calendar" : "",
@@ -6348,6 +6439,21 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
         ])
       : ["Sync Google Calendar or import QUO jobs."],
   };
+}
+
+async function buildJobInbox(request, body = {}, store = {}, options = {}) {
+  const dispatch = await buildDispatchIntelligence(
+    request,
+    {
+      ...body,
+      days: body.days || body.windowDays || 14,
+      limit: body.limit || 24,
+      packetPrebuildLimit: body.packetPrebuildLimit || 10,
+    },
+    store,
+    options,
+  );
+  return buildJobInboxFromDispatch(dispatch);
 }
 
 async function promoteDispatchItemToCalendar(request, store, body = {}) {
@@ -15118,6 +15224,32 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/job-inbox") {
+    try {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const body = request.method === "POST" ? await readJsonBody(request) : {};
+      sendJson(
+        response,
+        200,
+        await buildJobInbox(
+          request,
+          {
+            ...body,
+            days: body.days || url.searchParams.get("days"),
+            id: body.id || url.searchParams.get("id"),
+            q: body.q || url.searchParams.get("q"),
+            syncCalendar: body.syncCalendar || url.searchParams.get("syncCalendar") === "true",
+          },
+          store,
+          { canSyncCalendar: auth.role === "owner", role: auth.role },
+        ),
+      );
+    } catch (error) {
+      sendError(response, 400, `Job Inbox failed: ${error.message}`);
+    }
+    return;
+  }
+
   if ((request.method === "GET" || request.method === "POST") && pathname === "/api/dispatch-intelligence") {
     try {
       const url = new URL(request.url, `http://${request.headers.host}`);
@@ -15135,7 +15267,7 @@ async function handleApi(request, response, pathname) {
             syncCalendar: body.syncCalendar || url.searchParams.get("syncCalendar") === "true",
           },
           store,
-          { canSyncCalendar: auth.role === "owner" },
+          { canSyncCalendar: auth.role === "owner", role: auth.role },
         ),
       );
     } catch (error) {

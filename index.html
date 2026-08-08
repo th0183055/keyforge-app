@@ -283,6 +283,26 @@
 
             <div class="start-job-status" id="startJobStatus">Ready.</div>
 
+            <section class="job-inbox-panel" id="jobInboxPanel" aria-label="Unified Job Inbox">
+              <div class="job-inbox-head">
+                <div>
+                  <p class="eyebrow">Today</p>
+                  <strong>Job Inbox</strong>
+                  <span id="jobInboxStatus">Calendar, QUO, and TimLock jobs load here.</span>
+                </div>
+                <div class="job-inbox-actions">
+                  <button class="secondary-action small" type="button" id="refreshJobInbox">Refresh</button>
+                  <button class="primary-action small" type="button" data-view-target="dispatch">Dispatch</button>
+                </div>
+              </div>
+              <div class="job-inbox-result" id="jobInboxResult">
+                <article class="job-inbox-empty">
+                  <strong>Loading jobs</strong>
+                  <span>Build packets from Calendar, QUO, and saved TimLock jobs.</span>
+                </article>
+              </div>
+            </section>
+
             <div class="workspace-bridge-summary" id="workspaceBridgeSummary" data-owner-only>
               <article>
                 <p class="eyebrow">Google Workspace</p>

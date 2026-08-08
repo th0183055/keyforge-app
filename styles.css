@@ -10921,6 +10921,176 @@ body.is-start-screen #startJobStatus[data-tone="ready"] {
   color: #d9ffe9;
 }
 
+body.is-start-screen #command .job-inbox-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 5px solid #e02430;
+  border-radius: 8px;
+  padding: clamp(14px, 2vw, 18px);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.13), rgba(255, 255, 255, 0.035)),
+    #0c0d11;
+  color: #ffffff;
+}
+
+body.is-start-screen #command .job-inbox-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body.is-start-screen #command .job-inbox-head strong {
+  display: block;
+  color: #ffffff;
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+}
+
+body.is-start-screen #command .job-inbox-head span,
+body.is-start-screen #command .job-inbox-empty span {
+  color: rgba(255, 255, 255, 0.68);
+  font-weight: 800;
+}
+
+body.is-start-screen #command .job-inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+body.is-start-screen #command .job-inbox-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .job-inbox-metrics article,
+body.is-start-screen #command .job-inbox-empty {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+body.is-start-screen #command .job-inbox-metrics span,
+body.is-start-screen #command .job-inbox-section > div:first-child .eyebrow {
+  color: #ffb3b8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .job-inbox-metrics strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.35rem;
+}
+
+body.is-start-screen #command .job-inbox-metrics small {
+  color: rgba(255, 255, 255, 0.58);
+  font-weight: 800;
+}
+
+body.is-start-screen #command .job-inbox-sections {
+  display: grid;
+  gap: 10px;
+}
+
+body.is-start-screen #command .job-inbox-section {
+  display: grid;
+  gap: 8px;
+}
+
+body.is-start-screen #command .job-inbox-section > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+body.is-start-screen #command .job-inbox-section > div:first-child strong {
+  color: #ffffff;
+}
+
+body.is-start-screen #command .job-inbox-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .job-inbox-card {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-left: 4px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  padding: 11px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #ffffff;
+  text-align: left;
+}
+
+body.is-start-screen #command .job-inbox-card.ready {
+  border-left-color: #24d18f;
+}
+
+body.is-start-screen #command .job-inbox-card.warn {
+  border-left-color: #ffb020;
+}
+
+body.is-start-screen #command .job-inbox-card:hover {
+  border-color: rgba(224, 36, 48, 0.55);
+  background: rgba(224, 36, 48, 0.16);
+}
+
+body.is-start-screen #command .job-inbox-card span,
+body.is-start-screen #command .job-inbox-card small,
+body.is-start-screen #command .job-inbox-card em,
+body.is-start-screen #command .job-inbox-card b {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .job-inbox-card span {
+  color: #ffb3b8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .job-inbox-card strong {
+  color: #ffffff;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+body.is-start-screen #command .job-inbox-card small,
+body.is-start-screen #command .job-inbox-card em {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.25;
+}
+
+body.is-start-screen #command .job-inbox-card .owner-inline {
+  color: rgba(255, 255, 255, 0.46);
+}
+
+body.is-start-screen #command .job-inbox-card b {
+  justify-self: start;
+  margin-top: 2px;
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #ffffff;
+  color: #0b0c10;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
 @media (max-width: 1040px) {
   body.is-start-screen #command .start-job-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -10928,6 +11098,10 @@ body.is-start-screen #startJobStatus[data-tone="ready"] {
 
   body.is-start-screen #command .start-job-card.schedule-start {
     grid-column: 1 / -1;
+  }
+
+  body.is-start-screen #command .job-inbox-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -10979,6 +11153,28 @@ body.is-start-screen #startJobStatus[data-tone="ready"] {
   body.is-start-screen .start-menu-mode .mode-toggle {
     width: 100%;
     min-width: 0;
+  }
+
+  body.is-start-screen #command .job-inbox-head,
+  body.is-start-screen #command .job-inbox-section > div:first-child {
+    display: grid;
+    align-items: start;
+  }
+
+  body.is-start-screen #command .job-inbox-actions {
+    justify-content: stretch;
+  }
+
+  body.is-start-screen #command .job-inbox-actions > * {
+    flex: 1 1 130px;
+  }
+
+  body.is-start-screen #command .job-inbox-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.is-start-screen #command .job-inbox-list {
+    grid-template-columns: 1fr;
   }
 }
 
