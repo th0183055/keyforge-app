@@ -11046,6 +11046,69 @@ body.is-start-screen #command .start-guidance-strip span {
   text-align: center;
 }
 
+body.is-start-screen #command .start-active-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(224, 36, 48, 0.34);
+  border-radius: 8px;
+  padding: clamp(12px, 2vw, 16px);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.18), rgba(255, 255, 255, 0.045) 46%, rgba(255, 255, 255, 0.02)),
+    #101116;
+  color: #ffffff;
+}
+
+body.is-start-screen #command .start-active-panel > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+body.is-start-screen #command .start-active-panel strong {
+  display: block;
+  color: #ffffff;
+  font-size: clamp(1.05rem, 1.7vw, 1.42rem);
+  line-height: 1.08;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .start-active-panel span {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .start-active-score {
+  display: grid;
+  min-width: 88px;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.075);
+  text-align: center;
+}
+
+body.is-start-screen #command .start-active-score strong {
+  font-size: 1.32rem;
+}
+
+body.is-start-screen #command .start-active-score span {
+  font-size: 0.66rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .start-active-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 body.is-start-screen #command .start-job-card.primary-start {
   border-color: rgba(224, 36, 48, 0.38);
   border-left-color: #e02430;
@@ -11100,6 +11163,27 @@ body.is-start-screen #command .start-job-card button[type="submit"] {
   min-height: 50px;
 }
 
+body.is-start-screen #command .schedule-more-fields {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+body.is-start-screen #command .schedule-more-fields summary {
+  cursor: pointer;
+  color: #ffb3b8;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .schedule-more-fields[open] summary {
+  margin-bottom: 10px;
+}
+
 body.is-start-screen #command .primary-action {
   min-height: 50px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -11132,6 +11216,71 @@ body.is-start-screen #startJobStatus[data-tone="ready"] {
   border-color: rgba(47, 125, 91, 0.46);
   background: rgba(34, 197, 94, 0.12);
   color: #d9ffe9;
+}
+
+body.is-start-screen #command .start-operator-drawer {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.035);
+  color: #ffffff;
+}
+
+body.is-start-screen #command .start-operator-drawer > summary {
+  display: flex;
+  cursor: pointer;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  list-style: none;
+}
+
+body.is-start-screen #command .start-operator-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+body.is-start-screen #command .start-operator-drawer > summary::after {
+  content: "Open";
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .start-operator-drawer[open] > summary::after {
+  content: "Close";
+}
+
+body.is-start-screen #command .start-operator-drawer > summary span {
+  display: grid;
+  gap: 2px;
+}
+
+body.is-start-screen #command .start-operator-drawer > summary strong {
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+body.is-start-screen #command .start-operator-drawer > summary small {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+body.is-start-screen #command .start-operator-drawer[open] {
+  padding-bottom: 14px;
+}
+
+body.is-start-screen #command .start-operator-drawer[open] > .command-os-board,
+body.is-start-screen #command .start-operator-drawer[open] > .job-inbox-panel,
+body.is-start-screen #command .start-operator-drawer[open] > .workspace-bridge-summary {
+  margin-inline: 14px;
 }
 
 body.is-start-screen #command .command-os-board {
@@ -11822,6 +11971,19 @@ body.is-start-screen #command .job-packet-owner .secondary-action {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  body.is-start-screen #command .start-active-panel {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  body.is-start-screen #command .start-active-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  body.is-start-screen #command .start-active-actions > * {
+    flex: 1 1 120px;
+  }
+
   body.is-start-screen #command .start-job-card.schedule-start {
     grid-column: 1 / -1;
   }
@@ -11852,6 +12014,26 @@ body.is-start-screen #command .job-packet-owner .secondary-action {
 
   body.is-start-screen #command .start-job-grid {
     grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .start-active-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  body.is-start-screen #command .start-active-score {
+    min-width: 0;
+    text-align: left;
+  }
+
+  body.is-start-screen #command .start-active-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.is-start-screen #command .start-active-actions > *:first-child:last-child,
+  body.is-start-screen #command .start-active-actions > *:nth-child(3) {
+    grid-column: 1 / -1;
   }
 
   body.is-start-screen #command .start-job-card.schedule-start {
@@ -11939,6 +12121,12 @@ body.is-start-screen #command .job-packet-owner .secondary-action {
   body.is-start-screen #command .command-os-hero > strong {
     width: 100%;
     min-width: 0;
+  }
+
+  body.is-start-screen #command .start-operator-drawer[open] > .command-os-board,
+  body.is-start-screen #command .start-operator-drawer[open] > .job-inbox-panel,
+  body.is-start-screen #command .start-operator-drawer[open] > .workspace-bridge-summary {
+    margin-inline: 10px;
   }
 
   body.is-start-screen #command .job-inbox-metrics {

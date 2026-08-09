@@ -52,6 +52,7 @@ let latestDispatchIntelligence = null;
 let latestJobInbox = null;
 let latestCommandOs = null;
 let latestJobPacketPayload = null;
+let latestActiveFieldContext = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestGoogleWorkspace = null;
@@ -78,6 +79,7 @@ const codeDeskLessonsKey = "timlockCodeDeskLessonsV1";
 const fieldLookupCacheKey = "timlockFieldLookupCacheV1";
 const dispatchPackArchiveKey = "timlockDispatchPacksV1";
 const currentJobContextKey = "timlockCurrentJobContextV1";
+const activeFieldContextKey = "timlockActiveFieldContextV1";
 const appModeKey = "timlockAppModeV1";
 const liveProductFilters = {
   condition: new Set(),
@@ -163,6 +165,7 @@ const quickVinStartForm = document.querySelector("#quickVinStartForm");
 const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
 const quickScheduleJobForm = document.querySelector("#quickScheduleJobForm");
 const startJobStatus = document.querySelector("#startJobStatus");
+const startActivePanel = document.querySelector("#startActivePanel");
 const commandOsStatus = document.querySelector("#commandOsStatus");
 const commandOsResult = document.querySelector("#commandOsResult");
 const refreshCommandOsButton = document.querySelector("#refreshCommandOs");
@@ -685,6 +688,173 @@ function setStartJobStatus(message, tone = "ready") {
   startJobStatus.dataset.tone = tone;
 }
 
+function normalizeActiveFieldContext(context = {}) {
+  const vehicle = context.vehicle || {};
+  const vehicleLabel = cleanInput(
+    context.vehicleLabel ||
+      [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") ||
+      context.title ||
+      context.label ||
+      context.query ||
+      "",
+  );
+  const query = cleanInput(context.query || context.q || context.vin || vehicleLabel || "");
+  const normalizedVin = normalizeVinInput(context.vin || query);
+  return {
+    mode: cleanInput(context.mode || (normalizeVinInput(query).length === 17 ? "vin" : "job")) || "job",
+    title: cleanInput(context.title || vehicleLabel || query || "Current job"),
+    query,
+    vin: normalizedVin.length === 17 ? normalizedVin : "",
+    vehicle: {
+      year: cleanInput(vehicle.year || ""),
+      make: cleanInput(vehicle.make || ""),
+      model: cleanInput(vehicle.model || ""),
+    },
+    vehicleLabel,
+    nextStep: cleanInput(context.nextStep || context.next || "Build the field path"),
+    confidencePercent: clampPercent(context.confidencePercent ?? context.score ?? 0, 0),
+    confidenceLabel: cleanInput(context.confidenceLabel || context.gate || ""),
+    source: cleanInput(context.source || "TimLock"),
+    jobId: cleanInput(context.jobId || context.id || ""),
+    updatedAt: context.updatedAt || new Date().toISOString(),
+  };
+}
+
+function loadActiveFieldContext() {
+  const stored = readLocalObject(activeFieldContextKey, null);
+  latestActiveFieldContext = stored ? normalizeActiveFieldContext(stored) : null;
+  return latestActiveFieldContext;
+}
+
+function writeActiveFieldContext(context = {}) {
+  latestActiveFieldContext = normalizeActiveFieldContext({
+    ...(latestActiveFieldContext || {}),
+    ...context,
+    updatedAt: new Date().toISOString(),
+  });
+  writeLocalObject(activeFieldContextKey, latestActiveFieldContext);
+  renderStartActivePanel();
+  return latestActiveFieldContext;
+}
+
+function clearActiveFieldContext() {
+  latestActiveFieldContext = null;
+  try {
+    localStorage.removeItem(activeFieldContextKey);
+  } catch {}
+  renderStartActivePanel();
+}
+
+function activeFieldContextSubject(context = latestActiveFieldContext) {
+  if (!context) return "";
+  return cleanInput(context.vehicleLabel || context.title || context.query || context.vin || "");
+}
+
+function activeFieldContextSubline(context = latestActiveFieldContext) {
+  if (!context) return "";
+  return [context.vin, context.nextStep, context.source].map(cleanInput).filter(Boolean).join(" | ");
+}
+
+function renderStartActivePanel() {
+  if (!startActivePanel) return;
+  const context = latestActiveFieldContext || loadActiveFieldContext();
+  const nextJob = !context && latestCommandOs?.nextJob ? latestCommandOs.nextJob : null;
+  if (context) {
+    const subject = activeFieldContextSubject(context) || "Current job";
+    const subline = activeFieldContextSubline(context) || "Continue the field path.";
+    const confidence = Number(context.confidencePercent || 0);
+    startActivePanel.innerHTML = `
+      <div>
+        <p class="eyebrow">${escapeHtml(context.mode === "vin" ? "Active VIN path" : context.mode === "ymm" ? "Active YMM path" : "Current path")}</p>
+        <strong>${escapeHtml(subject)}</strong>
+        <span>${escapeHtml(subline)}</span>
+      </div>
+      <div class="start-active-score">
+        <strong>${escapeHtml(confidence ? `${confidence}%` : "Ready")}</strong>
+        <span>${escapeHtml(context.confidenceLabel || "field path")}</span>
+      </div>
+      <div class="start-active-actions">
+        <button class="primary-action small" type="button" data-start-context-action="continue">Continue</button>
+        <button class="secondary-action small" type="button" data-start-context-action="dispatch">Dispatch</button>
+        <button class="secondary-action small" type="button" data-start-context-action="clear">Clear</button>
+      </div>
+    `;
+    return;
+  }
+  if (nextJob) {
+    startActivePanel.innerHTML = `
+      <div>
+        <p class="eyebrow">Next scheduled job</p>
+        <strong>${escapeHtml(nextJob.title || "Dispatch job")}</strong>
+        <span>${escapeHtml(nextJob.packetLine || nextJob.subline || "Open the packet before heading out.")}</span>
+      </div>
+      <div class="start-active-score">
+        <strong>${escapeHtml(latestCommandOs?.readiness?.score || 0)}%</strong>
+        <span>run board</span>
+      </div>
+      <div class="start-active-actions">
+        <button class="primary-action small" type="button" data-start-context-action="packet" data-start-context-id="${escapeHtml(nextJob.id || "")}">Open Packet</button>
+        <button class="secondary-action small" type="button" data-start-context-action="dispatch">Dispatch</button>
+      </div>
+    `;
+    return;
+  }
+  startActivePanel.innerHTML = `
+    <div>
+      <p class="eyebrow">Current path</p>
+      <strong>Ready for the next job</strong>
+      <span>Start with VIN or YMM. TimLock will keep the next move here.</span>
+    </div>
+    <div class="start-active-score">
+      <strong>1</strong>
+      <span>next move</span>
+    </div>
+    <div class="start-active-actions">
+      <button class="secondary-action small" type="button" data-start-context-action="focus-vin">Start VIN</button>
+      <button class="secondary-action small" type="button" data-start-context-action="dispatch">Dispatch</button>
+    </div>
+  `;
+}
+
+async function continueActiveFieldContext() {
+  const context = latestActiveFieldContext || loadActiveFieldContext();
+  if (!context) {
+    quickVinStartForm?.elements.quickVin?.focus();
+    return;
+  }
+  const query = context.query || context.vin || activeFieldContextSubject(context);
+  if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = query;
+  showView("loadout", { skipAutoLoad: true });
+  await loadFieldWorkflow(context.vehicle?.year && context.vehicle?.make && context.vehicle?.model
+    ? { ...context.vehicle, q: query }
+    : query);
+}
+
+function handleStartContextAction(action = "", button = null) {
+  const cleanAction = cleanInput(action);
+  if (cleanAction === "continue") {
+    continueActiveFieldContext();
+    return;
+  }
+  if (cleanAction === "clear") {
+    clearActiveFieldContext();
+    setStartJobStatus("Current path cleared.", "ready");
+    return;
+  }
+  if (cleanAction === "dispatch") {
+    showView("dispatch");
+    loadDispatchIntelligence({ quiet: true });
+    return;
+  }
+  if (cleanAction === "packet") {
+    openJobInboxPacket(cleanInput(button?.dataset.startContextId || latestCommandOs?.nextJob?.id || ""));
+    return;
+  }
+  if (cleanAction === "focus-vin") {
+    quickVinStartForm?.elements.quickVin?.focus();
+  }
+}
+
 const fallbackVehicleOptions = {
   years: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"],
   makes: ["Ford", "Chevrolet", "GMC", "Toyota", "Lexus", "Honda", "Acura", "Nissan", "Infiniti", "Hyundai", "Kia", "Mazda", "Subaru", "Volkswagen", "Audi", "BMW", "Jeep", "Dodge", "Ram"],
@@ -930,6 +1100,14 @@ async function startVinWalkthroughFromValue(value) {
   if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = vin;
   latestFieldWorkflow = null;
   latestJobLoadout = null;
+  writeActiveFieldContext({
+    mode: "vin",
+    title: vin,
+    query: vin,
+    vin,
+    nextStep: "Build the field path",
+    source: "VIN start",
+  });
   setStartJobStatus(`Building field packet for ${vin}.`, "ready");
   showView("loadout", { skipAutoLoad: true });
   await loadFieldWorkflow(vin);
@@ -948,6 +1126,15 @@ async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" 
   if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = query;
   latestFieldWorkflow = null;
   latestJobLoadout = null;
+  writeActiveFieldContext({
+    mode: "ymm",
+    title: query,
+    query,
+    vehicle: { year: cleanYear, make: cleanMake, model: cleanModel },
+    vehicleLabel: query,
+    nextStep: "Confirm VIN or keyway",
+    source: "YMM start",
+  });
   setStartJobStatus(`Building field packet for ${query}.`, "ready");
   showView("loadout", { skipAutoLoad: true });
   await loadFieldWorkflow({ year: cleanYear, make: cleanMake, model: cleanModel, q: query });
@@ -6502,6 +6689,19 @@ async function scheduleJobFromStart() {
       ...(result.job || {}),
       calendarError: result.calendarError || result.job?.calendarError || "",
     });
+    writeActiveFieldContext({
+      mode: "scheduled",
+      title: result.job?.title || result.job?.vehicle || payload.customer || payload.service || "Scheduled job",
+      query: payload.vin || [payload.year, payload.make, payload.model].filter(Boolean).join(" ") || payload.notes || payload.customer || "",
+      vin: payload.vin,
+      vehicle: { year: payload.year, make: payload.make, model: payload.model },
+      vehicleLabel: result.job?.vehicle || [payload.year, payload.make, payload.model].filter(Boolean).join(" "),
+      nextStep: result.event?.htmlLink ? "Open dispatch packet" : "Sync Calendar when ready",
+      source: result.event?.htmlLink ? "Google Calendar" : "TimLock schedule",
+      jobId: result.job?.id || payload.id,
+      confidencePercent: result.event?.htmlLink ? 80 : 55,
+      confidenceLabel: result.event?.htmlLink ? "scheduled" : "saved",
+    });
     const eventText = result.event?.htmlLink ? "Calendar event created." : result.calendarError || "Job saved in TimLock.";
     setStartJobStatus(`Saved: ${result.job?.customer || result.job?.vehicle || result.job?.service || "job"}. ${eventText}`, "ready");
     if (result.event?.htmlLink) window.open(result.event.htmlLink, "_blank", "noopener");
@@ -6522,6 +6722,19 @@ async function scheduleJobFromStart() {
       status: "scheduled",
       calendarSyncStatus: "pending-server",
       calendarError: error.message,
+    });
+    writeActiveFieldContext({
+      mode: "scheduled",
+      title: localJob.title || localJob.vehicle || localJob.customer || localJob.service || "Scheduled job",
+      query: localJob.vin || [localJob.year, localJob.make, localJob.model].filter(Boolean).join(" ") || localJob.notes || localJob.customer || "",
+      vin: localJob.vin,
+      vehicle: { year: localJob.year, make: localJob.make, model: localJob.model },
+      vehicleLabel: localJob.vehicle || [localJob.year, localJob.make, localJob.model].filter(Boolean).join(" "),
+      nextStep: "Calendar sync is retrying",
+      source: "Local schedule",
+      jobId: localJob.id,
+      confidencePercent: 45,
+      confidenceLabel: "local",
     });
     setStartJobStatus(`Saved on this device: ${localJob.customer || localJob.vehicle || localJob.service || "job"}. Calendar sync is retrying.`, "ready");
     retryScheduledJobServerSync(localJob);
@@ -7308,6 +7521,7 @@ function renderCommandOs(payload = {}) {
   if (commandOsStatus) {
     commandOsStatus.textContent = `${summary.total || 0} jobs | ${summary.readyPackets || 0} ready | ${summary.needsAttention || 0} verify`;
   }
+  renderStartActivePanel();
 }
 
 async function loadCommandOs(options = {}) {
@@ -9820,6 +10034,20 @@ function renderJobWorkbench(payload = {}) {
   const overview = payload.overview || {};
   const activeQueries = payload.activeQueries || {};
   const truth = payload.truthLedger || {};
+  const subject = cleanInput(payload.title || activeQueries.auto || payload.query || payload.vin || "");
+  if (subject || payload.vin) {
+    writeActiveFieldContext({
+      mode: payload.vin ? "vin" : "workbench",
+      title: subject || "Job Workbench",
+      query: payload.vin || activeQueries.auto || payload.query || activeQueries.part || "",
+      vin: payload.vin || "",
+      vehicleLabel: subject,
+      nextStep: payload.nextMove || "Review workbench packet",
+      confidencePercent: overview.observedCoveragePercent || payload.confidencePercent || 0,
+      confidenceLabel: truth.label || overview.trustLabel || "workbench",
+      source: "Job Workbench",
+    });
+  }
   const metrics = [
     ["Current", payload.title || "Job context", payload.vin || payload.query || "Search ready"],
     ["Proof", truth.label || overview.trustLabel || "Verify", `${overview.exactProofMatches || 0} exact | ${overview.relatedProfileMatches || 0} related`],
@@ -10207,6 +10435,24 @@ function renderFieldWorkflow(payload = {}) {
   if (!loadoutResult) return;
   latestFieldWorkflow = payload;
   latestJobLoadout = payload.loadout || null;
+  const packet = payload.verifiedPacket || payload.subscriber?.verifiedPacket || {};
+  const best = packet.best || {};
+  const vehicleChoice = best.vehicle || {};
+  const primaryChoice = best.primary || {};
+  const query = cleanInput(payload.query || payload.q || packet.query || loadoutQueryFromForm());
+  if (query || packet.title || vehicleChoice.value) {
+    writeActiveFieldContext({
+      mode: (packet.vin || normalizeVinInput(query).length === 17) ? "vin" : (latestActiveFieldContext?.mode || "job"),
+      title: vehicleChoice.value || packet.title || query || "Current job",
+      query,
+      vin: packet.vin || (normalizeVinInput(query).length === 17 ? normalizeVinInput(query) : ""),
+      vehicleLabel: vehicleChoice.value || packet.title || "",
+      nextStep: packet.nextStep || `Bring ${primaryChoice.value || "verified part"}`,
+      confidencePercent: packet.gate?.score || payload.subscriber?.confidencePercent || 0,
+      confidenceLabel: packet.gate?.label || payload.subscriber?.confidenceLabel || "",
+      source: "Field Path",
+    });
+  }
   loadoutResult.innerHTML = `
     ${renderVerifiedFieldPacket(payload)}
   `;
@@ -13661,6 +13907,11 @@ startMenuButton?.addEventListener("click", () => {
 startMenuBackdrop?.addEventListener("click", closeStartMenu);
 closeStartMenuButton?.addEventListener("click", closeStartMenu);
 closeJobPacketDrawerButton?.addEventListener("click", closeJobPacketDrawer);
+startActivePanel?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-start-context-action]");
+  if (!button) return;
+  handleStartContextAction(button.dataset.startContextAction, button);
+});
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -13681,6 +13932,8 @@ document.querySelectorAll("[data-view-target]").forEach((button) => {
 
 const initialRoute = routeFromLocation() || activeViewId || "command";
 replaceRouteHash(initialRoute);
+loadActiveFieldContext();
+renderStartActivePanel();
 showView(initialRoute, { push: false, scroll: true });
 resetMainScrollSoon();
 const urlParams = new URLSearchParams(window.location.search);
@@ -13820,6 +14073,7 @@ clearWorkbenchButton?.addEventListener("click", () => {
   try {
     localStorage.removeItem(currentJobContextKey);
   } catch {}
+  clearActiveFieldContext();
   if (workbenchForm) workbenchForm.reset();
   if (workbenchStatus) workbenchStatus.textContent = "Workbench context cleared.";
   if (workbenchResult) {
@@ -13836,9 +14090,14 @@ loadoutForm?.addEventListener("submit", (event) => {
 refreshLoadoutButton?.addEventListener("click", () => loadFieldWorkflow(loadoutQueryFromForm()));
 
 loadoutUseCurrentButton?.addEventListener("click", () => {
-  const query = latestVinProfile?.vin || latestWorkbench?.vin || latestWorkbench?.activeQueries?.part || workbenchQueryFromForm() || globalSearchQuery();
+  const activeContext = latestActiveFieldContext || loadActiveFieldContext();
+  const query = activeContext?.query || activeContext?.vin || latestVinProfile?.vin || latestWorkbench?.vin || latestWorkbench?.activeQueries?.part || workbenchQueryFromForm() || globalSearchQuery();
   if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query || "";
-  loadFieldWorkflow(query || "");
+  if (activeContext) {
+    continueActiveFieldContext();
+  } else {
+    loadFieldWorkflow(query || "");
+  }
 });
 
 referenceListForm?.addEventListener("submit", (event) => {
