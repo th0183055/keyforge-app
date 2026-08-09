@@ -169,6 +169,12 @@ const emptyStore = {
     records: [],
     connectors: [],
   },
+  sourceHub: {
+    version: 1,
+    updatedAt: "",
+    mappings: [],
+    imports: [],
+  },
   dispatchPacketCache: {
     version: dispatchPacketCacheVersion,
     updatedAt: "",
@@ -216,6 +222,7 @@ function normalizeStore(store = {}) {
     googleWorkspace: normalizeGoogleWorkspaceStore(store.googleWorkspace),
     scheduledJobs: Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [],
     serviceIntake: normalizeServiceIntakeStore(store.serviceIntake),
+    sourceHub: normalizeSourceHubStore(store.sourceHub),
     dispatchPacketCache: normalizeDispatchPacketCache(store.dispatchPacketCache),
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
@@ -1843,6 +1850,12 @@ function mergeStorageStore(currentStore, incomingStore = {}, replace = false) {
     aiFeedback: mergeStorageRecords(current.aiFeedback, incoming.aiFeedback, ["createdAt", "prompt", "value"], "ai-feedback"),
     shopRules: mergeStorageRecords(current.shopRules, incoming.shopRules, ["title", "body", "createdAt"], "shop-rule"),
     fieldPacketFeedback: mergeStorageRecords(current.fieldPacketFeedback, incoming.fieldPacketFeedback, ["createdAt", "outcome", "query", "itemValue"], "field-packet-feedback"),
+    sourceHub: {
+      version: 1,
+      updatedAt: incoming.sourceHub?.updatedAt || current.sourceHub?.updatedAt || "",
+      mappings: mergeStorageRecords(current.sourceHub?.mappings, incoming.sourceHub?.mappings, ["source", "label", "type"], "source-hub-mapping").slice(0, 100),
+      imports: mergeStorageRecords(current.sourceHub?.imports, incoming.sourceHub?.imports, ["source", "importedAt", "mappingId"], "source-hub-import").slice(0, 250),
+    },
     codeDeskRecords: mergeStorageRecords(current.codeDeskRecords, incoming.codeDeskRecords, ["system", "code", "bitting"], "code-desk-record"),
     codeDeskSystems: mergeStorageRecords(current.codeDeskSystems, incoming.codeDeskSystems, ["name", "id"], "code-desk-system"),
     codeDeskLessons: mergeStorageRecords(current.codeDeskLessons, incoming.codeDeskLessons, ["createdAt", "system", "code", "bitting", "outcome"], "code-desk-lesson"),
@@ -4335,6 +4348,86 @@ function normalizeServiceIntakeStore(intake = {}) {
   };
 }
 
+const sourceHubCanonicalFields = [
+  { id: "customer", label: "Customer", target: "Customer", weight: 10, headers: ["Customer", "Customer Name", "Name", "Client", "Caller", "Contact Name", "Requested By", "RequestedBy", "Bill To"] },
+  { id: "phone", label: "Phone", target: "Phone", weight: 9, headers: ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone", "Phone Number", "Contact Phone", "Call", "Telephone"] },
+  { id: "location", label: "Location", target: "Address", weight: 9, headers: ["Address", "Location", "Job Address", "Service Address", "Site Address", "Destination", "Street", "Full Address"] },
+  { id: "vin", label: "VIN", target: "VIN", weight: 10, headers: ["VIN", "Vin", "Vehicle VIN", "VehicleVin", "Context Vin", "Auto VIN"] },
+  { id: "year", label: "Year", target: "Year", weight: 8, headers: ["Year", "Vehicle Year", "Y", "VehicleYear", "Auto Year"] },
+  { id: "make", label: "Make", target: "Make", weight: 8, headers: ["Make", "Vehicle Make", "Manufacturer", "Auto Make"] },
+  { id: "model", label: "Model", target: "Model", weight: 8, headers: ["Model", "Vehicle Model", "Auto Model"] },
+  { id: "service", label: "Service", target: "Service", weight: 8, headers: ["Service", "Service Type", "Job Type", "Call Type", "Work Type", "Request Type", "Description"] },
+  { id: "scheduledAt", label: "Scheduled", target: "Scheduled", weight: 7, headers: ["Scheduled", "Scheduled At", "Start", "Start Time", "Appointment", "Date", "When", "Job Date", "Window Start"] },
+  { id: "end", label: "End", target: "End", weight: 3, headers: ["End", "End Time", "Finished", "Stop Time", "Window End"] },
+  { id: "notes", label: "Notes", target: "Notes", weight: 7, headers: ["Notes", "Details", "Memo", "Comments", "Description", "Job Notes", "Private Notes", "Dispatch Notes", "Work Order Notes"] },
+  { id: "sourceId", label: "Source ID", target: "Job ID", weight: 6, headers: ["Job ID", "JobId", "ID", "Call ID", "Ticket", "Ticket ID", "Source ID", "SourceID", "Work Order", "WO"] },
+  { id: "price", label: "Price", target: "Total", weight: 3, headers: ["Total", "Amount", "Price", "Subtotal", "Total Stop Amount", "Stop Amount", "Collected", "Due"] },
+  { id: "billing", label: "Billing", target: "Billing", weight: 2, headers: ["Billing", "Payment Terms", "Terms", "Bill To", "Account", "Net Terms"] },
+  { id: "payment", label: "Payment", target: "Payment", weight: 2, headers: ["Payment", "Invoice", "Invoice #", "Square Invoice", "Sq Inv", "Invoice Number"] },
+  { id: "programmer", label: "Programmer", target: "Programmer", weight: 6, headers: ["Programmer", "Tool", "Programmer Used", "Programming Tool"] },
+  { id: "partsUsed", label: "Parts Used", target: "Parts Used", weight: 7, headers: ["Part Used", "Parts Used", "Part(s) Used", "SKU", "Part Number", "PartNum", "Source ID", "SourceID"] },
+];
+
+function sourceHubEmpty() {
+  return {
+    version: 1,
+    updatedAt: "",
+    mappings: [],
+    imports: [],
+  };
+}
+
+function normalizeSourceHubMapping(mapping = {}) {
+  if (!mapping || typeof mapping !== "object") return null;
+  const source = cleanString(mapping.source || mapping.system || mapping.id || "Custom phone app");
+  const fields = {};
+  const inputFields = mapping.fields && typeof mapping.fields === "object" ? mapping.fields : {};
+  for (const field of sourceHubCanonicalFields) {
+    const value = cleanString(inputFields[field.id] || inputFields[field.target] || inputFields[field.label]);
+    if (value) fields[field.id] = value;
+  }
+  const id = cleanString(mapping.id) || metkaStableId("source-map", [source, JSON.stringify(fields)]);
+  return {
+    id,
+    source,
+    label: cleanString(mapping.label || source),
+    type: cleanString(mapping.type || "service-import"),
+    updatedAt: cleanString(mapping.updatedAt),
+    confidencePercent: Math.max(0, Math.min(100, Number(mapping.confidencePercent || mapping.confidence || 0))),
+    sampleHeaders: uniqueCleanValues(mapping.sampleHeaders || mapping.headers || []),
+    fields,
+  };
+}
+
+function normalizeSourceHubImport(entry = {}) {
+  if (!entry || typeof entry !== "object") return null;
+  return {
+    id: cleanString(entry.id) || metkaStableId("source-import", [entry.source, entry.importedAt, entry.records, entry.mappingId]),
+    source: cleanString(entry.source || "Custom phone app"),
+    label: cleanString(entry.label || entry.source || "Service import"),
+    importedAt: cleanString(entry.importedAt),
+    parsed: Number(entry.parsed || 0),
+    added: Number(entry.added || 0),
+    updated: Number(entry.updated || 0),
+    skipped: Number(entry.skipped || 0),
+    mappingId: cleanString(entry.mappingId),
+    confidencePercent: Math.max(0, Math.min(100, Number(entry.confidencePercent || 0))),
+    sampleTitles: uniqueCleanValues(entry.sampleTitles || []).slice(0, 6),
+  };
+}
+
+function normalizeSourceHubStore(hub = {}) {
+  const empty = sourceHubEmpty();
+  if (!hub || typeof hub !== "object") return empty;
+  return {
+    ...empty,
+    ...hub,
+    updatedAt: cleanString(hub.updatedAt),
+    mappings: Array.isArray(hub.mappings) ? hub.mappings.map(normalizeSourceHubMapping).filter(Boolean).slice(0, 100) : [],
+    imports: Array.isArray(hub.imports) ? hub.imports.map(normalizeSourceHubImport).filter(Boolean).slice(0, 250) : [],
+  };
+}
+
 function normalizeDispatchPacketCache(cache = {}) {
   const packets = cache?.packets && typeof cache.packets === "object" && !Array.isArray(cache.packets) ? cache.packets : {};
   const safePackets = {};
@@ -6058,6 +6151,300 @@ function importServiceIntakePayload(store, payload = {}) {
   return { added, updated, skipped: Math.max(0, rows.length - records.length), parsed: rows.length, status: serviceIntakePublicStatus(store) };
 }
 
+function sourceHubHeaders(rows = []) {
+  const headers = new Map();
+  rows.slice(0, 100).forEach((row) => {
+    Object.keys(row || {}).forEach((header) => {
+      const clean = cleanString(header);
+      const key = metkaHeaderKey(clean);
+      if (clean && key && !headers.has(key)) headers.set(key, clean);
+    });
+  });
+  return Array.from(headers.values());
+}
+
+function sourceHubHeaderMatchScore(header = "", aliases = []) {
+  const headerKey = metkaHeaderKey(header);
+  if (!headerKey) return 0;
+  let best = 0;
+  for (const alias of aliases) {
+    const aliasKey = metkaHeaderKey(alias);
+    if (!aliasKey) continue;
+    if (headerKey === aliasKey) best = Math.max(best, 100);
+    else if (headerKey.endsWith(aliasKey) || headerKey.startsWith(aliasKey)) best = Math.max(best, 88);
+    else if (headerKey.includes(aliasKey) || aliasKey.includes(headerKey)) best = Math.max(best, 74);
+  }
+  return best;
+}
+
+function sourceHubBestHeader(headers = [], field = {}, used = new Set()) {
+  let best = null;
+  for (const header of headers) {
+    const key = metkaHeaderKey(header);
+    if (used.has(key)) continue;
+    const score = sourceHubHeaderMatchScore(header, field.headers || []);
+    if (score > 0 && (!best || score > best.score)) best = { header, key, score };
+  }
+  return best && best.score >= 74 ? best : null;
+}
+
+function sourceHubSavedMapping(store = {}, source = "") {
+  const sourceKey = metkaHeaderKey(source);
+  return normalizeSourceHubStore(store.sourceHub).mappings.find((mapping) => metkaHeaderKey(mapping.source) === sourceKey) || null;
+}
+
+function sourceHubInferMapping(rows = [], source = "Custom phone app", options = {}) {
+  const headers = sourceHubHeaders(rows);
+  const saved = options.savedMapping && typeof options.savedMapping === "object" ? normalizeSourceHubMapping(options.savedMapping) : null;
+  const overrides = options.mapping?.fields && typeof options.mapping.fields === "object" ? options.mapping.fields : {};
+  const used = new Set();
+  const fields = {};
+  let score = 0;
+  let total = 0;
+  for (const field of sourceHubCanonicalFields) {
+    total += field.weight || 1;
+    const override = cleanString(overrides[field.id] || overrides[field.target] || overrides[field.label]);
+    const savedHeader = cleanString(saved?.fields?.[field.id]);
+    const overrideKey = metkaHeaderKey(override);
+    const savedKey = metkaHeaderKey(savedHeader);
+    const exactOverride = headers.find((header) => metkaHeaderKey(header) === overrideKey);
+    const exactSaved = headers.find((header) => metkaHeaderKey(header) === savedKey);
+    if (exactOverride || exactSaved) {
+      const header = exactOverride || exactSaved;
+      fields[field.id] = header;
+      used.add(metkaHeaderKey(header));
+      score += field.weight || 1;
+      continue;
+    }
+    const match = sourceHubBestHeader(headers, field, used);
+    if (match) {
+      fields[field.id] = match.header;
+      used.add(match.key);
+      score += (field.weight || 1) * (match.score / 100);
+    }
+  }
+  const directConfidence = total ? Math.round((score / total) * 100) : 0;
+  const mapping = normalizeSourceHubMapping({
+    id: cleanString(saved?.id) || metkaStableId("source-map", [source, JSON.stringify(fields)]),
+    source,
+    label: cleanString(options.mapping?.label || saved?.label || source),
+    type: cleanString(options.mapping?.type || saved?.type || "service-import"),
+    updatedAt: new Date().toISOString(),
+    confidencePercent: directConfidence,
+    sampleHeaders: headers,
+    fields,
+  });
+  return mapping;
+}
+
+function sourceHubCanonicalRow(row = {}, mapping = {}) {
+  const canonical = { ...(metkaCleanRow(row) || {}) };
+  const normalized = new Map(Object.entries(canonical).map(([key, value]) => [metkaHeaderKey(key), value]));
+  const fields = mapping?.fields || {};
+  for (const field of sourceHubCanonicalFields) {
+    const header = cleanString(fields[field.id]);
+    if (!header) continue;
+    const value = normalized.get(metkaHeaderKey(header));
+    if (value !== undefined && value !== null && cleanString(value) !== "") canonical[field.target] = metkaCleanCell(value);
+  }
+  if (mapping?.source) canonical.Source = mapping.source;
+  return metkaCleanRow(canonical) || {};
+}
+
+function sourceHubRecordCompleteness(record = {}) {
+  let score = 0;
+  if (record.customer) score += 16;
+  if (record.phone) score += 12;
+  if (record.location) score += 14;
+  if (record.service) score += 10;
+  if (record.scheduledAt) score += 10;
+  if (record.vin) score += 18;
+  if (record.year && record.make && record.model) score += 16;
+  if (record.partsUsed || record.programmer) score += 4;
+  return Math.max(0, Math.min(100, score));
+}
+
+function sourceHubMappedRecords(rows = [], mapping = {}) {
+  const source = cleanString(mapping.source || "Custom phone app");
+  return rows
+    .map((row) => normalizeServiceIntakeRecord(sourceHubCanonicalRow(row, mapping), source))
+    .filter((record) => record.customer || record.phone || record.vehicle || record.vin || record.location || record.service);
+}
+
+function sourceHubPreviewFromRows(store = {}, rows = [], payload = {}) {
+  const source = cleanString(payload.source || payload.system || "Custom phone app");
+  const savedMapping = sourceHubSavedMapping(store, source);
+  const mapping = sourceHubInferMapping(rows, source, { savedMapping, mapping: payload.mapping || payload });
+  const records = sourceHubMappedRecords(rows, mapping);
+  const avgCompleteness = records.length
+    ? Math.round(records.slice(0, 25).reduce((sum, record) => sum + sourceHubRecordCompleteness(record), 0) / Math.min(records.length, 25))
+    : 0;
+  const confidencePercent = Math.round((mapping.confidencePercent * 0.62) + (avgCompleteness * 0.38));
+  mapping.confidencePercent = Math.max(mapping.confidencePercent, confidencePercent);
+  const missingCore = sourceHubCanonicalFields
+    .filter((field) => field.weight >= 8 && !mapping.fields[field.id])
+    .map((field) => field.label);
+  const warnings = [];
+  if (!rows.length) warnings.push("No rows were parsed from the export.");
+  if (missingCore.length) warnings.push(`Missing mapped columns: ${missingCore.slice(0, 5).join(", ")}.`);
+  if (!records.length && rows.length) warnings.push("Rows parsed, but no usable job records were found.");
+  return {
+    generatedAt: new Date().toISOString(),
+    source,
+    parsed: rows.length,
+    usableRecords: records.length,
+    confidencePercent: mapping.confidencePercent,
+    savedMappingUsed: Boolean(savedMapping),
+    mapping,
+    headers: sourceHubHeaders(rows),
+    warnings,
+    records: records.slice(0, 12),
+  };
+}
+
+function previewSourceHubImport(store = {}, payload = {}) {
+  const rows = serviceIntakeRowsFromPayload(payload);
+  return sourceHubPreviewFromRows(store, rows, payload);
+}
+
+function sourceHubUpsertMapping(store = {}, mapping = {}) {
+  const hub = normalizeSourceHubStore(store.sourceHub);
+  const normalized = normalizeSourceHubMapping(mapping);
+  if (!normalized) return hub;
+  const sourceKey = metkaHeaderKey(normalized.source);
+  hub.mappings = [
+    normalized,
+    ...hub.mappings.filter((item) => item.id !== normalized.id && metkaHeaderKey(item.source) !== sourceKey),
+  ].slice(0, 100);
+  hub.updatedAt = new Date().toISOString();
+  store.sourceHub = hub;
+  return hub;
+}
+
+function applySourceHubImport(store = {}, payload = {}) {
+  const rows = serviceIntakeRowsFromPayload(payload);
+  const preview = sourceHubPreviewFromRows(store, rows, payload);
+  const mappedRows = rows.map((row) => sourceHubCanonicalRow(row, preview.mapping));
+  const intake = importServiceIntakePayload(store, {
+    ...payload,
+    source: preview.source,
+    rows: mappedRows,
+    rawText: "",
+    data: null,
+  });
+  const hub = sourceHubUpsertMapping(store, preview.mapping);
+  const importEntry = normalizeSourceHubImport({
+    id: metkaStableId("source-import", [preview.source, new Date().toISOString(), intake.parsed, intake.added, intake.updated]),
+    source: preview.source,
+    label: cleanString(payload.label || preview.mapping.label || preview.source),
+    importedAt: new Date().toISOString(),
+    parsed: intake.parsed,
+    added: intake.added,
+    updated: intake.updated,
+    skipped: intake.skipped,
+    mappingId: preview.mapping.id,
+    confidencePercent: preview.confidencePercent,
+    sampleTitles: preview.records.map((record) => record.title || record.vehicle || record.customer),
+  });
+  hub.imports = [importEntry, ...hub.imports.filter((entry) => entry.id !== importEntry.id)].slice(0, 250);
+  hub.updatedAt = importEntry.importedAt;
+  store.sourceHub = hub;
+  return {
+    ok: true,
+    preview,
+    import: importEntry,
+    intake,
+    sourceHub: buildSourceHub(store, null),
+  };
+}
+
+function sourceHubCatalog(store = {}, request = null) {
+  const google = googleWorkspacePublicStatus(store, request);
+  const intake = normalizeServiceIntakeStore(store.serviceIntake);
+  const hub = normalizeSourceHubStore(store.sourceHub);
+  const connectorCounts = Object.fromEntries((intake.connectors || []).map((connector) => [metkaHeaderKey(connector.source), connector.records || 0]));
+  return [
+    {
+      id: "google-calendar",
+      name: "Google Calendar",
+      status: google.connected ? "connected" : google.configured ? "ready" : "setup",
+      detail: google.connected ? `${google.calendar.events || 0} calendar jobs cached` : "Connect in Settings",
+      action: "settings",
+    },
+    {
+      id: "google-sheets",
+      name: "Google Sheets",
+      status: google.sheets?.sheetStats?.length ? "connected" : google.connected ? "ready" : "setup",
+      detail: google.sheets?.sheetStats?.length ? `${google.sheets.sheetStats.length} synced tabs` : "Use Source Hub or Data Bridge",
+      action: "source-hub",
+    },
+    {
+      id: "quo",
+      name: "QUO",
+      status: connectorCounts.QUO ? "connected" : "ready",
+      detail: connectorCounts.QUO ? `${connectorCounts.QUO} imported jobs` : "Paste CSV/TSV/JSON export",
+      action: "source-hub",
+    },
+    {
+      id: "housecall-pro",
+      name: "Housecall Pro",
+      status: connectorCounts.HOUSECALLPRO ? "connected" : "ready",
+      detail: "Paste export now; direct API later",
+      action: "source-hub",
+    },
+    {
+      id: "jobber",
+      name: "Jobber",
+      status: connectorCounts.JOBBER ? "connected" : "ready",
+      detail: "Paste export now; direct API later",
+      action: "source-hub",
+    },
+    {
+      id: "custom",
+      name: "Custom service app",
+      status: hub.mappings.length ? "learning" : "ready",
+      detail: hub.mappings.length ? `${hub.mappings.length} saved field maps` : "Map any CSV into TimLock",
+      action: "source-hub",
+    },
+  ];
+}
+
+function buildSourceHub(store = {}, request = null) {
+  const hub = normalizeSourceHubStore(store.sourceHub);
+  const intake = serviceIntakePublicStatus(store);
+  const google = googleWorkspacePublicStatus(store, request);
+  const totalImported = hub.imports.reduce((sum, entry) => sum + (Number(entry.added || 0) + Number(entry.updated || 0)), 0);
+  const lastImport = hub.imports[0] || null;
+  return {
+    generatedAt: new Date().toISOString(),
+    updatedAt: hub.updatedAt || intake.updatedAt,
+    summary: {
+      sources: sourceHubCatalog(store, request).length,
+      mappings: hub.mappings.length,
+      intakeRecords: intake.records,
+      totalImported,
+      lastImportAt: lastImport?.importedAt || "",
+      googleConnected: Boolean(google.connected),
+    },
+    catalog: sourceHubCatalog(store, request),
+    mappings: hub.mappings,
+    imports: hub.imports,
+    intake,
+    google: {
+      configured: google.configured,
+      connected: google.connected,
+      calendarEvents: google.calendar.events,
+      sheets: google.sheets.sheetStats?.length || 0,
+    },
+    fieldDefinitions: sourceHubCanonicalFields.map((field) => ({
+      id: field.id,
+      label: field.label,
+      target: field.target,
+      examples: field.headers.slice(0, 4),
+    })),
+  };
+}
+
 function googleSheetRange(sheetName) {
   return `'${cleanString(sheetName).replace(/'/g, "''")}'!A:AZ`;
 }
@@ -7059,6 +7446,7 @@ async function createDispatchDriveFolder(request, store, body = {}) {
 async function buildWorkspaceBrief(store = {}) {
   const metka = buildMetkaBridgeStatus(store);
   const google = googleWorkspacePublicStatus(store);
+  const sourceHub = buildSourceHub(store);
   const metkaCounts = metka.counts || {};
   const metkaRows = [
     metkaCounts.workLogJobs,
@@ -7130,8 +7518,18 @@ async function buildWorkspaceBrief(store = {}) {
           ? `${metkaCounts.workLogJobs || 0} jobs, ${metkaCounts.inventoryRows || 0} inventory, ${metkaCounts.partMaps || 0} part maps`
           : "Owner-only import keeps the subscriber app clean while using the operational brain.",
       },
+      {
+        id: "source-hub",
+        label: "Source Hub",
+        status: sourceHub.summary?.intakeRecords || sourceHub.summary?.mappings ? "connected" : "setup",
+        value: sourceHub.summary?.intakeRecords ? `${sourceHub.summary.intakeRecords} jobs` : `${sourceHub.summary?.mappings || 0} maps`,
+        detail: sourceHub.summary?.mappings
+          ? `${sourceHub.summary.mappings} saved mappings for Google, QUO, and phone-service imports`
+          : "Map any service-app export into Dispatch once, then reuse it.",
+      },
     ],
     metka,
+    sourceHub,
     calendar: calendar
       ? {
           connected: true,
@@ -12120,6 +12518,7 @@ function referenceListSources() {
     { id: "field-jobs", label: "Field jobs", note: "Saved jobs plus Metka WorkLog jobs used by subscriber decisions." },
     { id: "scheduled-jobs", label: "Scheduled jobs", note: "TimLock start-screen dispatch jobs and Google Calendar handoff records." },
     { id: "service-intake", label: "Service intake", note: "Normalized QUO/phone-app exports ready for scheduling and field packets." },
+    { id: "source-hub", label: "Source Hub", note: "Saved source mappings and import history for Google, QUO, and phone-service apps." },
     { id: "metka-parts", label: "Metka part bridge", note: "ProductAliasLog, wkst, PartReference, Log, and tbl_Products normalized into field aliases." },
     { id: "metka-inventory", label: "Metka inventory", note: "InventoryLedger rolled up by master part and location." },
     { id: "metka-worklog", label: "Metka WorkLog", note: "WorkLog rows normalized into proof jobs." },
@@ -12204,6 +12603,22 @@ async function buildReferenceList(options = {}, store = { jobs: [] }) {
   } else if (source === "service-intake") {
     rows = normalizeServiceIntakeStore(store.serviceIntake).records;
     sourceNote = "Normalized QUO/phone-app export records.";
+  } else if (source === "source-hub") {
+    const hub = normalizeSourceHubStore(store.sourceHub);
+    rows = [
+      ...hub.mappings.map((mapping) => ({
+        recordType: "Saved source mapping",
+        source: mapping.source,
+        label: mapping.label,
+        confidencePercent: mapping.confidencePercent,
+        fieldMap: Object.entries(mapping.fields || {}).map(([key, value]) => `${key}: ${value}`).join(" | "),
+        updatedAt: mapping.updatedAt,
+        sampleHeaders: mapping.sampleHeaders?.join(", "),
+      })),
+      ...hub.imports.map((entry) => ({ recordType: "Source import", ...entry })),
+    ];
+    generatedAt = hub.updatedAt || "";
+    sourceNote = `${hub.mappings.length} saved mappings, ${hub.imports.length} import runs.`;
   } else if (source === "metka-parts") {
     rows = metkaNormalizedRows(store, "parts");
     sourceNote = "Owner-side Metka part bridge rows powering alias and field-kit decisions.";
@@ -15426,6 +15841,7 @@ function isOwnerOnlyApiRequest(request, pathname) {
     "/api/workspace-brief",
     "/api/google",
     "/api/service-intake",
+    "/api/source-hub",
     "/api/schedule-jobs",
     "/api/supplier-accounts",
     "/api/audit-log",
@@ -15798,11 +16214,42 @@ async function handleApi(request, response, pathname) {
     return;
   }
 
-  if (request.method === "POST" && (pathname === "/api/service-intake/import" || pathname === "/api/service-intake/ingest")) {
+  if (request.method === "GET" && pathname === "/api/source-hub") {
+    sendJson(response, 200, buildSourceHub(store, request));
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/source-hub/preview") {
     try {
-      const result = importServiceIntakePayload(store, await readJsonBody(request));
+      sendJson(response, 200, previewSourceHubImport(store, await readJsonBody(request)));
+    } catch (error) {
+      sendError(response, 400, `Source Hub preview failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && pathname === "/api/source-hub/import") {
+    try {
+      const result = applySourceHubImport(store, await readJsonBody(request));
       await writeStore(store);
       sendJson(response, 201, result);
+    } catch (error) {
+      sendError(response, 400, `Source Hub import failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && (pathname === "/api/service-intake/import" || pathname === "/api/service-intake/ingest")) {
+    try {
+      const result = applySourceHubImport(store, await readJsonBody(request));
+      await writeStore(store);
+      sendJson(response, 201, {
+        ...result.intake,
+        status: result.intake.status,
+        sourceHub: result.sourceHub,
+        preview: result.preview,
+        import: result.import,
+      });
     } catch (error) {
       sendError(response, 400, `Service intake import failed: ${error.message}`);
     }

@@ -104,6 +104,10 @@
             <span>Data Bridge</span>
             <small>Metka / Sheets</small>
           </button>
+          <button class="nav-item" data-view="source-hub" data-owner-only>
+            <span>Source Hub</span>
+            <small>Google / QUO</small>
+          </button>
           <button class="nav-item" data-view="settings" data-owner-only>
             <span>Settings</span>
             <small>Sources and storage</small>
@@ -184,6 +188,7 @@
               </div>
               <div class="start-menu-grid owner-menu-grid" data-owner-only>
                 <button type="button" data-view-target="metka-bridge"><span>Data Bridge</span><small>Metka / Sheets</small></button>
+                <button type="button" data-view-target="source-hub"><span>Source Hub</span><small>Google / QUO</small></button>
                 <button type="button" data-view-target="settings"><span>Settings</span><small>Google / storage</small></button>
               </div>
             </aside>
@@ -1367,6 +1372,79 @@
                 <button class="primary-action" type="button" id="syncGoogleCalendar">Preview Calendar Jobs</button>
               </form>
               <div class="google-calendar-result" id="googleCalendarResult"></div>
+            </section>
+          </section>
+        </section>
+
+        <section class="view" id="source-hub">
+          <section class="panel wide source-hub-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Owner source setup</p>
+                <h3>Source Hub</h3>
+              </div>
+              <div class="proof-vault-actions">
+                <button class="secondary-action small" type="button" id="refreshSourceHub">Refresh</button>
+                <button class="secondary-action small" type="button" data-view-target="settings">Google Settings</button>
+                <button class="secondary-action small" type="button" data-view-target="dispatch">Open Dispatch</button>
+              </div>
+            </div>
+            <section class="bridge-hero source-hub-hero">
+              <div>
+                <p class="eyebrow">Connect any job source</p>
+                <h3>Turn Google, QUO, and service-app exports into one clean TimLock job queue.</h3>
+                <p>Source Hub learns field mappings once, then sends normalized jobs into Dispatch, Job Packet, What To Bring, and AI.</p>
+              </div>
+              <strong id="sourceHubScore">0<small>ready records</small></strong>
+            </section>
+            <div class="form-status" id="sourceHubStatus">Source Hub is ready.</div>
+            <div class="source-hub-result" id="sourceHubResult"></div>
+
+            <section class="assistant-card source-hub-import-card">
+              <div class="panel-header tight">
+                <div>
+                  <p class="eyebrow">Import mapper</p>
+                  <h3>Paste a job export and preview the field map.</h3>
+                </div>
+              </div>
+              <form class="field-os-form" id="sourceHubForm">
+                <label>
+                  Source
+                  <select name="source">
+                    <option value="QUO">QUO</option>
+                    <option value="Google Sheets">Google Sheets export</option>
+                    <option value="Google Calendar">Google Calendar copy/paste</option>
+                    <option value="Housecall Pro">Housecall Pro</option>
+                    <option value="ServiceTitan">ServiceTitan</option>
+                    <option value="Jobber">Jobber</option>
+                    <option value="Custom phone app">Custom phone app</option>
+                  </select>
+                </label>
+                <label>
+                  Label
+                  <input name="label" placeholder="Example: Omaha QUO dispatch export" autocomplete="off" />
+                </label>
+                <label class="full-span">
+                  Export text
+                  <textarea name="rawText" rows="7" placeholder="Paste CSV, TSV, or JSON with customer, phone, address, date, VIN/YMM, service, notes, part, and programmer fields"></textarea>
+                </label>
+                <div class="form-actions full-span">
+                  <button class="secondary-action" type="button" id="previewSourceHubImport">Preview Map</button>
+                  <button class="primary-action" type="submit">Import To Dispatch</button>
+                </div>
+              </form>
+              <div class="source-hub-preview" id="sourceHubPreview"></div>
+            </section>
+
+            <section class="source-hub-detail-grid">
+              <article class="assistant-card">
+                <p class="eyebrow">Saved mappings</p>
+                <div id="sourceHubSavedMappings"></div>
+              </article>
+              <article class="assistant-card">
+                <p class="eyebrow">Recent imports</p>
+                <div id="sourceHubImportHistory"></div>
+              </article>
             </section>
           </section>
         </section>

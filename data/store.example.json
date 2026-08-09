@@ -51,6 +51,12 @@
     "records": [],
     "connectors": []
   },
+  "sourceHub": {
+    "version": 1,
+    "updatedAt": "",
+    "mappings": [],
+    "imports": []
+  },
   "dispatchPacketCache": {
     "version": 2,
     "updatedAt": "",

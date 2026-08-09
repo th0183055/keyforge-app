@@ -54,6 +54,7 @@ let latestJobPacketPayload = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
 let latestGoogleWorkspace = null;
+let latestSourceHub = null;
 let latestAuthStatus = null;
 let authRoleSelection = "owner";
 let appMode = "owner";
@@ -275,6 +276,15 @@ const googleSheetSyncResult = document.querySelector("#googleSheetSyncResult");
 const serviceIntakeImportForm = document.querySelector("#serviceIntakeImportForm");
 const serviceIntakeStatus = document.querySelector("#serviceIntakeStatus");
 const serviceIntakeResult = document.querySelector("#serviceIntakeResult");
+const sourceHubStatus = document.querySelector("#sourceHubStatus");
+const sourceHubScore = document.querySelector("#sourceHubScore");
+const sourceHubResult = document.querySelector("#sourceHubResult");
+const sourceHubForm = document.querySelector("#sourceHubForm");
+const sourceHubPreview = document.querySelector("#sourceHubPreview");
+const previewSourceHubImportButton = document.querySelector("#previewSourceHubImport");
+const refreshSourceHubButton = document.querySelector("#refreshSourceHub");
+const sourceHubSavedMappings = document.querySelector("#sourceHubSavedMappings");
+const sourceHubImportHistory = document.querySelector("#sourceHubImportHistory");
 const dispatchIntelligenceForm = document.querySelector("#dispatchIntelligenceForm");
 const dispatchIntelligenceStatus = document.querySelector("#dispatchIntelligenceStatus");
 const dispatchIntelligenceResult = document.querySelector("#dispatchIntelligenceResult");
@@ -352,6 +362,10 @@ const routeMeta = {
   "metka-bridge": {
     eyebrow: "Owner data room",
     title: "Metka into field decisions.",
+  },
+  "source-hub": {
+    eyebrow: "Owner source setup",
+    title: "Connect Google, QUO, and service apps.",
   },
   dispatch: {
     eyebrow: "Dispatch Intelligence",
@@ -456,6 +470,7 @@ function showView(id, options = {}) {
   if (id === "metka-bridge" && !latestMetkaBridge) loadMetkaBridge();
   if (id === "metka-bridge" && !latestGoogleWorkspace) loadGoogleWorkspace({ quiet: true });
   if (id === "metka-bridge") loadServiceIntake({ quiet: true });
+  if (id === "source-hub") loadSourceHub({ quiet: true });
   if (id === "dispatch" && !latestDispatchIntelligence) loadDispatchIntelligence();
   if (id === "settings") {
     loadStorageStatus({ quiet: true });
@@ -6536,6 +6551,215 @@ async function retryScheduledJobServerSync(job = {}) {
   }
 }
 
+function sourceHubFormPayload() {
+  if (!sourceHubForm) return {};
+  const data = new FormData(sourceHubForm);
+  return {
+    source: cleanInput(data.get("source")),
+    label: cleanInput(data.get("label")),
+    rawText: cleanInput(data.get("rawText")),
+  };
+}
+
+function renderSourceHubRecord(record = {}) {
+  return `
+    <article class="reference-row-card source-hub-record-card">
+      <strong>${escapeHtml(record.title || record.service || "Imported job")}</strong>
+      <p>${escapeHtml([record.customer, record.phone, record.vehicle || record.vin, record.location].filter(Boolean).join(" | "))}</p>
+      <small>${escapeHtml([record.scheduledAt, record.partsUsed, record.programmer].filter(Boolean).join(" | "))}</small>
+    </article>
+  `;
+}
+
+function renderSourceHubMapping(mapping = {}) {
+  const fields = Object.entries(mapping.fields || {});
+  return `
+    <article class="source-hub-map-row">
+      <div>
+        <strong>${escapeHtml(mapping.label || mapping.source || "Saved source")}</strong>
+        <p>${escapeHtml([mapping.source, mapping.updatedAt ? `Updated ${formatWorkspaceDate(mapping.updatedAt)}` : ""].filter(Boolean).join(" | "))}</p>
+      </div>
+      <span>${escapeHtml(mapping.confidencePercent || 0)}%</span>
+      <small>${escapeHtml(fields.slice(0, 8).map(([key, value]) => `${key}: ${value}`).join(" | ") || "No mapped fields yet")}</small>
+    </article>
+  `;
+}
+
+function renderSourceHubImport(entry = {}) {
+  return `
+    <article class="source-hub-map-row">
+      <div>
+        <strong>${escapeHtml(entry.label || entry.source || "Source import")}</strong>
+        <p>${escapeHtml([formatWorkspaceDate(entry.importedAt), `${entry.added || 0} added`, `${entry.updated || 0} updated`, `${entry.skipped || 0} skipped`].filter(Boolean).join(" | "))}</p>
+      </div>
+      <span>${escapeHtml(entry.confidencePercent || 0)}%</span>
+      <small>${escapeHtml((entry.sampleTitles || []).slice(0, 4).join(" | ") || "No sample titles")}</small>
+    </article>
+  `;
+}
+
+function renderSourceHub(payload = {}) {
+  if (!sourceHubResult) return;
+  latestSourceHub = payload;
+  const summary = payload.summary || {};
+  const catalog = payload.catalog || [];
+  if (sourceHubScore) {
+    sourceHubScore.innerHTML = `${escapeHtml(summary.intakeRecords || 0)}<small>ready records</small>`;
+  }
+  sourceHubResult.innerHTML = `
+    <section class="history-summary-grid source-hub-metrics">
+      <article class="metric">
+        <span>Sources</span>
+        <strong>${escapeHtml(summary.sources || 0)}</strong>
+        <p>${escapeHtml(summary.googleConnected ? "Google connected" : "Google optional")}</p>
+      </article>
+      <article class="metric">
+        <span>Mappings</span>
+        <strong>${escapeHtml(summary.mappings || 0)}</strong>
+        <p>Reusable field maps</p>
+      </article>
+      <article class="metric">
+        <span>Dispatch-ready</span>
+        <strong>${escapeHtml(summary.intakeRecords || 0)}</strong>
+        <p>Normalized intake records</p>
+      </article>
+      <article class="metric">
+        <span>Imported</span>
+        <strong>${escapeHtml(summary.totalImported || 0)}</strong>
+        <p>${escapeHtml(summary.lastImportAt ? `Last ${formatWorkspaceDate(summary.lastImportAt)}` : "Waiting")}</p>
+      </article>
+    </section>
+    <section class="source-hub-catalog">
+      ${catalog
+        .map(
+          (source) => `
+            <article class="${escapeHtml(source.status || "ready")}">
+              <span>${escapeHtml(source.name)}</span>
+              <strong>${escapeHtml(source.status || "ready")}</strong>
+              <p>${escapeHtml(source.detail || "")}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+  if (sourceHubSavedMappings) {
+    sourceHubSavedMappings.innerHTML = (payload.mappings || []).length
+      ? (payload.mappings || []).slice(0, 8).map(renderSourceHubMapping).join("")
+      : `<article class="compact-empty-card"><strong>No saved mappings</strong><p>Preview and import one export to teach Source Hub.</p></article>`;
+  }
+  if (sourceHubImportHistory) {
+    sourceHubImportHistory.innerHTML = (payload.imports || []).length
+      ? (payload.imports || []).slice(0, 8).map(renderSourceHubImport).join("")
+      : `<article class="compact-empty-card"><strong>No imports yet</strong><p>Imported jobs will show here for owner audit.</p></article>`;
+  }
+}
+
+function renderSourceHubPreview(payload = {}) {
+  if (!sourceHubPreview) return;
+  const mapping = payload.mapping || {};
+  const fields = Object.entries(mapping.fields || {});
+  sourceHubPreview.innerHTML = `
+    <section class="source-hub-preview-grid">
+      <article>
+        <span>Confidence</span>
+        <strong>${escapeHtml(payload.confidencePercent || 0)}%</strong>
+        <p>${escapeHtml(`${payload.usableRecords || 0} usable of ${payload.parsed || 0} parsed rows`)}</p>
+      </article>
+      <article>
+        <span>Mapping</span>
+        <strong>${escapeHtml(fields.length)}</strong>
+        <p>${escapeHtml(payload.savedMappingUsed ? "Saved mapping reused" : "New mapping inferred")}</p>
+      </article>
+    </section>
+    ${
+      payload.warnings?.length
+        ? `<section class="storage-warning-list">${payload.warnings.map((warning) => `<article>${escapeHtml(warning)}</article>`).join("")}</section>`
+        : ""
+    }
+    <section class="source-hub-field-map">
+      ${fields
+        .map(([key, value]) => `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(value)}</span>`)
+        .join("") || `<span><strong>No fields mapped</strong>Check the export header row</span>`}
+    </section>
+    <div class="reference-list-cards compact-reference-list">
+      ${(payload.records || []).length
+        ? payload.records.slice(0, 5).map(renderSourceHubRecord).join("")
+        : `<article class="assistant-card"><strong>No preview records</strong><p>Try a CSV/TSV/JSON export with customer, phone, location, date, VIN/YMM, or notes.</p></article>`}
+    </div>
+  `;
+}
+
+async function loadSourceHub({ quiet = false } = {}) {
+  if (!sourceHubResult) return null;
+  try {
+    if (sourceHubStatus && !quiet) sourceHubStatus.textContent = "Loading Source Hub...";
+    const payload = await api("/api/source-hub", { timeoutMs: 18000, noStatus: true });
+    renderSourceHub(payload);
+    if (sourceHubStatus && !quiet) {
+      sourceHubStatus.textContent = `Source Hub ready: ${payload.summary?.intakeRecords || 0} dispatch-ready records, ${payload.summary?.mappings || 0} saved mappings.`;
+    }
+    return payload;
+  } catch (error) {
+    if (sourceHubStatus) sourceHubStatus.textContent = `Source Hub unavailable: ${error.message}`;
+    sourceHubResult.innerHTML = `<article class="assistant-card"><strong>Source Hub unavailable</strong><p>${escapeHtml(error.message)}</p></article>`;
+    return null;
+  }
+}
+
+async function previewSourceHubImport() {
+  const payload = sourceHubFormPayload();
+  if (!payload.rawText) {
+    if (sourceHubStatus) sourceHubStatus.textContent = "Paste a CSV, TSV, or JSON export first.";
+    return;
+  }
+  try {
+    if (sourceHubStatus) sourceHubStatus.textContent = `Previewing ${payload.source || "source"} export...`;
+    const preview = await api("/api/source-hub/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 22000,
+      noStatus: true,
+    });
+    renderSourceHubPreview(preview);
+    if (sourceHubStatus) sourceHubStatus.textContent = `Preview ready: ${preview.usableRecords || 0} usable records, ${preview.confidencePercent || 0}% confidence.`;
+  } catch (error) {
+    if (sourceHubStatus) sourceHubStatus.textContent = `Preview failed: ${error.message}`;
+    if (sourceHubPreview) sourceHubPreview.innerHTML = `<article class="assistant-card"><strong>Preview failed</strong><p>${escapeHtml(error.message)}</p></article>`;
+  }
+}
+
+async function importSourceHub() {
+  const payload = sourceHubFormPayload();
+  if (!payload.rawText) {
+    if (sourceHubStatus) sourceHubStatus.textContent = "Paste a CSV, TSV, or JSON export first.";
+    return;
+  }
+  try {
+    if (sourceHubStatus) sourceHubStatus.textContent = `Importing ${payload.source || "source"} into Dispatch...`;
+    const result = await api("/api/source-hub/import", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 35000,
+      noStatus: true,
+    });
+    renderSourceHub(result.sourceHub);
+    renderSourceHubPreview(result.preview);
+    renderServiceIntake(result.intake?.status);
+    if (sourceHubStatus) sourceHubStatus.textContent = `Imported ${result.intake?.added || 0}; updated ${result.intake?.updated || 0}; skipped ${result.intake?.skipped || 0}.`;
+    sourceHubForm.elements.rawText.value = "";
+    latestWorkspaceBrief = null;
+    latestReferenceList = null;
+    latestDispatchIntelligence = null;
+    latestJobInbox = null;
+    await loadWorkspaceBrief();
+    loadJobInbox({ quiet: true });
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
+  } catch (error) {
+    if (sourceHubStatus) sourceHubStatus.textContent = `Import failed: ${error.message}`;
+  }
+}
+
 function renderServiceIntake(payload = {}) {
   if (!serviceIntakeResult) return;
   const sources = payload.sources || [];
@@ -6606,15 +6830,17 @@ async function importServiceIntake() {
   }
   try {
     if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Importing ${source || "service"} intake...`;
-    const payload = await api("/api/service-intake/import", {
+    const payload = await api("/api/source-hub/import", {
       method: "POST",
       body: JSON.stringify({ source, rawText }),
       timeoutMs: 22000,
       noStatus: true,
     });
-    renderServiceIntake(payload.status);
-    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Imported ${payload.added || 0}; updated ${payload.updated || 0}; skipped ${payload.skipped || 0}.`;
+    renderServiceIntake(payload.intake?.status);
+    renderSourceHub(payload.sourceHub);
+    if (serviceIntakeStatus) serviceIntakeStatus.textContent = `Imported ${payload.intake?.added || 0}; updated ${payload.intake?.updated || 0}; skipped ${payload.intake?.skipped || 0}.`;
     serviceIntakeImportForm.elements.rawText.value = "";
+    latestSourceHub = payload.sourceHub || latestSourceHub;
     latestReferenceList = null;
     latestDispatchIntelligence = null;
     latestJobInbox = null;
@@ -9927,6 +10153,7 @@ function renderWorkspaceBridgeSummary(payload = {}) {
   const sheets = sourceById["google-sheets"] || {};
   const drive = sourceById["google-drive"] || {};
   const metka = sourceById.metka || {};
+  const sourceHub = sourceById["source-hub"] || {};
   workspaceBridgeSummary.innerHTML = `
     <article class="${escapeHtml(calendar.status || "setup")}">
       <p class="eyebrow">Calendar</p>
@@ -9948,7 +10175,13 @@ function renderWorkspaceBridgeSummary(payload = {}) {
       <strong>${escapeHtml(metka.value || "0 rows")}</strong>
       <span>${escapeHtml(metka.detail || "Owner import is waiting.")}</span>
     </article>
+    <article class="${escapeHtml(sourceHub.status || "setup")}">
+      <p class="eyebrow">Source Hub</p>
+      <strong>${escapeHtml(sourceHub.value || "0 maps")}</strong>
+      <span>${escapeHtml(sourceHub.detail || "Map service-app exports into Dispatch.")}</span>
+    </article>
     <div class="workspace-bridge-actions">
+      <button class="secondary-action small" type="button" data-view-target="source-hub">Source Hub</button>
       <button class="secondary-action small" type="button" data-view-target="metka-bridge">Field Data Bridge</button>
       <button class="secondary-action small" type="button" data-view-target="mission-control">Mission Control</button>
     </div>
@@ -13279,6 +13512,15 @@ googleSheetSyncForm?.addEventListener("submit", (event) => {
 serviceIntakeImportForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   importServiceIntake();
+});
+
+refreshSourceHubButton?.addEventListener("click", () => loadSourceHub());
+
+previewSourceHubImportButton?.addEventListener("click", previewSourceHubImport);
+
+sourceHubForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  importSourceHub();
 });
 
 if (supplierSelect) {
