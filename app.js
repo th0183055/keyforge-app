@@ -50,6 +50,7 @@ let latestMetkaBridge = null;
 let latestWorkspaceBrief = null;
 let latestDispatchIntelligence = null;
 let latestJobInbox = null;
+let latestCommandOs = null;
 let latestJobPacketPayload = null;
 let latestStorageStatus = null;
 let latestStorageDiagnostics = null;
@@ -162,6 +163,9 @@ const quickVinStartForm = document.querySelector("#quickVinStartForm");
 const quickYmmStartForm = document.querySelector("#quickYmmStartForm");
 const quickScheduleJobForm = document.querySelector("#quickScheduleJobForm");
 const startJobStatus = document.querySelector("#startJobStatus");
+const commandOsStatus = document.querySelector("#commandOsStatus");
+const commandOsResult = document.querySelector("#commandOsResult");
+const refreshCommandOsButton = document.querySelector("#refreshCommandOs");
 const jobInboxStatus = document.querySelector("#jobInboxStatus");
 const jobInboxResult = document.querySelector("#jobInboxResult");
 const refreshJobInboxButton = document.querySelector("#refreshJobInbox");
@@ -478,6 +482,7 @@ function showView(id, options = {}) {
   }
   if (id === "command") {
     if (!latestWorkspaceBrief) loadWorkspaceBrief();
+    if (!latestCommandOs) loadCommandOs({ quiet: true });
     if (!latestJobInbox) loadJobInbox({ quiet: true });
   }
   updateAiContextUi();
@@ -6342,6 +6347,8 @@ async function syncGoogleCalendarPreview() {
     renderGoogleWorkspace(payload.google);
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
+    latestJobInbox = null;
+    latestCommandOs = null;
     await loadWorkspaceBrief();
     const events = payload.events || [];
     if (googleCalendarResult) {
@@ -6364,6 +6371,8 @@ async function syncGoogleCalendarPreview() {
         : `<article class="assistant-card"><strong>No upcoming calendar jobs</strong><p>No events were found for the next ${escapeHtml(days)} days.</p></article>`;
     }
     if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar preview loaded: ${events.length} event${events.length === 1 ? "" : "s"}.`;
+    loadCommandOs({ quiet: true });
+    loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
     if (googleWorkspaceStatus) googleWorkspaceStatus.textContent = `Calendar sync failed: ${error.message}`;
@@ -6484,7 +6493,9 @@ async function scheduleJobFromStart() {
     latestWorkspaceBrief = null;
     latestDispatchIntelligence = null;
     latestJobInbox = null;
+    latestCommandOs = null;
     await loadWorkspaceBrief();
+    loadCommandOs({ quiet: true });
     loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
@@ -6500,6 +6511,8 @@ async function scheduleJobFromStart() {
     quickScheduleJobForm.reset();
     latestDispatchIntelligence = null;
     latestJobInbox = null;
+    latestCommandOs = null;
+    loadCommandOs({ quiet: true });
     loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   }
@@ -6520,6 +6533,8 @@ async function syncScheduledJobCalendar(id = "", options = {}) {
     if (!options.quiet && synced?.calendarHtmlLink) setStartJobStatus("Calendar event created.", "ready");
     latestDispatchIntelligence = null;
     latestJobInbox = null;
+    latestCommandOs = null;
+    loadCommandOs({ quiet: true });
     loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
     return payload;
@@ -6752,7 +6767,9 @@ async function importSourceHub() {
     latestReferenceList = null;
     latestDispatchIntelligence = null;
     latestJobInbox = null;
+    latestCommandOs = null;
     await loadWorkspaceBrief();
+    loadCommandOs({ quiet: true });
     loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
@@ -6844,6 +6861,8 @@ async function importServiceIntake() {
     latestReferenceList = null;
     latestDispatchIntelligence = null;
     latestJobInbox = null;
+    latestCommandOs = null;
+    loadCommandOs({ quiet: true });
     loadJobInbox({ quiet: true });
     if (activeViewId === "dispatch") loadDispatchIntelligence({ quiet: true });
   } catch (error) {
@@ -7126,6 +7145,213 @@ async function loadJobInbox(options = {}) {
     if (jobInboxStatus) jobInboxStatus.textContent = `Inbox unavailable: ${error.message}`;
     jobInboxResult.innerHTML = `<article class="job-inbox-empty warn"><strong>Inbox unavailable</strong><span>${escapeHtml(error.message)}</span></article>`;
     return null;
+  }
+}
+
+function commandOsTone(score = 0) {
+  const value = Number(score || 0);
+  if (value >= 85) return "ready";
+  if (value >= 65) return "verify";
+  return "warn";
+}
+
+function renderCommandOsMetric(label, value, note = "") {
+  return `
+    <article>
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+    </article>
+  `;
+}
+
+function renderCommandOsAction(action = {}) {
+  return `
+    <button class="${action.id === "packet" ? "primary-action" : "secondary-action"} small" type="button"
+      data-command-os-action="${escapeHtml(action.target || action.id || "")}"
+      data-command-os-id="${escapeHtml(action.itemId || "")}"
+      data-command-os-query="${escapeHtml(action.query || "")}">
+      ${escapeHtml(action.label || "Open")}
+    </button>
+  `;
+}
+
+function renderCommandOsJob(item = {}) {
+  const when = item.start ? formatWorkspaceDate(item.start) : "No time";
+  const status = item.fieldReady ? "Ready" : item.needsAttention ? "Verify" : "Queued";
+  return `
+    <button class="command-os-job ${item.fieldReady ? "ready" : item.needsAttention ? "warn" : "queued"}" type="button" data-command-os-action="packet" data-command-os-id="${escapeHtml(item.id)}">
+      <span>${escapeHtml([when, item.sourceLabel, status].filter(Boolean).join(" | "))}</span>
+      <strong>${escapeHtml(item.title || "Dispatch job")}</strong>
+      ${item.subline ? `<small>${escapeHtml(item.subline)}</small>` : ""}
+      ${item.packetLine ? `<em>${escapeHtml(item.packetLine)}</em>` : ""}
+    </button>
+  `;
+}
+
+function renderCommandOsSource(source = {}) {
+  return `
+    <article class="${escapeHtml(source.status || "setup")}">
+      <span>${escapeHtml(source.label || "Source")}</span>
+      <strong>${escapeHtml(source.value ?? 0)}</strong>
+      <small>${escapeHtml(source.detail || "")}</small>
+    </article>
+  `;
+}
+
+function localCommandOsFallbackPayload(error = null) {
+  const inbox = latestJobInbox || localJobInboxFallbackPayload(error);
+  const items = inbox.items || [];
+  const nextJob = items.find((item) => item.fieldReady) || items[0] || null;
+  return {
+    generatedAt: new Date().toISOString(),
+    role: appMode,
+    headline: nextJob ? `Open ${nextJob.headline || nextJob.title || "saved job"}` : "Schedule or sync the first job",
+    nextMove: nextJob ? "Open the local packet while the server catches up." : "Schedule a job or retry Google/QUO sync.",
+    readiness: {
+      score: nextJob ? 55 : 35,
+      label: "Local fallback",
+    },
+    summary: {
+      total: inbox.summary?.total || items.length,
+      today: inbox.summary?.today || 0,
+      readyPackets: inbox.summary?.readyPackets || 0,
+      needsAttention: inbox.summary?.needsAttention || 0,
+    },
+    nextJob: nextJob ? jobInboxPublicItem(nextJob) : null,
+    queue: items.slice(0, 4).map(jobInboxPublicItem),
+    attention: error ? [{ id: "server", title: "Server check", detail: error.message, openAction: "dispatch" }] : [],
+    sources: [
+      { id: "calendar", label: "Google", status: latestGoogleWorkspace?.connected ? "ready" : "setup", value: latestGoogleWorkspace?.calendar?.events || 0, detail: latestGoogleWorkspace?.connected ? "connected" : "server pending" },
+      { id: "timlock", label: "TimLock", status: items.length ? "ready" : "standby", value: items.length, detail: "local jobs" },
+    ],
+    actions: nextJob
+      ? [{ id: "packet", label: "Open Packet", target: "packet", itemId: nextJob.id }]
+      : [{ id: "dispatch", label: "Dispatch", target: "dispatch" }],
+  };
+}
+
+function renderCommandOs(payload = {}) {
+  if (!commandOsResult) return;
+  latestCommandOs = payload;
+  const summary = payload.summary || {};
+  const readiness = payload.readiness || {};
+  const tone = commandOsTone(readiness.score);
+  const nextJob = payload.nextJob || null;
+  const queue = payload.queue || [];
+  const attention = payload.attention || [];
+  commandOsResult.innerHTML = `
+    <section class="command-os-hero ${tone}">
+      <div>
+        <p class="eyebrow">${escapeHtml(readiness.label || "Command ready")}</p>
+        <h3>${escapeHtml(payload.headline || "Daily Command OS")}</h3>
+        <span>${escapeHtml(payload.nextMove || "Pick the next job and build the packet.")}</span>
+        <div class="command-os-actions">
+          ${(payload.actions || []).slice(0, 4).map(renderCommandOsAction).join("")}
+        </div>
+      </div>
+      <strong><span>${escapeHtml(readiness.score || 0)}%</span><small>run readiness</small></strong>
+    </section>
+    <section class="command-os-metrics">
+      ${renderCommandOsMetric("Today", summary.today || 0, "due")}
+      ${renderCommandOsMetric("Ready", summary.readyPackets || 0, "packets")}
+      ${renderCommandOsMetric("Verify", summary.needsAttention || 0, "checks")}
+      ${renderCommandOsMetric("Queue", summary.total || 0, "jobs")}
+    </section>
+    <section class="command-os-lanes">
+      <article class="command-os-lane main">
+        <div>
+          <p class="eyebrow">Next</p>
+          <strong>${escapeHtml(nextJob?.title || "No job selected")}</strong>
+          <span>${escapeHtml(nextJob?.packetLine || nextJob?.subline || "Sync Calendar, import QUO/source jobs, or schedule a job.")}</span>
+        </div>
+        ${nextJob ? `<button class="primary-action small" type="button" data-command-os-action="packet" data-command-os-id="${escapeHtml(nextJob.id)}">${escapeHtml(nextJob.fieldReady ? "Open Packet" : "Review")}</button>` : `<button class="primary-action small" type="button" data-command-os-action="sync">Sync Calendar</button>`}
+      </article>
+      <article class="command-os-lane">
+        <p class="eyebrow">Attention</p>
+        ${
+          attention.length
+            ? `<ul>${attention.slice(0, 3).map((item) => `<li><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.detail)}</span></li>`).join("")}</ul>`
+            : `<strong>Clean</strong><span>No urgent gaps on the visible queue.</span>`
+        }
+      </article>
+    </section>
+    <section class="command-os-source-grid">
+      ${(payload.sources || []).map(renderCommandOsSource).join("")}
+    </section>
+    <section class="command-os-queue">
+      <div>
+        <p class="eyebrow">Short queue</p>
+        <strong>${escapeHtml(queue.length ? "Next jobs" : "No queued jobs")}</strong>
+      </div>
+      <div>${queue.length ? queue.slice(0, appMode === "owner" ? 6 : 4).map(renderCommandOsJob).join("") : `<article class="command-os-empty"><strong>Ready for work</strong><span>Create a job, sync Google, or import a phone-service export.</span></article>`}</div>
+    </section>
+  `;
+  if (commandOsStatus) {
+    commandOsStatus.textContent = `${summary.total || 0} jobs | ${summary.readyPackets || 0} ready | ${summary.needsAttention || 0} verify`;
+  }
+}
+
+async function loadCommandOs(options = {}) {
+  if (!commandOsResult) return null;
+  try {
+    if (commandOsStatus && !options.quiet) commandOsStatus.textContent = options.syncCalendar ? "Syncing Calendar and building Command OS..." : "Building Command OS...";
+    const payload = await api("/api/command-os", {
+      method: "POST",
+      body: JSON.stringify({
+        days: options.days || 7,
+        syncCalendar: Boolean(options.syncCalendar),
+        localScheduledJobs: localScheduledJobs(),
+        limit: options.limit || 18,
+        packetPrebuildLimit: options.packetPrebuildLimit || 3,
+      }),
+      timeoutMs: options.syncCalendar ? 65000 : 22000,
+      retryOnTimeout: true,
+      noStatus: true,
+    });
+    renderCommandOs(payload);
+    latestGoogleWorkspace = payload.google || latestGoogleWorkspace;
+    return payload;
+  } catch (error) {
+    const fallback = localCommandOsFallbackPayload(error);
+    renderCommandOs(fallback);
+    if (commandOsStatus) commandOsStatus.textContent = `Command OS using local fallback: ${error.message}`;
+    return fallback;
+  }
+}
+
+async function handleCommandOsAction(action = "", button = null) {
+  const cleanAction = cleanInput(action);
+  const itemId = cleanInput(button?.dataset.commandOsId || latestCommandOs?.nextJob?.id || "");
+  const query = cleanInput(button?.dataset.commandOsQuery || latestCommandOs?.nextJob?.vin || latestCommandOs?.nextJob?.vehicleLabel || latestCommandOs?.nextJob?.title || "");
+  if (cleanAction === "sync") {
+    await loadCommandOs({ syncCalendar: true });
+    loadJobInbox({ quiet: true });
+    if (activeViewId === "dispatch") loadDispatchIntelligence({ syncCalendar: true, quiet: true });
+    return;
+  }
+  if (cleanAction === "packet") {
+    openJobInboxPacket(itemId);
+    return;
+  }
+  if (cleanAction === "dispatch") {
+    showView("dispatch");
+    loadDispatchIntelligence({ id: itemId, quiet: true });
+    return;
+  }
+  if (cleanAction === "loadout") {
+    showView("loadout");
+    if (loadoutForm) loadoutForm.elements.loadoutQuery.value = query;
+    loadFieldWorkflow(query);
+    return;
+  }
+  if (cleanAction === "source-hub") {
+    showView("source-hub");
+    loadSourceHub({ quiet: true });
+    return;
+  }
+  if (cleanAction === "command") {
+    showView("command");
   }
 }
 
@@ -13410,7 +13636,11 @@ serverBackupImportInput?.addEventListener("change", async () => {
 connectGoogleWorkspaceButton?.addEventListener("click", connectGoogleWorkspace);
 disconnectGoogleWorkspaceButton?.addEventListener("click", disconnectGoogleWorkspace);
 syncGoogleCalendarButton?.addEventListener("click", syncGoogleCalendarPreview);
-refreshJobInboxButton?.addEventListener("click", () => loadJobInbox());
+refreshCommandOsButton?.addEventListener("click", () => loadCommandOs());
+refreshJobInboxButton?.addEventListener("click", () => {
+  loadCommandOs({ quiet: true });
+  loadJobInbox();
+});
 dispatchIntelligenceForm?.addEventListener("submit", (event) => {
   event.preventDefault();
   loadDispatchIntelligence();
@@ -13562,6 +13792,12 @@ document.addEventListener("click", (event) => {
   const jobInboxButton = event.target.closest("[data-job-inbox-open]");
   if (jobInboxButton) {
     openJobInboxPacket(jobInboxButton.dataset.jobInboxOpen);
+    return;
+  }
+
+  const commandOsButton = event.target.closest("[data-command-os-action]");
+  if (commandOsButton) {
+    handleCommandOsAction(commandOsButton.dataset.commandOsAction, commandOsButton);
     return;
   }
 

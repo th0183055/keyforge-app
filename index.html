@@ -288,6 +288,26 @@
 
             <div class="start-job-status" id="startJobStatus">Ready.</div>
 
+            <section class="command-os-board" id="commandOsBoard" aria-label="Daily Command OS">
+              <div class="command-os-head">
+                <div>
+                  <p class="eyebrow">Daily Command OS</p>
+                  <strong>Next job, proof, sources, and AI next move</strong>
+                  <span id="commandOsStatus">Building today&apos;s run board.</span>
+                </div>
+                <div class="command-os-head-actions">
+                  <button class="secondary-action small" type="button" id="refreshCommandOs">Refresh</button>
+                  <button class="primary-action small" type="button" data-command-os-action="sync">Sync Calendar</button>
+                </div>
+              </div>
+              <div class="command-os-result" id="commandOsResult">
+                <article class="command-os-empty">
+                  <strong>Loading Command OS</strong>
+                  <span>Reading Calendar, QUO/source imports, scheduled jobs, proof, and packet confidence.</span>
+                </article>
+              </div>
+            </section>
+
             <section class="job-inbox-panel" id="jobInboxPanel" aria-label="Unified Job Inbox">
               <div class="job-inbox-head">
                 <div>

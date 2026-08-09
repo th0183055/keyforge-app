@@ -7280,6 +7280,186 @@ async function buildJobInbox(request, body = {}, store = {}, options = {}) {
   return buildJobInboxFromDispatch(dispatch);
 }
 
+function commandOsPublicJob(item = {}) {
+  const preview = item.packetPreview || {};
+  return {
+    id: cleanString(item.id),
+    source: cleanString(item.source),
+    sourceLabel: cleanString(item.sourceLabel || item.source),
+    title: cleanString(item.headline || preview.title || item.vehicleLabel || item.title || item.service || "Dispatch job"),
+    subline: cleanString(item.subline || uniqueCleanValues([item.customer, item.service, item.location]).join(" | ")),
+    packetLine: cleanString(item.packetLine || uniqueCleanValues([preview.primary, preview.programmer, preview.lishi]).join(" | ")),
+    start: cleanString(item.start),
+    bucket: cleanString(item.bucket || jobInboxBucket(item)),
+    customer: cleanString(item.customer),
+    service: cleanString(item.service),
+    location: cleanString(item.location),
+    vin: cleanString(item.vin),
+    vehicleLabel: cleanString(item.vehicleLabel || preview.title),
+    fieldReady: Boolean(item.fieldReady),
+    needsAttention: Boolean(item.needsAttention),
+    packetStatus: cleanString(item.packetStatus),
+    confidencePercent: Number(preview.confidencePercent || 0),
+    actionLabel: item.fieldReady ? "Open Packet" : "Review Job",
+  };
+}
+
+function commandOsAttentionForJob(item = {}) {
+  const missing = [];
+  if (!cleanString(item.vin)) missing.push("VIN");
+  if (!cleanString(item.vehicleLabel || item.headline || item.title)) missing.push("vehicle");
+  if (!cleanString(item.packetLine)) missing.push("packet");
+  if (item.source === "service-intake" && !item.hasCalendarEvent) missing.push("Calendar");
+  if (!missing.length && item.needsAttention) missing.push("verification");
+  return {
+    id: cleanString(item.id),
+    title: cleanString(item.headline || item.vehicleLabel || item.title || item.service || "Dispatch job"),
+    detail: missing.length ? `Needs ${missing.join(", ")}` : "Ready to review",
+    openAction: item.source === "service-intake" && !item.hasCalendarEvent ? "dispatch" : "packet",
+  };
+}
+
+function commandOsSourceSummary(store = {}, inbox = {}, request = null, role = "subscriber") {
+  const google = inbox.google || googleWorkspacePublicStatus(store, request);
+  const sourceHub = buildSourceHub(store, request);
+  const metka = buildMetkaBridgeStatus(store);
+  const inboxSources = inbox.sources || {};
+  const calendarStatus = google.connected ? "ready" : google.configured ? "connect" : "setup";
+  const sourceHubReady = Number(sourceHub.summary?.intakeRecords || 0);
+  const sourceHubStatus = sourceHubReady ? "ready" : sourceHub.summary?.mappings ? "mapped" : "setup";
+  const bridgeStatus = metka.connected ? "ready" : "setup";
+  const sources = [
+    {
+      id: "calendar",
+      label: "Google",
+      status: calendarStatus,
+      value: Number(google.calendar?.events || inboxSources.calendar || 0),
+      detail: google.connected ? "Calendar jobs synced" : google.configured ? "Connect account" : "OAuth setup needed",
+    },
+    {
+      id: "source-hub",
+      label: "QUO / Source Hub",
+      status: sourceHubStatus,
+      value: Number(sourceHubReady || inboxSources.intake || 0),
+      detail: sourceHubReady ? "intake jobs ready" : sourceHub.summary?.mappings ? "mapping saved" : "import source jobs",
+    },
+    {
+      id: "metka",
+      label: "Field Data",
+      status: bridgeStatus,
+      value: Number(metka.counts?.workLogJobs || 0),
+      detail: metka.connected ? "proof and stock brain active" : "owner import pending",
+    },
+    {
+      id: "timlock",
+      label: "TimLock",
+      status: Number(inboxSources.scheduled || 0) ? "ready" : "standby",
+      value: Number(inboxSources.scheduled || 0),
+      detail: "scheduled jobs",
+    },
+  ];
+  const scoreFor = (source) => {
+    if (source.status === "ready") return 100;
+    if (source.status === "mapped" || source.status === "connect") return 65;
+    if (source.status === "standby") return 45;
+    return 20;
+  };
+  const visibleSources = role === "owner" ? sources : sources.filter((source) => source.id !== "metka");
+  return {
+    score: Math.round(visibleSources.reduce((sum, source) => sum + scoreFor(source), 0) / Math.max(1, visibleSources.length)),
+    sources: visibleSources,
+    owner: role === "owner"
+      ? {
+          sourceHub: sourceHub.summary,
+          metka: metka.counts,
+          googleWarnings: google.warnings || [],
+        }
+      : null,
+  };
+}
+
+async function buildCommandOs(request, body = {}, store = {}, options = {}) {
+  const role = options.role === "owner" ? "owner" : "subscriber";
+  const days = Math.max(1, Math.min(21, Number(body.days || body.windowDays || 7)));
+  const inbox = await buildJobInbox(
+    request,
+    {
+      ...body,
+      days,
+      limit: body.limit || 18,
+      packetPrebuildLimit: body.packetPrebuildLimit || 3,
+      syncCalendar: Boolean(body.syncCalendar),
+    },
+    store,
+    { ...options, role, persistCache: false },
+  );
+  const items = inbox.items || [];
+  const nextJob = items.find((item) => item.fieldReady) || items[0] || null;
+  const todayItems = items.filter((item) => item.bucket === "overdue" || item.bucket === "today");
+  const tomorrowItems = items.filter((item) => item.bucket === "tomorrow");
+  const attention = items.filter((item) => item.needsAttention).map(commandOsAttentionForJob).slice(0, role === "owner" ? 6 : 3);
+  const sourceSummary = commandOsSourceSummary(store, inbox, request, role);
+  const readyPackets = Number(inbox.summary?.readyPackets || 0);
+  const total = Number(inbox.summary?.total || items.length || 0);
+  const packetScore = total ? Math.round((readyPackets / total) * 100) : 0;
+  const attentionScore = total ? Math.max(35, 100 - Math.min(60, attention.length * 12)) : sourceSummary.score > 60 ? 65 : 35;
+  const readinessScore = Math.round((packetScore * 0.5) + (sourceSummary.score * 0.3) + (attentionScore * 0.2));
+  const queue = items.slice(0, role === "owner" ? 8 : 5).map(commandOsPublicJob);
+  const nextPublic = nextJob ? commandOsPublicJob(nextJob) : null;
+  const headline = nextPublic
+    ? `${nextPublic.fieldReady ? "Start" : "Verify"} ${nextPublic.title}`
+    : total
+      ? "Review queued jobs"
+      : "Sync or schedule the first job";
+  const nextMove = nextPublic
+    ? nextPublic.fieldReady
+      ? "Open the field packet and dispatch."
+      : "Review missing proof, VIN, vehicle, or packet details."
+    : sourceSummary.sources.some((source) => source.id === "calendar" && source.status !== "ready")
+      ? "Connect or sync Google Calendar."
+      : "Import QUO/source jobs or create a schedule job.";
+  const actions = nextPublic
+    ? [
+        { id: "packet", label: nextPublic.fieldReady ? "Open Packet" : "Review Job", target: "packet", itemId: nextPublic.id },
+        { id: "dispatch", label: "Dispatch", target: "dispatch" },
+        { id: "loadout", label: "What To Bring", target: "loadout", query: nextPublic.vin || nextPublic.vehicleLabel || nextPublic.title },
+      ]
+    : [
+        { id: "sync", label: "Sync Calendar", target: "sync" },
+        { id: "source-hub", label: "Import Source", target: "source-hub" },
+        { id: "schedule", label: "Schedule Job", target: "command" },
+      ];
+  return {
+    generatedAt: new Date().toISOString(),
+    role,
+    days,
+    headline,
+    nextMove,
+    readiness: {
+      score: readinessScore,
+      label: readinessScore >= 85 ? "Field ready" : readinessScore >= 65 ? "Verify first" : "Needs setup",
+      packetScore,
+      sourceScore: sourceSummary.score,
+      attentionScore,
+    },
+    summary: {
+      total,
+      today: todayItems.length,
+      tomorrow: tomorrowItems.length,
+      readyPackets,
+      needsAttention: Number(inbox.summary?.needsAttention || attention.length || 0),
+      connectedCalendar: Boolean(inbox.summary?.connectedCalendar),
+    },
+    google: inbox.google || googleWorkspacePublicStatus(store, request),
+    nextJob: nextPublic,
+    queue,
+    attention,
+    sources: sourceSummary.sources,
+    owner: sourceSummary.owner,
+    actions,
+  };
+}
+
 async function promoteDispatchItemToCalendar(request, store, body = {}) {
   const item = dispatchItemById(store, cleanString(body.id || body.itemId || body.dispatchId));
   if (!item) throw new Error("Dispatch item not found.");
@@ -16099,6 +16279,30 @@ async function handleApi(request, response, pathname) {
       );
     } catch (error) {
       sendError(response, 400, `Job Inbox failed: ${error.message}`);
+    }
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "POST") && pathname === "/api/command-os") {
+    try {
+      const url = new URL(request.url, `http://${request.headers.host}`);
+      const body = request.method === "POST" ? await readJsonBody(request) : {};
+      sendJson(
+        response,
+        200,
+        await buildCommandOs(
+          request,
+          {
+            ...body,
+            days: body.days || url.searchParams.get("days"),
+            syncCalendar: body.syncCalendar || url.searchParams.get("syncCalendar") === "true",
+          },
+          store,
+          { canSyncCalendar: auth.role === "owner", role: auth.role },
+        ),
+      );
+    } catch (error) {
+      sendError(response, 400, `Command OS failed: ${error.message}`);
     }
     return;
   }

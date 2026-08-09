@@ -11103,6 +11103,286 @@ body.is-start-screen #startJobStatus[data-tone="ready"] {
   color: #d9ffe9;
 }
 
+body.is-start-screen #command .command-os-board {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-left: 5px solid #e02430;
+  border-radius: 8px;
+  padding: clamp(14px, 2vw, 18px);
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.16), rgba(255, 255, 255, 0.035) 44%, rgba(0, 0, 0, 0.14)),
+    #0b0c10;
+  color: #ffffff;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+body.is-start-screen #command .command-os-head,
+body.is-start-screen #command .command-os-lanes,
+body.is-start-screen #command .command-os-queue > div:first-child {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+body.is-start-screen #command .command-os-head strong,
+body.is-start-screen #command .command-os-queue > div:first-child strong {
+  display: block;
+  color: #ffffff;
+  font-size: clamp(1.12rem, 1.7vw, 1.45rem);
+  line-height: 1.1;
+}
+
+body.is-start-screen #command .command-os-head span,
+body.is-start-screen #command .command-os-hero span,
+body.is-start-screen #command .command-os-lane span,
+body.is-start-screen #command .command-os-empty span {
+  display: block;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .command-os-head-actions,
+body.is-start-screen #command .command-os-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+body.is-start-screen #command .command-os-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: clamp(14px, 2vw, 18px);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
+    #101217;
+}
+
+body.is-start-screen #command .command-os-hero.ready {
+  border-color: rgba(36, 209, 143, 0.34);
+}
+
+body.is-start-screen #command .command-os-hero.verify {
+  border-color: rgba(255, 176, 32, 0.36);
+}
+
+body.is-start-screen #command .command-os-hero.warn {
+  border-color: rgba(224, 36, 48, 0.42);
+}
+
+body.is-start-screen #command .command-os-hero h3 {
+  margin: 0 0 6px;
+  color: #ffffff;
+  font-size: clamp(1.35rem, 2.6vw, 2.25rem);
+  line-height: 1.04;
+}
+
+body.is-start-screen #command .command-os-hero > strong {
+  display: grid;
+  min-width: 108px;
+  gap: 2px;
+  border-radius: 8px;
+  padding: 13px;
+  background:
+    linear-gradient(135deg, #e02430, #870c15),
+    #b3121d;
+  color: #ffffff;
+  text-align: center;
+  box-shadow: 0 16px 34px rgba(224, 36, 48, 0.23);
+}
+
+body.is-start-screen #command .command-os-hero.ready > strong {
+  background:
+    linear-gradient(135deg, #1fb879, #116746),
+    #168a5b;
+}
+
+body.is-start-screen #command .command-os-hero.verify > strong {
+  background:
+    linear-gradient(135deg, #ffb020, #9a5c06),
+    #c9790a;
+}
+
+body.is-start-screen #command .command-os-hero > strong span {
+  color: #ffffff;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+body.is-start-screen #command .command-os-hero > strong small {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.66rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .command-os-metrics,
+body.is-start-screen #command .command-os-source-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .command-os-metrics article,
+body.is-start-screen #command .command-os-source-grid article,
+body.is-start-screen #command .command-os-lane,
+body.is-start-screen #command .command-os-empty {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  padding: 11px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+body.is-start-screen #command .command-os-metrics span,
+body.is-start-screen #command .command-os-source-grid span,
+body.is-start-screen #command .command-os-lane .eyebrow {
+  display: block;
+  color: #ffb3b8;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .command-os-metrics strong,
+body.is-start-screen #command .command-os-source-grid strong,
+body.is-start-screen #command .command-os-lane strong {
+  display: block;
+  color: #ffffff;
+  font-size: 1.18rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .command-os-metrics small,
+body.is-start-screen #command .command-os-source-grid small {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.74rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .command-os-source-grid article.ready {
+  border-left: 4px solid #24d18f;
+}
+
+body.is-start-screen #command .command-os-source-grid article.mapped,
+body.is-start-screen #command .command-os-source-grid article.connect,
+body.is-start-screen #command .command-os-source-grid article.standby {
+  border-left: 4px solid #ffb020;
+}
+
+body.is-start-screen #command .command-os-source-grid article.setup {
+  border-left: 4px solid #e02430;
+}
+
+body.is-start-screen #command .command-os-lanes {
+  align-items: stretch;
+}
+
+body.is-start-screen #command .command-os-lane {
+  display: grid;
+  flex: 1 1 0;
+  gap: 8px;
+  align-content: start;
+}
+
+body.is-start-screen #command .command-os-lane.main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  flex: 1.35 1 0;
+}
+
+body.is-start-screen #command .command-os-lane ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+body.is-start-screen #command .command-os-lane li {
+  display: grid;
+  gap: 2px;
+}
+
+body.is-start-screen #command .command-os-queue {
+  display: grid;
+  gap: 8px;
+}
+
+body.is-start-screen #command .command-os-queue > div:last-child {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+body.is-start-screen #command .command-os-job {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-left: 4px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #ffffff;
+  text-align: left;
+}
+
+body.is-start-screen #command .command-os-job.ready {
+  border-left-color: #24d18f;
+}
+
+body.is-start-screen #command .command-os-job.warn {
+  border-left-color: #ffb020;
+}
+
+body.is-start-screen #command .command-os-job:hover {
+  border-color: rgba(224, 36, 48, 0.55);
+  background: rgba(224, 36, 48, 0.14);
+}
+
+body.is-start-screen #command .command-os-job span,
+body.is-start-screen #command .command-os-job small,
+body.is-start-screen #command .command-os-job em {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+body.is-start-screen #command .command-os-job span {
+  color: #ffb3b8;
+  font-size: 0.66rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+body.is-start-screen #command .command-os-job strong {
+  color: #ffffff;
+  font-size: 0.94rem;
+  line-height: 1.14;
+}
+
+body.is-start-screen #command .command-os-job small,
+body.is-start-screen #command .command-os-job em {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.76rem;
+  font-style: normal;
+  line-height: 1.23;
+}
+
 body.is-start-screen #command .job-inbox-panel {
   display: grid;
   gap: 12px;
@@ -11519,6 +11799,16 @@ body.is-start-screen #command .job-packet-owner .secondary-action {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  body.is-start-screen #command .command-os-metrics,
+  body.is-start-screen #command .command-os-source-grid,
+  body.is-start-screen #command .command-os-queue > div:last-child {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body.is-start-screen #command .command-os-lanes {
+    display: grid;
+  }
+
   body.is-start-screen #command .job-packet-decisions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -11586,6 +11876,38 @@ body.is-start-screen #command .job-packet-owner .secondary-action {
 
   body.is-start-screen #command .job-inbox-actions > * {
     flex: 1 1 130px;
+  }
+
+  body.is-start-screen #command .command-os-head,
+  body.is-start-screen #command .command-os-lane.main,
+  body.is-start-screen #command .command-os-hero {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .command-os-head {
+    display: grid;
+    align-items: start;
+  }
+
+  body.is-start-screen #command .command-os-head-actions,
+  body.is-start-screen #command .command-os-actions {
+    justify-content: stretch;
+  }
+
+  body.is-start-screen #command .command-os-head-actions > *,
+  body.is-start-screen #command .command-os-actions > * {
+    flex: 1 1 130px;
+  }
+
+  body.is-start-screen #command .command-os-metrics,
+  body.is-start-screen #command .command-os-source-grid,
+  body.is-start-screen #command .command-os-queue > div:last-child {
+    grid-template-columns: 1fr;
+  }
+
+  body.is-start-screen #command .command-os-hero > strong {
+    width: 100%;
+    min-width: 0;
   }
 
   body.is-start-screen #command .job-inbox-metrics {
