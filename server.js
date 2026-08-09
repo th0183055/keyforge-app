@@ -37,6 +37,9 @@ const partsReferenceRowsByIdCache = new WeakMap();
 const jobEvidenceIndexMarker = Symbol("timlock-job-evidence-index");
 const googleWorkspaceStatusCacheMs = 15 * 1000;
 let googleWorkspaceStatusCache = { at: 0, status: null, origin: "" };
+const dispatchPacketCacheVersion = 2;
+const dispatchPacketCacheMaxEntries = Math.max(50, Math.min(1200, Number(process.env.TIMLOCK_PACKET_CACHE_MAX || 450)));
+const dispatchPacketCacheTtlMs = Math.max(15, Math.min(168, Number(process.env.TIMLOCK_PACKET_CACHE_TTL_HOURS || 24))) * 60 * 60 * 1000;
 const databaseUrl = process.env.TIMLOCK_DATABASE_URL || process.env.DATABASE_URL || "";
 const databaseStoreKey = "store";
 let postgresPoolPromise = null;
@@ -166,6 +169,16 @@ const emptyStore = {
     records: [],
     connectors: [],
   },
+  dispatchPacketCache: {
+    version: dispatchPacketCacheVersion,
+    updatedAt: "",
+    packets: {},
+    stats: {
+      hits: 0,
+      misses: 0,
+      writes: 0,
+    },
+  },
   codeDeskRecords: [],
   codeDeskSystems: [],
   codeDeskLessons: [],
@@ -203,6 +216,7 @@ function normalizeStore(store = {}) {
     googleWorkspace: normalizeGoogleWorkspaceStore(store.googleWorkspace),
     scheduledJobs: Array.isArray(store.scheduledJobs) ? store.scheduledJobs : [],
     serviceIntake: normalizeServiceIntakeStore(store.serviceIntake),
+    dispatchPacketCache: normalizeDispatchPacketCache(store.dispatchPacketCache),
     codeDeskRecords: Array.isArray(store.codeDeskRecords) ? store.codeDeskRecords : [],
     codeDeskSystems: Array.isArray(store.codeDeskSystems) ? store.codeDeskSystems : [],
     codeDeskLessons: Array.isArray(store.codeDeskLessons) ? store.codeDeskLessons : [],
@@ -4321,6 +4335,40 @@ function normalizeServiceIntakeStore(intake = {}) {
   };
 }
 
+function normalizeDispatchPacketCache(cache = {}) {
+  const packets = cache?.packets && typeof cache.packets === "object" && !Array.isArray(cache.packets) ? cache.packets : {};
+  const safePackets = {};
+  for (const [key, entry] of Object.entries(packets)) {
+    if (!entry || typeof entry !== "object") continue;
+    const cleanKey = cleanString(key);
+    const fingerprint = cleanString(entry.fingerprint);
+    if (!cleanKey || !fingerprint || !entry.summary) continue;
+    safePackets[cleanKey] = {
+      ...entry,
+      key: cleanString(entry.key || cleanKey),
+      itemId: cleanString(entry.itemId),
+      itemSource: cleanString(entry.itemSource),
+      fingerprint,
+      builtAt: cleanString(entry.builtAt),
+      expiresAt: cleanString(entry.expiresAt),
+      error: cleanString(entry.error),
+      summary: entry.summary,
+      loadout: entry.loadout || null,
+      workflow: entry.workflow || null,
+    };
+  }
+  return {
+    version: dispatchPacketCacheVersion,
+    updatedAt: cleanString(cache?.updatedAt),
+    packets: safePackets,
+    stats: {
+      hits: Number(cache?.stats?.hits || 0),
+      misses: Number(cache?.stats?.misses || 0),
+      writes: Number(cache?.stats?.writes || 0),
+    },
+  };
+}
+
 function normalizeMetkaBridgeStore(bridge = {}) {
   const empty = metkaBridgeCloneEmpty();
   if (!bridge || typeof bridge !== "object") return empty;
@@ -5291,6 +5339,65 @@ function scheduleNoteField(notes = "", label = "") {
   return cleanString(notes.match(new RegExp(`^\\s*${escaped}\\s*:\\s*(.+)$`, "im"))?.[1] || "");
 }
 
+function scheduleFirstField(notes = "", labels = []) {
+  for (const label of labels) {
+    const value = scheduleNoteField(notes, label);
+    if (value) return value;
+  }
+  return "";
+}
+
+function scheduleServiceFromCode(code = "") {
+  const text = cleanString(code).toUpperCase();
+  if (/^(AKL|ALL)$/.test(text) || /ALL\s*KEY|LOST/.test(text)) return "All keys lost";
+  if (/^(DK|ADD|DUP)$/.test(text) || /DUPLICATE|SPARE/.test(text)) return "Duplicate key";
+  if (/^(LO|LOCKOUT)$/.test(text) || /UNLOCK/.test(text)) return "Lockout";
+  if (/^(IGN|IGNITION)$/.test(text)) return "Ignition / lock work";
+  if (/^(PROX|SMART)$/.test(text)) return "Proximity key";
+  if (/^(RHK|REMOTE)$/.test(text)) return "Remote head key";
+  return "";
+}
+
+function scheduleVehicleFromText(text = "") {
+  const vehicleLine = scheduleFirstField(text, ["Vehicle", "Auto", "YMM", "Year Make Model"]);
+  const direct = vehicleLine ? coverageVehicleForJob({ title: vehicleLine, vehicle: vehicleLine }) : {};
+  if (direct?.year || direct?.make || direct?.model) {
+    return {
+      vehicle: cleanString(vehicleLine),
+      year: vehicleOptionYear(direct.year),
+      make: vehicleOptionMakeLabel(direct.make),
+      model: vehicleOptionModelLabel(direct.model),
+    };
+  }
+  const match = cleanString(text).match(/\b((?:19|20)\d{2})\s+([A-Z][A-Z .'-]{1,22})\s+([A-Z0-9][A-Z0-9 .#'/-]{1,38})/i);
+  const inferredText = cleanString(match?.[0]);
+  const inferred = inferredText ? coverageVehicleForJob({ title: inferredText, vehicle: inferredText }) : {};
+  return {
+    vehicle: cleanString(vehicleLine || inferredText),
+    year: vehicleOptionYear(inferred.year || match?.[1]),
+    make: vehicleOptionMakeLabel(inferred.make || match?.[2]),
+    model: vehicleOptionModelLabel(inferred.model || match?.[3]),
+  };
+}
+
+function scheduleProgrammerFromText(text = "") {
+  const explicit = scheduleFirstField(text, ["Programmer", "Programmer Used", "Tool", "Programmer Path"]);
+  if (explicit) return explicit;
+  const titleProgrammer = cleanString(text.match(/^\s*\|\s*([^|\n]{2,32})\s*\|/m)?.[1]);
+  if (titleProgrammer) return titleProgrammer;
+  const lineProgrammer = cleanString(text.match(/^\s*[A-Z0-9][A-Z0-9#/_ -]{2,44}\s*\+\s*([A-Z][A-Z0-9 ._-]{1,32})\s*$/im)?.[1]);
+  return lineProgrammer;
+}
+
+function scheduleCustomerFromText(text = "") {
+  return scheduleFirstField(text, ["Name", "Customer", "Contact", "Requested By", "Caller"]) ||
+    cleanString(text.match(/\brequested\s+by\s+([A-Z][A-Z .'-]{2,60})/i)?.[1]);
+}
+
+function schedulePhoneFromText(text = "") {
+  return scheduleFirstField(text, ["Call", "Phone", "Mobile", "Contact Phone", "Customer Phone"]);
+}
+
 function parseScheduleJobNotes(notes = "") {
   const text = cleanString(notes);
   if (!text) return {};
@@ -5300,21 +5407,30 @@ function parseScheduleJobNotes(notes = "") {
   const chargeBreakdown = text.match(/^\s*([0-9,.]+\s*\+\s*[0-9,.]+(?:\s*[A-Z0-9./ -]+)?)\s*$/im);
   const invoice = text.match(/\b(?:Sq\.?\s*Inv\.?|Invoice|Inv\.?)\s*#?\s*([A-Z0-9-]+)/i);
   const billingLine = scheduleNoteField(text, "BILLING");
+  const titleService = cleanString(text.match(/^\s*\|\s*[^|\n]+\s*\|\s*([A-Z]{2,5})\b/im)?.[1]);
+  const vehicle = scheduleVehicleFromText(text);
+  const programmer = scheduleProgrammerFromText(text);
   return {
-    status: scheduleNoteField(text, "STATUS"),
+    status: scheduleFirstField(text, ["STATUS", "Job Status"]),
+    customer: scheduleCustomerFromText(text),
+    phone: schedulePhoneFromText(text),
+    location: scheduleFirstField(text, ["Location", "Address", "Service Address", "Job Address"]),
     vin: extractVinsFromText(text)[0] || normalizeVinCandidate(text),
-    vehicle: scheduleNoteField(text, "Vehicle"),
-    service: scheduleNoteField(text, "Service"),
-    sourceId: scheduleNoteField(text, "Source ID") || cleanString(partProgrammer?.[1]),
-    addOns: scheduleNoteField(text, "Add-Ons"),
-    pricingLevel: scheduleNoteField(text, "PRICING LEVEL"),
+    vehicle: vehicle.vehicle,
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    service: scheduleFirstField(text, ["Service", "Service Type", "Call Type"]) || scheduleServiceFromCode(titleService),
+    sourceId: scheduleFirstField(text, ["Source ID", "SourceID", "Part", "Part #", "Part Number"]) || cleanString(partProgrammer?.[1]),
+    addOns: scheduleFirstField(text, ["Add-Ons", "Add Ons", "Addons"]),
+    pricingLevel: scheduleFirstField(text, ["PRICING LEVEL", "Price Tier", "Tier"]),
     billing: billingLine,
     billingCode: cleanString(billingLine.match(/\[([^\]]+)\]/)?.[1] || amountWithBilling?.[2]),
     price: cleanString(totalLine?.[1] || amountWithBilling?.[1]),
     subtotal: cleanString(scheduleNoteField(text, "Subtotal").replace(/^\$/, "")),
     payment: scheduleNoteField(text, "Payment") || (invoice ? `Sq. Inv. ${invoice[1]}` : ""),
-    partsUsed: scheduleNoteField(text, "Part(s) Used"),
-    programmer: cleanString(partProgrammer?.[2]),
+    partsUsed: scheduleFirstField(text, ["Part(s) Used", "Parts Used", "Part Used", "Part(s)", "Parts"]),
+    programmer,
     programmerPath: cleanString(partProgrammer?.[0]),
     chargeBreakdown: cleanString(chargeBreakdown?.[1]),
     amountDue: cleanString(amountWithBilling?.[1]),
@@ -5326,14 +5442,14 @@ function normalizeScheduleJobInput(input = {}) {
   const vehicle = input.vehicle && typeof input.vehicle === "object" ? input.vehicle : {};
   const rawNotes = cleanString(input.notes || input.description);
   const parsedNotes = parseScheduleJobNotes(rawNotes);
-  const year = vehicleOptionYear(input.year || vehicle.year);
-  const make = vehicleOptionMakeLabel(input.make || vehicle.make);
-  const model = vehicleOptionModelLabel(input.model || vehicle.model);
+  const year = vehicleOptionYear(input.year || vehicle.year || parsedNotes.year);
+  const make = vehicleOptionMakeLabel(input.make || vehicle.make || parsedNotes.make);
+  const model = vehicleOptionModelLabel(input.model || vehicle.model || parsedNotes.model);
   const vin = normalizeVinCandidate(input.vin || vehicle.vin || parsedNotes.vin);
   const service = cleanString(input.service || input.serviceType || parsedNotes.service || "Locksmith service");
-  const customer = cleanString(input.customer || input.customerName || input.name);
-  const phone = cleanString(input.phone || input.customerPhone || input.contact);
-  const location = cleanString(input.location || input.address || input.jobAddress);
+  const customer = cleanString(input.customer || input.customerName || input.name || parsedNotes.customer);
+  const phone = cleanString(input.phone || input.customerPhone || input.contact || parsedNotes.phone);
+  const location = cleanString(input.location || input.address || input.jobAddress || parsedNotes.location);
   const notes = rawNotes;
   const startDate = scheduleDateTime(input.start || input.scheduledAt || input.datetime || input.dateTime);
   const minutes = Math.max(30, Math.min(Number(input.durationMinutes) || 90, 480));
@@ -5596,6 +5712,7 @@ function queueScheduledJobCalendarSync(request, jobId) {
       };
       store.scheduledJobs = [updatedJob, ...jobs.filter((item) => item.id !== jobId)].slice(0, 2000);
       await writeStore(store);
+      queueDispatchPacketPrewarm(updatedJob.id);
     } catch (error) {
       try {
         const store = await readStore();
@@ -5615,6 +5732,23 @@ function queueScheduledJobCalendarSync(request, jobId) {
       }
     }
   }, 0);
+}
+
+function queueDispatchPacketPrewarm(jobId) {
+  const id = cleanString(jobId);
+  if (!id) return;
+  setTimeout(async () => {
+    try {
+      const store = await readStore();
+      const job = (store.scheduledJobs || []).find((item) => cleanString(item.id) === id);
+      if (!job) return;
+      const item = dispatchItemFromScheduledJob(job);
+      await buildDispatchPacketBundle(item, store, { full: true });
+      await persistDispatchPacketCache(store.dispatchPacketCache);
+    } catch (error) {
+      console.warn("Dispatch packet prewarm failed", error);
+    }
+  }, 25);
 }
 
 function scheduledJobKey(job = {}) {
@@ -5755,6 +5889,7 @@ async function createScheduledJob(request, store, input = {}) {
   }
   store.scheduledJobs = [job, ...(store.scheduledJobs || []).filter((item) => item.id !== job.id)].slice(0, 2000);
   await writeStore(store);
+  queueDispatchPacketPrewarm(job.id);
   if (calendarQueued) queueScheduledJobCalendarSync(request, job.id);
   return {
     ok: true,
@@ -5818,22 +5953,30 @@ function serviceIntakeRowsFromPayload(payload = {}) {
 function normalizeServiceIntakeRecord(row = {}, source = "Custom") {
   const notes = metkaValue(row, ["Notes", "Details", "Memo", "Comments", "Description", "Job Notes", "Private Notes"]);
   const parsedNotes = parseScheduleJobNotes(notes);
-  const year = vehicleOptionYear(metkaValue(row, ["Year", "Vehicle Year", "Y", "VehicleYear"]));
-  const make = vehicleOptionMakeLabel(metkaValue(row, ["Make", "Vehicle Make", "Manufacturer"]));
-  const model = vehicleOptionModelLabel(metkaValue(row, ["Model", "Vehicle Model"]));
+  const year = vehicleOptionYear(metkaValue(row, ["Year", "Vehicle Year", "Y", "VehicleYear"]) || parsedNotes.year);
+  const make = vehicleOptionMakeLabel(metkaValue(row, ["Make", "Vehicle Make", "Manufacturer"]) || parsedNotes.make);
+  const model = vehicleOptionModelLabel(metkaValue(row, ["Model", "Vehicle Model"]) || parsedNotes.model);
   const vin = normalizeVinCandidate(metkaValue(row, ["VIN", "Vin", "Vehicle VIN", "VehicleVin"])) || parsedNotes.vin;
-  const customer = metkaValue(row, ["Customer", "Customer Name", "Name", "Client", "Caller", "Contact Name", "Requested By"]);
-  const phone = metkaValue(row, ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone", "Phone Number", "Contact Phone"]);
-  const location = metkaValue(row, ["Address", "Location", "Job Address", "Service Address", "Site Address", "Destination"]);
+  const customer = metkaValue(row, ["Customer", "Customer Name", "Name", "Client", "Caller", "Contact Name", "Requested By"]) || parsedNotes.customer;
+  const phone = metkaValue(row, ["Phone", "Customer Phone", "Mobile", "Contact", "Caller Phone", "Phone Number", "Contact Phone"]) || parsedNotes.phone;
+  const location = metkaValue(row, ["Address", "Location", "Job Address", "Service Address", "Site Address", "Destination"]) || parsedNotes.location;
   const service = metkaValue(row, ["Service", "Service Type", "Job Type", "Call Type", "Description", "Work Type"]) || parsedNotes.service || "Locksmith service";
   const scheduledAt = metkaValue(row, ["Scheduled", "Scheduled At", "Start", "Start Time", "Appointment", "Date", "When", "Job Date"]);
   const end = metkaValue(row, ["End", "End Time", "Finished", "Stop Time"]);
   const sourceId = metkaValue(row, ["Job ID", "JobId", "ID", "Call ID", "Ticket", "Ticket ID", "Source ID", "SourceID", "Part", "PartNum", "Part Number"]) || parsedNotes.sourceId;
   const price = metkaValue(row, ["Total", "Amount", "Price", "Subtotal", "Total Stop Amount", "Stop Amount"]) || parsedNotes.price;
+  const subtotal = metkaValue(row, ["Subtotal", "Sub Total", "Parts Total", "Job Subtotal"]) || parsedNotes.subtotal;
+  const addOns = metkaValue(row, ["Add-Ons", "Add Ons", "Addons", "Add On Charges", "Extras"]) || parsedNotes.addOns;
+  const pricingLevel = metkaValue(row, ["Pricing Level", "Price Tier", "Tier", "Pricing Tier"]) || parsedNotes.pricingLevel;
   const billing = metkaValue(row, ["Billing", "Payment Terms", "Terms", "Bill To"]) || parsedNotes.billing;
+  const billingCode = metkaValue(row, ["Billing Code", "Payment Code", "Terms Code"]) || parsedNotes.billingCode;
   const payment = metkaValue(row, ["Payment", "Invoice", "Invoice #", "Square Invoice", "Sq Inv"]) || parsedNotes.payment;
   const programmer = metkaValue(row, ["Programmer", "Tool", "Programmer Used"]) || parsedNotes.programmer;
+  const programmerPath = metkaValue(row, ["Programmer Path", "Tool Path", "Part + Programmer"]) || parsedNotes.programmerPath;
   const partsUsed = metkaValue(row, ["Part Used", "Parts Used", "Part(s) Used", "SKU", "Part Number"]) || parsedNotes.partsUsed;
+  const chargeBreakdown = metkaValue(row, ["Charge Breakdown", "Price Breakdown", "Breakdown"]) || parsedNotes.chargeBreakdown;
+  const amountDue = metkaValue(row, ["Amount Due", "Due", "Balance", "Collected"]) || parsedNotes.amountDue;
+  const amountDueCode = metkaValue(row, ["Amount Due Code", "Due Code"]) || parsedNotes.amountDueCode;
   const vehicleLabel = uniqueCleanValues([year, make, model]).join(" ");
   const title = metkaValue(row, ["Title", "Summary", "Job", "Job Name"]) || uniqueCleanValues([service, vehicleLabel, customer]).join(" ");
   const timlockSignature = dispatchNaturalSignature({ title, customer, phone, location, service, start: scheduledAt, vin, vehicle: vehicleLabel });
@@ -5857,10 +6000,18 @@ function normalizeServiceIntakeRecord(row = {}, source = "Custom") {
     model,
     vehicle: vehicleLabel,
     price,
+    subtotal,
+    addOns,
+    pricingLevel,
     billing,
+    billingCode,
     payment,
     programmer,
+    programmerPath,
     partsUsed,
+    chargeBreakdown,
+    amountDue,
+    amountDueCode,
     raw: metkaCleanRow(row) || {},
   };
 }
@@ -6026,13 +6177,24 @@ function dispatchVehicleLabel(vehicle = {}, fallback = "") {
 
 function dispatchItemSearchText(item = {}) {
   return uniqueCleanValues([
+    item.id,
+    item.sourceId,
+    item.externalSourceId,
+    item.sourcePartId,
     item.vin,
     item.vehicleLabel,
     item.service,
     item.customer,
+    item.phone,
     item.location,
     item.title,
     item.notes,
+    item.partsUsed,
+    item.programmer,
+    item.programmerPath,
+    item.billing,
+    item.payment,
+    item.price,
   ]).join(" ");
 }
 
@@ -6051,12 +6213,12 @@ function dispatchWindowIncludes(item = {}, days = 14) {
 
 function dispatchItemFromCalendarEvent(event = {}) {
   const text = uniqueCleanValues([event.summary, event.description, event.location]).join(" ");
-  const parsedNotes = parseScheduleJobNotes(event.description);
-  const vin = normalizeVinCandidate(event.vin) || extractVinsFromText(text)[0] || "";
-  const vehicle = dispatchVehicleFromRecord({ vin }, text);
+  const parsedNotes = parseScheduleJobNotes(text);
+  const vin = normalizeVinCandidate(event.vin || parsedNotes.vin) || extractVinsFromText(text)[0] || "";
+  const vehicle = dispatchVehicleFromRecord({ vin, year: parsedNotes.year, make: parsedNotes.make, model: parsedNotes.model, vehicle: parsedNotes.vehicle }, text);
   const title = cleanString(event.summary || dispatchVehicleLabel(vehicle, vin) || "Google Calendar job");
-  const customer = scheduleNoteField(event.description, "Name");
-  const phone = scheduleNoteField(event.description, "Call");
+  const customer = parsedNotes.customer || scheduleFirstField(event.description, ["Name", "Customer", "Contact"]);
+  const phone = parsedNotes.phone || scheduleFirstField(event.description, ["Call", "Phone", "Mobile"]);
   return {
     id: `calendar:${cleanString(event.id) || metkaStableId("calendar", [title, event.start, event.location])}`,
     source: "google-calendar",
@@ -6069,7 +6231,7 @@ function dispatchItemFromCalendarEvent(event = {}) {
     customer,
     phone,
     service: cleanString(parsedNotes.service || event.summary || "Calendar job"),
-    location: cleanString(event.location),
+    location: cleanString(event.location || parsedNotes.location),
     notes: cleanString(event.description),
     start: cleanString(event.start),
     end: cleanString(event.end),
@@ -6077,12 +6239,21 @@ function dispatchItemFromCalendarEvent(event = {}) {
     vehicle,
     vehicleLabel: dispatchVehicleLabel(vehicle, title),
     status: cleanString(event.status || "calendar"),
-    sourceId: parsedNotes.sourceId,
+    externalSourceId: cleanString(parsedNotes.sourceId),
+    sourcePartId: cleanString(parsedNotes.partsUsed || parsedNotes.sourceId),
     price: parsedNotes.price,
+    subtotal: parsedNotes.subtotal,
+    addOns: parsedNotes.addOns,
+    pricingLevel: parsedNotes.pricingLevel,
     billing: parsedNotes.billing,
+    billingCode: parsedNotes.billingCode,
     payment: parsedNotes.payment,
     programmer: parsedNotes.programmer,
+    programmerPath: parsedNotes.programmerPath,
     partsUsed: parsedNotes.partsUsed,
+    chargeBreakdown: parsedNotes.chargeBreakdown,
+    amountDue: parsedNotes.amountDue,
+    amountDueCode: parsedNotes.amountDueCode,
     raw: event,
   };
 }
@@ -6111,6 +6282,21 @@ function dispatchItemFromScheduledJob(job = {}) {
     vehicle,
     vehicleLabel: dispatchVehicleLabel(vehicle, title),
     status: cleanString(job.status || "scheduled"),
+    externalSourceId: cleanString(job.sourceId),
+    sourcePartId: cleanString(job.partsUsed || job.sourceId),
+    price: cleanString(job.price),
+    subtotal: cleanString(job.subtotal),
+    addOns: cleanString(job.addOns),
+    pricingLevel: cleanString(job.pricingLevel),
+    billing: cleanString(job.billing),
+    billingCode: cleanString(job.billingCode),
+    payment: cleanString(job.payment),
+    programmer: cleanString(job.programmer),
+    programmerPath: cleanString(job.programmerPath),
+    partsUsed: cleanString(job.partsUsed),
+    chargeBreakdown: cleanString(job.chargeBreakdown),
+    amountDue: cleanString(job.amountDue),
+    amountDueCode: cleanString(job.amountDueCode),
     raw: job,
   };
 }
@@ -6141,10 +6327,18 @@ function dispatchItemFromServiceIntake(record = {}) {
     externalSourceId: cleanString(record.sourceId),
     sourcePartId: cleanString(record.sourceId),
     price: cleanString(record.price),
+    subtotal: cleanString(record.subtotal),
+    addOns: cleanString(record.addOns),
+    pricingLevel: cleanString(record.pricingLevel),
     billing: cleanString(record.billing),
+    billingCode: cleanString(record.billingCode),
     payment: cleanString(record.payment),
     programmer: cleanString(record.programmer),
+    programmerPath: cleanString(record.programmerPath),
     partsUsed: cleanString(record.partsUsed),
+    chargeBreakdown: cleanString(record.chargeBreakdown),
+    amountDue: cleanString(record.amountDue),
+    amountDueCode: cleanString(record.amountDueCode),
     raw: record,
   };
 }
@@ -6189,13 +6383,15 @@ function dispatchPacketSummary(item = {}, loadout = {}) {
   const packet = loadout.fieldPacket || {};
   const choiceById = (id) => (packet.choices || []).find((choice) => choice.id === id) || {};
   const choiceText = (choice) => cleanString(choice?.label || choice?.value || "");
+  const explicitPrimary = cleanString(item.partsUsed || item.sourcePartId || item.externalSourceId);
+  const explicitProgrammer = cleanString(item.programmer || item.programmerPath);
   return {
     title: packet.title || loadout.title || item.title,
     confidencePercent: Number(packet.confidencePercent || loadout.confidencePercent || 0),
     confidenceLabel: cleanString(packet.confidenceLabel || loadout.confidenceLabel || "Confidence"),
-    primary: choiceText(packet.primary || choiceById("primary")),
+    primary: explicitPrimary || choiceText(packet.primary || choiceById("primary")),
     backup: choiceText(packet.backup || choiceById("backup")),
-    programmer: choiceText(packet.programmer || choiceById("programmer")),
+    programmer: explicitProgrammer || choiceText(packet.programmer || choiceById("programmer")),
     lishi: choiceText(packet.lishi || choiceById("lishi")),
     proof: choiceText(packet.proof || choiceById("proof")),
     checklist: (packet.checklist || []).slice(0, 6),
@@ -6305,6 +6501,7 @@ function buildJobInboxFromDispatch(dispatch = {}) {
       readyPackets: items.filter((item) => item.fieldReady).length,
       needsAttention: attentionItems.length,
       connectedCalendar: Boolean(dispatch.summary?.connectedCalendar),
+      packetCache: dispatch.summary?.packetCache || dispatch.packetCache || {},
     },
     items,
     sections: [
@@ -6315,18 +6512,248 @@ function buildJobInboxFromDispatch(dispatch = {}) {
     ].filter((section) => section.count || section.id === "today"),
     selected: items.find((item) => item.id === (dispatch.summary?.selectedId || dispatch.selected?.id)) || items[0] || null,
     packet: dispatch.packet,
+    packetCache: dispatch.summary?.packetCache || dispatch.packetCache || {},
     fieldWorkflow: dispatch.fieldWorkflow?.subscriber ? { subscriber: dispatch.fieldWorkflow.subscriber } : null,
     next: dispatch.next || [],
   };
 }
 
+function dispatchPacketCacheKey(item = {}) {
+  return metkaStableId("dispatch-packet", [
+    item.id,
+    item.timlockSignature,
+    item.source,
+    item.sourceId,
+    item.externalSourceId,
+    item.calendarEventId,
+    item.start,
+  ]);
+}
+
+function dispatchPacketTimestamp(record = {}) {
+  const fields = ["updatedAt", "createdAt", "importedAt", "timestamp", "Timestamp", "start", "scheduledAt", "end"];
+  for (const field of fields) {
+    const value = record?.[field];
+    const parsed = Date.parse(cleanString(value));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function dispatchPacketCollectionMark(records = []) {
+  const items = Array.isArray(records) ? records : [];
+  let latest = 0;
+  const idSample = [];
+  for (const item of items.slice(0, 100)) {
+    latest = Math.max(latest, dispatchPacketTimestamp(item));
+    idSample.push(cleanString(item.id || item.timlockSignature || item.vin || item.ML_PN || item.mlPn || item.sourceId));
+  }
+  return {
+    count: items.length,
+    latest,
+    sample: createHash("sha1").update(idSample.join("|")).digest("hex").slice(0, 12),
+  };
+}
+
+function dispatchPacketEvidenceMark(store = {}) {
+  const bridge = normalizeMetkaBridgeStore(store.metkaBridge);
+  const google = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  const intake = normalizeServiceIntakeStore(store.serviceIntake);
+  return {
+    jobs: dispatchPacketCollectionMark(store.jobs),
+    vehicles: dispatchPacketCollectionMark(store.vehicles),
+    scheduled: dispatchPacketCollectionMark(store.scheduledJobs),
+    intake: {
+      ...dispatchPacketCollectionMark(intake.records),
+      updatedAt: cleanString(intake.updatedAt),
+    },
+    calendar: {
+      ...dispatchPacketCollectionMark(google.calendar.events),
+      updatedAt: cleanString(google.calendar.updatedAt || google.updatedAt),
+    },
+    bridge: {
+      updatedAt: cleanString(bridge.updatedAt || bridge.importedAt),
+      parts: bridge.normalized.parts.length,
+      jobs: bridge.normalized.jobs.length,
+      inventory: bridge.normalized.inventory.length,
+      programmers: bridge.normalized.programmers.length,
+    },
+    feedback: dispatchPacketCollectionMark(store.fieldPacketFeedback),
+    rules: dispatchPacketCollectionMark(store.shopRules),
+  };
+}
+
+function dispatchPacketFingerprint(item = {}, store = {}) {
+  const itemMark = {
+    id: item.id,
+    signature: item.timlockSignature,
+    source: item.source,
+    sourceId: item.sourceId,
+    externalSourceId: item.externalSourceId,
+    sourcePartId: item.sourcePartId,
+    calendarEventId: item.calendarEventId,
+    vin: item.vin,
+    vehicleLabel: item.vehicleLabel,
+    service: item.service,
+    customer: item.customer,
+    phone: item.phone,
+    location: item.location,
+    start: item.start,
+    end: item.end,
+    status: item.status,
+    notes: item.notes,
+    partsUsed: item.partsUsed,
+    programmer: item.programmer,
+    price: item.price,
+    billing: item.billing,
+    payment: item.payment,
+  };
+  return createHash("sha1")
+    .update(JSON.stringify({ version: dispatchPacketCacheVersion, item: itemMark, evidence: dispatchPacketEvidenceMark(store) }))
+    .digest("hex");
+}
+
+function dispatchPacketCacheExpired(entry = {}) {
+  const expiresAt = Date.parse(cleanString(entry.expiresAt));
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now();
+}
+
+function dispatchPacketCacheRead(store = {}, item = {}, options = {}) {
+  const cache = normalizeDispatchPacketCache(store.dispatchPacketCache);
+  store.dispatchPacketCache = cache;
+  const key = cleanString(options.key) || dispatchPacketCacheKey(item);
+  const fingerprint = cleanString(options.fingerprint) || dispatchPacketFingerprint(item, store);
+  const entry = cache.packets[key];
+  const requireFull = Boolean(options.full);
+  if (entry && dispatchPacketCacheExpired(entry)) {
+    delete cache.packets[key];
+    cache.updatedAt = new Date().toISOString();
+  } else if (entry && entry.fingerprint === fingerprint && entry.summary && (!requireFull || entry.workflow)) {
+    cache.stats.hits += 1;
+    return {
+      item,
+      summary: entry.summary,
+      loadout: entry.loadout || null,
+      workflow: entry.workflow || null,
+      error: entry.error || "",
+      cacheHit: true,
+      cacheKey: key,
+    };
+  }
+  cache.stats.misses += 1;
+  return null;
+}
+
+function pruneDispatchPacketCache(cache = {}) {
+  const normalized = normalizeDispatchPacketCache(cache);
+  const now = Date.now();
+  const entries = Object.entries(normalized.packets)
+    .filter(([, entry]) => {
+      const expiresAt = Date.parse(cleanString(entry.expiresAt));
+      return Number.isFinite(expiresAt) && expiresAt > now;
+    })
+    .sort(([, a], [, b]) => (Date.parse(cleanString(b.builtAt)) || 0) - (Date.parse(cleanString(a.builtAt)) || 0))
+    .slice(0, dispatchPacketCacheMaxEntries);
+  normalized.packets = Object.fromEntries(entries);
+  return normalized;
+}
+
+function dispatchPacketCacheLoadout(loadout = null) {
+  if (!loadout || typeof loadout !== "object") return null;
+  return {
+    generatedAt: cleanString(loadout.generatedAt),
+    query: cleanString(loadout.query),
+    vin: cleanString(loadout.vin),
+    title: cleanString(loadout.title),
+    vehicle: loadout.vehicle || {},
+    confidencePercent: Number(loadout.confidencePercent || 0),
+    confidenceLabel: cleanString(loadout.confidenceLabel),
+    summary: loadout.summary || null,
+    fieldPacket: loadout.fieldPacket || null,
+  };
+}
+
+function dispatchPacketCacheWorkflow(workflow = null) {
+  if (!workflow || typeof workflow !== "object") return null;
+  return {
+    generatedAt: cleanString(workflow.generatedAt),
+    mode: cleanString(workflow.mode),
+    query: cleanString(workflow.query),
+    vin: cleanString(workflow.vin),
+    vehicle: workflow.vehicle || {},
+    subscriber: workflow.subscriber || null,
+  };
+}
+
+function dispatchPacketCacheWrite(store = {}, item = {}, bundle = {}, options = {}) {
+  if (!bundle?.summary) return false;
+  const cache = pruneDispatchPacketCache(store.dispatchPacketCache);
+  const key = cleanString(options.key) || dispatchPacketCacheKey(item);
+  const fingerprint = cleanString(options.fingerprint) || dispatchPacketFingerprint(item, store);
+  const builtAt = new Date().toISOString();
+  cache.packets[key] = {
+    key,
+    itemId: cleanString(item.id),
+    itemSource: cleanString(item.source),
+    fingerprint,
+    builtAt,
+    expiresAt: new Date(Date.now() + dispatchPacketCacheTtlMs).toISOString(),
+    summary: bundle.summary,
+    loadout: dispatchPacketCacheLoadout(bundle.loadout),
+    workflow: dispatchPacketCacheWorkflow(bundle.workflow),
+    error: cleanString(bundle.error),
+  };
+  const pruned = pruneDispatchPacketCache(cache);
+  pruned.stats.writes += 1;
+  pruned.updatedAt = builtAt;
+  store.dispatchPacketCache = pruned;
+  return true;
+}
+
+async function persistDispatchPacketCache(cache = {}) {
+  const latest = await readStore();
+  latest.dispatchPacketCache = normalizeDispatchPacketCache(cache);
+  await writeStore(latest);
+}
+
+function dispatchPacketCachePublic(cache = {}, bundles = []) {
+  const normalized = normalizeDispatchPacketCache(cache);
+  const packetValues = Object.values(normalized.packets || {});
+  const latestBuiltAt = packetValues
+    .map((entry) => cleanString(entry.builtAt))
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
+  return {
+    version: dispatchPacketCacheVersion,
+    size: packetValues.length,
+    max: dispatchPacketCacheMaxEntries,
+    ttlHours: Math.round(dispatchPacketCacheTtlMs / (60 * 60 * 1000)),
+    updatedAt: cleanString(normalized.updatedAt || latestBuiltAt),
+    hits: Number(normalized.stats.hits || 0),
+    misses: Number(normalized.stats.misses || 0),
+    writes: Number(normalized.stats.writes || 0),
+    runHits: bundles.filter((bundle) => bundle?.cacheHit).length,
+    runBuilt: bundles.filter((bundle) => bundle && !bundle.cacheHit && !bundle.error).length,
+    runErrors: bundles.filter((bundle) => bundle?.error).length,
+  };
+}
+
 async function buildDispatchPacketBundle(item = {}, store = {}, options = {}) {
   if (!item?.id) return { item, summary: null, loadout: null, workflow: null, error: "Dispatch item missing." };
+  const allowCache = options.cache !== false && options.allowCache !== false;
+  const key = dispatchPacketCacheKey(item);
+  const fingerprint = dispatchPacketFingerprint(item, store);
+  if (allowCache) {
+    const cached = dispatchPacketCacheRead(store, item, { ...options, key, fingerprint });
+    if (cached) return cached;
+  }
   try {
     const body = dispatchLoadoutBody(item);
+    let bundle;
     if (options.full) {
       const workflow = await buildFieldWorkflow(body, store);
-      return {
+      bundle = {
         item,
         workflow,
         loadout: workflow.loadout,
@@ -6336,9 +6763,12 @@ async function buildDispatchPacketBundle(item = {}, store = {}, options = {}) {
         },
         error: "",
       };
+    } else {
+      const loadout = await buildJobLoadout(body, store);
+      bundle = { item, workflow: null, loadout, summary: dispatchPacketSummary(item, loadout), error: "" };
     }
-    const loadout = await buildJobLoadout(body, store);
-    return { item, workflow: null, loadout, summary: dispatchPacketSummary(item, loadout), error: "" };
+    const cacheUpdated = allowCache && dispatchPacketCacheWrite(store, item, bundle, { key, fingerprint });
+    return { ...bundle, cacheHit: false, cacheUpdated, cacheKey: key };
   } catch (error) {
     return { item, summary: null, loadout: null, workflow: null, error: error.message };
   }
@@ -6396,6 +6826,10 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   for (const bundle of previewBundles) {
     if (bundle?.item?.id) packetBundles.set(bundle.item.id, bundle);
   }
+  const allBundles = Array.from(packetBundles.values());
+  if (allBundles.some((bundle) => bundle?.cacheUpdated) && options.persistCache !== false) {
+    await persistDispatchPacketCache(store.dispatchPacketCache);
+  }
   const queue = items.map((item) => dispatchPublicItem(item, packetBundles.get(item.id)?.summary, packetBundles.get(item.id)?.error));
   const sources = {
     calendar: items.filter((item) => item.source === "google-calendar").length,
@@ -6412,6 +6846,7 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
         subscriber: selectedBundle.workflow.subscriber,
       }
     : null;
+  const packetCache = dispatchPacketCachePublic(store.dispatchPacketCache, allBundles);
   return {
     generatedAt: new Date().toISOString(),
     days,
@@ -6424,7 +6859,9 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
       readyPackets: queue.filter((item) => item.packetStatus === "ready").length,
       prebuiltPackets: packetBundles.size,
       packetPrebuildLimit,
+      packetCache,
     },
+    packetCache,
     queue,
     selected: ownerMode ? selected : publicSelected,
     packet: selectedBundle?.summary || null,

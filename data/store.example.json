@@ -51,6 +51,16 @@
     "records": [],
     "connectors": []
   },
+  "dispatchPacketCache": {
+    "version": 2,
+    "updatedAt": "",
+    "packets": {},
+    "stats": {
+      "hits": 0,
+      "misses": 0,
+      "writes": 0
+    }
+  },
   "inventoryItems": [],
   "inventoryLedger": [],
   "inventoryLocations": [],

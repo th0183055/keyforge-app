@@ -6862,7 +6862,9 @@ function renderJobInbox(payload = {}) {
   `;
   if (jobInboxStatus) {
     const sourceCounts = payload.sources || {};
-    jobInboxStatus.textContent = `${summary.total || 0} jobs | ${sourceCounts.calendar || 0} Calendar | ${sourceCounts.intake || 0} QUO | ${sourceCounts.scheduled || 0} TimLock`;
+    const cache = payload.packetCache || summary.packetCache || {};
+    const cacheText = cache.size ? ` | ${cache.size} cached` : "";
+    jobInboxStatus.textContent = `${summary.total || 0} jobs | ${sourceCounts.calendar || 0} Calendar | ${sourceCounts.intake || 0} QUO | ${sourceCounts.scheduled || 0} TimLock${cacheText}`;
   }
 }
 
