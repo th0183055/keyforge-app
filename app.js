@@ -10048,6 +10048,108 @@ function renderFieldWorkflowChoice(choice = {}) {
   `;
 }
 
+function verifiedFieldMeta(choice = {}) {
+  return [choice.confidenceLabel || "", choice.confidencePercent ? `${choice.confidencePercent}%` : "", choice.proofJobs ? `${choice.proofJobs} proof` : "", choice.source || ""]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function renderVerifiedFieldChoice(choice = {}) {
+  return `
+    <article class="verified-choice ${escapeHtml(loadoutTone(choice.confidencePercent))}">
+      <span>${escapeHtml(choice.title || "Choice")}</span>
+      <strong>${escapeHtml(choice.value || "Verify manually")}</strong>
+      <small>${escapeHtml(verifiedFieldMeta(choice) || "Verify")}</small>
+    </article>
+  `;
+}
+
+function renderVerifiedEvidenceRow(row = {}) {
+  return `
+    <article>
+      <span>${escapeHtml(row.label || "Evidence")}</span>
+      <strong>${escapeHtml(row.value || "None")}</strong>
+      ${row.detail ? `<small>${escapeHtml(row.detail)}</small>` : ""}
+    </article>
+  `;
+}
+
+function renderVerifiedFieldPacket(payload = {}) {
+  const subscriber = payload.subscriber || {};
+  const packet = payload.verifiedPacket || subscriber.verifiedPacket;
+  if (!packet) {
+    const choices = subscriber.choices || [];
+    return `
+      <section class="field-decision-panel ${escapeHtml(loadoutTone(subscriber.confidencePercent))}">
+        <div class="field-decision-head">
+          <div>
+            <p class="eyebrow">Field Decision</p>
+            <h3>${escapeHtml(subscriber.title || payload.query || "Current job")}</h3>
+            <p>${escapeHtml([subscriber.vin, subscriber.bestMove].filter(Boolean).join(" | "))}</p>
+          </div>
+          <strong><span>${escapeHtml(subscriber.confidencePercent || 0)}%</span><small>${escapeHtml(subscriber.confidenceLabel || "Packet")}</small></strong>
+        </div>
+        <div class="field-decision-grid">${choices.map(renderFieldWorkflowChoice).join("")}</div>
+      </section>
+    `;
+  }
+  const gate = packet.gate || {};
+  const best = packet.best || {};
+  const choices = [best.vehicle, best.primary, best.programmer, best.lishi].filter(Boolean);
+  const checklist = packet.checklist || [];
+  const warnings = packet.warnings || [];
+  const evidence = packet.evidence || [];
+  return `
+    <section class="verified-field-packet ${escapeHtml(gate.tone || loadoutTone(gate.score))}">
+      <div class="verified-packet-head">
+        <div>
+          <p class="eyebrow">Verified Field Packet</p>
+          <h3>${escapeHtml(packet.title || payload.query || "Current job")}</h3>
+          ${packet.vin ? `<span>${escapeHtml(packet.vin)}</span>` : ""}
+        </div>
+        <strong>
+          <span>${escapeHtml(gate.score || 0)}%</span>
+          <small>${escapeHtml(gate.label || "Packet")}</small>
+        </strong>
+      </div>
+      <div class="verified-choice-grid">
+        ${choices.map(renderVerifiedFieldChoice).join("")}
+      </div>
+      <div class="verified-next-row">
+        <article>
+          <span>Next</span>
+          <strong>${escapeHtml(packet.nextStep || gate.subscriberAction || "Verify packet")}</strong>
+        </article>
+        <article>
+          <span>Status</span>
+          <strong>${escapeHtml(gate.subscriberAction || "Use as a planning aid.")}</strong>
+        </article>
+      </div>
+      ${
+        checklist.length
+          ? `<div class="verified-check-strip">${checklist.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+          : ""
+      }
+      ${
+        warnings.length
+          ? `<div class="verified-warning-strip">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+          : ""
+      }
+      <div class="field-packet-feedback" data-owner-only>
+        <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong Part</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong Programmer</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
+        <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing Info</button>
+      </div>
+      <details class="verified-owner-evidence" data-owner-only>
+        <summary>Owner evidence</summary>
+        <div>${evidence.map(renderVerifiedEvidenceRow).join("")}</div>
+      </details>
+    </section>
+  `;
+}
+
 function renderFieldWorkflowOwner(payload = {}) {
   const owner = payload.owner || {};
   const overview = owner.workbench?.overview || {};
@@ -10074,40 +10176,8 @@ function renderFieldWorkflow(payload = {}) {
   if (!loadoutResult) return;
   latestFieldWorkflow = payload;
   latestJobLoadout = payload.loadout || null;
-  const subscriber = payload.subscriber || {};
-  const choices = subscriber.choices || [];
-  const checklist = subscriber.checklist || [];
-  const warnings = subscriber.warnings || [];
   loadoutResult.innerHTML = `
-    <section class="field-decision-panel ${escapeHtml(loadoutTone(subscriber.confidencePercent))}">
-      <div class="field-decision-head">
-        <div>
-          <p class="eyebrow">Field Decision</p>
-          <h3>${escapeHtml(subscriber.title || payload.query || "Current job")}</h3>
-          <p>${escapeHtml([subscriber.vin, subscriber.bestMove].filter(Boolean).join(" | "))}</p>
-        </div>
-        <strong><span>${escapeHtml(subscriber.confidencePercent || 0)}%</span><small>${escapeHtml(subscriber.confidenceLabel || "Packet")}</small></strong>
-      </div>
-      <div class="field-decision-grid">
-        ${choices.map(renderFieldWorkflowChoice).join("")}
-      </div>
-      <div class="field-decision-checklist">
-        ${checklist.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-      </div>
-      ${
-        warnings.length
-          ? `<div class="field-decision-warnings">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
-          : ""
-      }
-      <div class="field-packet-feedback">
-        <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong Part</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong Programmer</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing Info</button>
-      </div>
-    </section>
-    ${renderFieldWorkflowOwner(payload)}
+    ${renderVerifiedFieldPacket(payload)}
   `;
   updateAiContextUi();
 }

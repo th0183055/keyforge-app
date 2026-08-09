@@ -11339,6 +11339,160 @@ function fieldWorkflowChoiceFromPacket(packet = {}, id = "", title = "", fallbac
   });
 }
 
+function clampConfidence(value = 0) {
+  return Math.max(0, Math.min(100, Math.round(Number(value || 0))));
+}
+
+function verifiedChoice(choice = {}, overrides = {}) {
+  const confidencePercent = clampConfidence(overrides.confidencePercent ?? choice.confidencePercent ?? choice.score);
+  const value = cleanString(overrides.value || choice.value || choice.label || "Verify manually");
+  return {
+    id: cleanString(overrides.id || choice.id),
+    title: cleanString(overrides.title || choice.title || "Choice"),
+    value,
+    confidencePercent,
+    confidenceLabel: cleanString(overrides.confidenceLabel || choice.confidenceLabel || fieldLoadoutConfidenceLabel(confidencePercent)),
+    source: cleanString(overrides.source || choice.source || ""),
+    proofJobs: Number(overrides.proofJobs ?? choice.proofJobs ?? 0),
+    action: cleanString(overrides.action || choice.action || (confidencePercent >= 72 && !/verify manually/i.test(value) ? "Use" : "Verify")),
+    identifiers: uniqueCleanValues([overrides.identifiers || [], choice.identifiers || []]).slice(0, 8),
+  };
+}
+
+function verifiedChoiceIsReady(choice = {}) {
+  const value = cleanString(choice.value);
+  return Boolean(value && !/verify|not proven|no proven|not confirmed/i.test(value) && Number(choice.confidencePercent || 0) >= 70);
+}
+
+function verifiedFieldGate(criticalChoices = [], warnings = [], proof = {}) {
+  const scores = criticalChoices.map((choice) => clampConfidence(choice.confidencePercent));
+  const lowest = scores.length ? Math.min(...scores) : 0;
+  const average = scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 0;
+  const missing = criticalChoices.filter((choice) => !verifiedChoiceIsReady(choice));
+  const exactJobs = Number(proof.exactJobs || 0);
+  const relatedJobs = Number(proof.relatedJobs || 0);
+  const proofBonus = exactJobs ? 8 : relatedJobs ? 4 : 0;
+  const warningPenalty = warnings.length ? Math.min(warnings.length * 5, 15) : 0;
+  const score = clampConfidence(Math.min(average + proofBonus - warningPenalty, lowest + 18));
+  if (missing.length >= 2 || score < 58) {
+    return {
+      label: "Do not trust yet",
+      tone: "low",
+      score,
+      subscriberAction: "Verify vehicle, part, programmer, and Lishi before dispatch.",
+    };
+  }
+  if (missing.length || score < 76) {
+    return {
+      label: "Needs locksmith check",
+      tone: "verify",
+      score,
+      subscriberAction: "Use this as a starting point and confirm the low-confidence section.",
+    };
+  }
+  if (score < 90) {
+    return {
+      label: "Strong match",
+      tone: "good",
+      score,
+      subscriberAction: "Work from this packet after authorization.",
+    };
+  }
+  return {
+    label: "Verified packet",
+    tone: "high",
+    score,
+    subscriberAction: "Dispatch from this packet and save final proof.",
+  };
+}
+
+function buildVerifiedFieldPacket(workbench = {}, loadout = {}, choices = [], warnings = [], checklist = []) {
+  const packet = loadout.fieldPacket || {};
+  const byId = new Map((choices || []).map((choice) => [choice.id, verifiedChoice(choice)]));
+  const vehicle = verifiedChoice(byId.get("vehicle"), {
+    id: "vehicle",
+    title: "Vehicle",
+    value: loadout.title || workbench.title || "Verify vehicle",
+  });
+  const primary = verifiedChoice(byId.get("primary") || byId.get("part"), { id: "primary", title: "Part" });
+  const programmer = verifiedChoice(byId.get("programmer"), { id: "programmer", title: "Programmer" });
+  const lishi = verifiedChoice(byId.get("lishi"), { id: "lishi", title: "Lishi" });
+  const backup = verifiedChoice(byId.get("backup"), { id: "backup", title: "Backup" });
+  const proofChoice = verifiedChoice(byId.get("proof"), { id: "proof", title: "Proof" });
+  const overview = workbench.overview || {};
+  const proof = {
+    exactJobs: Number(overview.exactProofMatches || 0),
+    relatedJobs: Number(overview.relatedProfileMatches || 0),
+    pattern: cleanString(loadout.proof?.pattern || packet.proofSummary?.pattern || ""),
+    partRows: Number(overview.partReferenceRows || 0),
+    lishiRows: Number(workbench.lishiLookup?.summary?.matches || workbench.lishi?.summary?.matches || 0),
+    feedback: Number(packet.learning?.relevantFeedback || 0),
+  };
+  const critical = [vehicle, primary, programmer, lishi];
+  const gate = verifiedFieldGate(critical, warnings, proof);
+  const missing = critical.filter((choice) => !verifiedChoiceIsReady(choice));
+  const nextStep = cleanString(
+    missing[0]
+      ? `Confirm ${missing[0].title}`
+      : gate.score >= 90
+        ? "Authorize, cut/program, save proof"
+        : "Authorize and verify packet",
+  );
+  const evidence = [
+    {
+      label: "Shop proof",
+      value: proof.exactJobs ? `${proof.exactJobs} exact` : proof.relatedJobs ? `${proof.relatedJobs} related` : "No exact proof",
+      detail: proof.pattern || "Saved jobs and proof vault",
+    },
+    {
+      label: "Parts",
+      value: primary.value,
+      detail: uniqueCleanValues([primary.source, primary.proofJobs ? `${primary.proofJobs} proof` : "", primary.identifiers]).join(" | "),
+    },
+    {
+      label: "Programmer",
+      value: programmer.value,
+      detail: uniqueCleanValues([programmer.source, programmer.proofJobs ? `${programmer.proofJobs} proof` : ""]).join(" | "),
+    },
+    {
+      label: "Lishi",
+      value: lishi.value,
+      detail: uniqueCleanValues([lishi.source, proof.lishiRows ? `${proof.lishiRows} reference rows` : ""]).join(" | "),
+    },
+    {
+      label: "Learning",
+      value: packet.learning?.relevantFeedback ? `${packet.learning.relevantFeedback} field marks` : "No field marks",
+      detail: `${packet.learning?.boostedChoices || 0} boosts | ${packet.learning?.correctedChoices || 0} corrections`,
+    },
+  ];
+  return {
+    generatedAt: loadout.generatedAt || new Date().toISOString(),
+    title: vehicle.value || cleanString(loadout.query || workbench.query || "Current job"),
+    query: cleanString(loadout.query || workbench.query || ""),
+    vin: cleanString(loadout.vin || workbench.vin || ""),
+    gate,
+    best: {
+      vehicle,
+      primary,
+      programmer,
+      lishi,
+      backup,
+      proof: proofChoice,
+    },
+    criticalIds: critical.map((choice) => choice.id),
+    nextStep,
+    checklist: uniqueCleanValues(checklist).slice(0, 5),
+    warnings: uniqueCleanValues(warnings).slice(0, 4),
+    proof,
+    evidence,
+    ownerOnly: {
+      alternates: (loadout.alternates || []).slice(0, 6),
+      gaps: packet.gaps || [],
+      truthLedger: workbench.truthLedger || loadout.truthLedger || null,
+    },
+  };
+}
+
 function buildFieldWorkflowSubscriber(workbench = {}, loadout = {}) {
   const packet = loadout.fieldPacket || {};
   const decisionEngine = workbench.decisionEngine || {};
@@ -11382,7 +11536,7 @@ function buildFieldWorkflowSubscriber(workbench = {}, loadout = {}) {
     Number(loadout.confidencePercent || 0),
     Math.min(100, Math.round(choices.reduce((total, choice) => total + Number(choice.confidencePercent || 0), 0) / Math.max(choices.length, 1))),
   );
-  return {
+  const subscriber = {
     title: vehicleLabel || cleanString(loadout.query || workbench.query || "Current job"),
     vin: cleanString(loadout.vin || workbench.vin),
     confidencePercent: Math.round(overall),
@@ -11392,6 +11546,11 @@ function buildFieldWorkflowSubscriber(workbench = {}, loadout = {}) {
     checklist,
     warnings,
   };
+  subscriber.verifiedPacket = buildVerifiedFieldPacket(workbench, loadout, choices, warnings, checklist);
+  subscriber.confidencePercent = subscriber.verifiedPacket.gate.score;
+  subscriber.confidenceLabel = subscriber.verifiedPacket.gate.label;
+  subscriber.bestMove = subscriber.verifiedPacket.gate.subscriberAction;
+  return subscriber;
 }
 
 async function buildFieldWorkflow(body = {}, store = { jobs: [] }) {
@@ -11417,6 +11576,7 @@ async function buildFieldWorkflow(body = {}, store = { jobs: [] }) {
     query: cleanString(body.q || body.query || loadout.query || workbench.query || ""),
     vin: cleanString(loadout.vin || workbench.vin || ""),
     vehicle: loadout.vehicle || workbench.vehicle || {},
+    verifiedPacket: subscriber.verifiedPacket,
     subscriber,
     loadout,
     owner: {
