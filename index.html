@@ -202,6 +202,11 @@
                 <button type="button" data-set-mode="owner">Owner</button>
               </div>
             </div>
+            <div class="start-guidance-strip" aria-label="Job flow">
+              <span>1. Start VIN/YMM</span>
+              <span>2. Follow field path</span>
+              <span>3. Save proof</span>
+            </div>
 
             <div class="start-job-grid">
               <form id="quickVinStartForm" class="start-job-card primary-start">
@@ -550,8 +555,8 @@
           <section class="panel wide loadout-panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">Field inventory</p>
-                <h3>Job Loadout</h3>
+                <p class="eyebrow">Field path</p>
+                <h3>What to do next</h3>
               </div>
               <div class="proof-vault-actions">
                 <button class="secondary-action small" type="button" id="loadoutUseCurrent">Use Current Job</button>
@@ -563,7 +568,7 @@
                 Job, VIN, vehicle, part, keyway, or programmer
                 <input name="loadoutQuery" placeholder="VIN, 2019 Ranger, LR# FRD068, HU101, Smart Pro" autocomplete="off" autocapitalize="characters" spellcheck="false" />
               </label>
-              <button class="primary-action" type="submit">Build Loadout</button>
+              <button class="primary-action" type="submit">Build Field Path</button>
             </form>
             <div class="form-status" id="loadoutStatus"></div>
             <div class="loadout-result" id="loadoutResult">

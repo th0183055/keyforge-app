@@ -340,8 +340,8 @@ const routeMeta = {
     title: "One packet. One next move.",
   },
   loadout: {
-    eyebrow: "Field inventory",
-    title: "What to bring.",
+    eyebrow: "Field path",
+    title: "What to do next.",
   },
   "part-history": {
     eyebrow: "Proof trail",
@@ -434,7 +434,7 @@ function pushRouteHash(id) {
 }
 
 function showView(id, options = {}) {
-  const { push = true, scroll = true } = options;
+  const { push = true, scroll = true, skipAutoLoad = false } = options;
   if (appMode === "subscriber" && isOwnerOnlyView(id)) id = "workbench";
   if (!routeExists(id)) id = "command";
   const previousViewId = activeViewId;
@@ -464,7 +464,7 @@ function showView(id, options = {}) {
   if (id === "coverage" && !latestCoverageDashboard) loadCoverageDashboard();
   if (id === "proof-vault" && !latestProofVault) loadProofVault();
   if (id === "workbench" && !latestWorkbench) loadJobWorkbench();
-  if (id === "loadout" && !latestJobLoadout) loadFieldWorkflow();
+  if (id === "loadout" && !latestJobLoadout && !skipAutoLoad) loadFieldWorkflow();
   if (id === "code-desk") {
     renderCodeDesk();
     if (!latestCodeDeskAutoBaseline) loadCodeDeskAutoBaseline();
@@ -741,6 +741,19 @@ function fallbackModelsForMake(make = "") {
   return fallbackModelsByMake[ymmMakeKey(make)] || [];
 }
 
+function mergeOptionValues(...groups) {
+  const seen = new Set();
+  const merged = [];
+  groups.flat().forEach((value) => {
+    const clean = cleanInput(value);
+    const key = clean.toUpperCase();
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    merged.push(clean);
+  });
+  return merged;
+}
+
 function fillYmmSelect(select, values = [], placeholder = "Select", selected = "") {
   if (!select) return;
   const cleanSelected = cleanInput(selected);
@@ -812,10 +825,11 @@ async function refreshYmmDropdownOptions(sourceForm = null, { clearModel = false
   try {
     const payload = await api(`/api/vehicle-options?${params.toString()}`, { timeoutMs: 6000, noStatus: true, noFallback: true });
     if (requestId !== vehicleOptionsRequestId) return;
+    const localModels = values.make ? fallbackModelsForMake(values.make) : [];
     latestVehicleOptions = {
-      years: payload.years?.length ? payload.years : fallbackVehicleOptions.years,
-      makes: payload.makes?.length ? payload.makes : fallbackVehicleOptions.makes,
-      models: payload.models?.length ? payload.models : values.make ? fallbackModelsForMake(values.make) : [],
+      years: mergeOptionValues(payload.years || [], fallbackVehicleOptions.years).sort((a, b) => Number(b) - Number(a)),
+      makes: mergeOptionValues(payload.makes || [], fallbackVehicleOptions.makes),
+      models: values.make ? mergeOptionValues(localModels, payload.models || []) : [],
     };
     vehicleOptionsCache.set(cacheKey, latestVehicleOptions);
     if (vehicleOptionsCache.size > 50) vehicleOptionsCache.delete(vehicleOptionsCache.keys().next().value);
@@ -914,8 +928,10 @@ async function startVinWalkthroughFromValue(value) {
   }
   if (vinForm?.elements.vin) vinForm.elements.vin.value = vin;
   if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = vin;
+  latestFieldWorkflow = null;
+  latestJobLoadout = null;
   setStartJobStatus(`Building field packet for ${vin}.`, "ready");
-  showView("loadout");
+  showView("loadout", { skipAutoLoad: true });
   await loadFieldWorkflow(vin);
 }
 
@@ -930,8 +946,10 @@ async function startYmmWalkthroughFromValues({ year = "", make = "", model = "" 
   setYmmDropdownValues({ year: cleanYear, make: cleanMake, model: cleanModel });
   const query = `${cleanYear} ${cleanMake} ${cleanModel}`;
   if (loadoutForm?.elements.loadoutQuery) loadoutForm.elements.loadoutQuery.value = query;
+  latestFieldWorkflow = null;
+  latestJobLoadout = null;
   setStartJobStatus(`Building field packet for ${query}.`, "ready");
-  showView("loadout");
+  showView("loadout", { skipAutoLoad: true });
   await loadFieldWorkflow({ year: cleanYear, make: cleanMake, model: cleanModel, q: query });
 }
 
@@ -10074,6 +10092,20 @@ function renderVerifiedEvidenceRow(row = {}) {
   `;
 }
 
+function renderVerifiedActionStep(index, verb, choice = {}, fallback = "Verify manually") {
+  return `
+    <article class="verified-action-step ${escapeHtml(loadoutTone(choice.confidencePercent))}">
+      <em>${escapeHtml(index)}</em>
+      <div>
+        <span>${escapeHtml(verb)}</span>
+        <strong>${escapeHtml(choice.title || "Step")}</strong>
+        <p>${escapeHtml(choice.value || fallback)}</p>
+      </div>
+      <small>${escapeHtml(choice.confidencePercent ? `${choice.confidencePercent}%` : "Verify")}</small>
+    </article>
+  `;
+}
+
 function renderVerifiedFieldPacket(payload = {}) {
   const subscriber = payload.subscriber || {};
   const packet = payload.verifiedPacket || subscriber.verifiedPacket;
@@ -10095,15 +10127,16 @@ function renderVerifiedFieldPacket(payload = {}) {
   }
   const gate = packet.gate || {};
   const best = packet.best || {};
-  const choices = [best.vehicle, best.primary, best.programmer, best.lishi].filter(Boolean);
   const checklist = packet.checklist || [];
   const warnings = packet.warnings || [];
   const evidence = packet.evidence || [];
+  const firstWarning = warnings[0] || "";
+  const quickChecks = checklist.slice(0, 3);
   return `
     <section class="verified-field-packet ${escapeHtml(gate.tone || loadoutTone(gate.score))}">
       <div class="verified-packet-head">
         <div>
-          <p class="eyebrow">Verified Field Packet</p>
+          <p class="eyebrow">Field Path</p>
           <h3>${escapeHtml(packet.title || payload.query || "Current job")}</h3>
           ${packet.vin ? `<span>${escapeHtml(packet.vin)}</span>` : ""}
         </div>
@@ -10112,39 +10145,37 @@ function renderVerifiedFieldPacket(payload = {}) {
           <small>${escapeHtml(gate.label || "Packet")}</small>
         </strong>
       </div>
-      <div class="verified-choice-grid">
-        ${choices.map(renderVerifiedFieldChoice).join("")}
+      <div class="verified-next-callout">
+        <span>Do next</span>
+        <strong>${escapeHtml(packet.nextStep || gate.subscriberAction || "Verify packet")}</strong>
+        ${firstWarning ? `<small>${escapeHtml(firstWarning)}</small>` : ""}
       </div>
-      <div class="verified-next-row">
-        <article>
-          <span>Next</span>
-          <strong>${escapeHtml(packet.nextStep || gate.subscriberAction || "Verify packet")}</strong>
-        </article>
-        <article>
-          <span>Status</span>
-          <strong>${escapeHtml(gate.subscriberAction || "Use as a planning aid.")}</strong>
-        </article>
+      <div class="verified-action-path">
+        ${renderVerifiedActionStep(1, "Confirm", best.vehicle, "Verify vehicle")}
+        ${renderVerifiedActionStep(2, "Bring", best.primary, "Verify primary part")}
+        ${renderVerifiedActionStep(3, "Program", best.programmer, "Verify programmer")}
+        ${renderVerifiedActionStep(4, "Decode", best.lishi, "Verify Lishi")}
       </div>
       ${
-        checklist.length
-          ? `<div class="verified-check-strip">${checklist.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+        quickChecks.length
+          ? `<div class="verified-check-strip">${quickChecks.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
           : ""
       }
       ${
-        warnings.length
-          ? `<div class="verified-warning-strip">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+        warnings.length > 1
+          ? `<details class="verified-warning-details"><summary>More checks</summary><div>${warnings.slice(1).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div></details>`
           : ""
       }
-      <div class="field-packet-feedback" data-owner-only>
-        <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong Part</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong Programmer</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
-        <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing Info</button>
-      </div>
-      <details class="verified-owner-evidence" data-owner-only>
-        <summary>Owner evidence</summary>
-        <div>${evidence.map(renderVerifiedEvidenceRow).join("")}</div>
+      <details class="verified-owner-tools" data-owner-only>
+        <summary>Owner tools</summary>
+        <div class="field-packet-feedback">
+          <button class="primary-action small" type="button" data-field-packet-feedback="worked">Worked</button>
+          <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-part" data-field-packet-section="primary">Wrong Part</button>
+          <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-programmer" data-field-packet-section="programmer">Wrong Programmer</button>
+          <button class="secondary-action small" type="button" data-field-packet-feedback="wrong-lishi" data-field-packet-section="lishi">Wrong Lishi</button>
+          <button class="secondary-action small" type="button" data-field-packet-feedback="missing-item">Missing Info</button>
+        </div>
+        <div class="verified-owner-evidence-grid">${evidence.map(renderVerifiedEvidenceRow).join("")}</div>
       </details>
     </section>
   `;
@@ -10203,6 +10234,24 @@ function fieldWorkflowPayload(input = loadoutQueryFromForm()) {
   };
 }
 
+function renderFieldWorkflowLoading(payloadBody = {}) {
+  if (!loadoutResult) return;
+  const vehicleText = [payloadBody.vehicle?.year, payloadBody.vehicle?.make, payloadBody.vehicle?.model].filter(Boolean).join(" ");
+  const subject = cleanInput(payloadBody.vin || vehicleText || payloadBody.query || "Current job");
+  loadoutResult.innerHTML = `
+    <section class="field-path-loading">
+      <p class="eyebrow">Building field path</p>
+      <h3>${escapeHtml(subject)}</h3>
+      <div>
+        <span class="active">1. Match vehicle</span>
+        <span>2. Pick part</span>
+        <span>3. Pick programmer</span>
+        <span>4. Confirm Lishi</span>
+      </div>
+    </section>
+  `;
+}
+
 async function loadFieldWorkflow(input = loadoutQueryFromForm()) {
   if (!loadoutResult) return;
   const payloadBody = fieldWorkflowPayload(input);
@@ -10216,6 +10265,7 @@ async function loadFieldWorkflow(input = loadoutQueryFromForm()) {
   }
   try {
     if (loadoutStatus) loadoutStatus.textContent = "Building the highest-confidence field decision...";
+    renderFieldWorkflowLoading(payloadBody);
     const payload = await api("/api/field-workflow", {
       method: "POST",
       body: JSON.stringify(payloadBody),

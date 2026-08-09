@@ -11364,17 +11364,23 @@ function verifiedChoiceIsReady(choice = {}) {
   return Boolean(value && !/verify|not proven|no proven|not confirmed/i.test(value) && Number(choice.confidencePercent || 0) >= 70);
 }
 
+function verifiedChoiceHasUsableValue(choice = {}) {
+  const value = cleanString(choice.value);
+  return Boolean(value && !/verify manually|not proven|no proven|not confirmed/i.test(value));
+}
+
 function verifiedFieldGate(criticalChoices = [], warnings = [], proof = {}) {
   const scores = criticalChoices.map((choice) => clampConfidence(choice.confidencePercent));
   const lowest = scores.length ? Math.min(...scores) : 0;
   const average = scores.length ? Math.round(scores.reduce((total, score) => total + score, 0) / scores.length) : 0;
   const missing = criticalChoices.filter((choice) => !verifiedChoiceIsReady(choice));
+  const missingValues = criticalChoices.filter((choice) => !verifiedChoiceHasUsableValue(choice));
   const exactJobs = Number(proof.exactJobs || 0);
   const relatedJobs = Number(proof.relatedJobs || 0);
   const proofBonus = exactJobs ? 8 : relatedJobs ? 4 : 0;
   const warningPenalty = warnings.length ? Math.min(warnings.length * 5, 15) : 0;
   const score = clampConfidence(Math.min(average + proofBonus - warningPenalty, lowest + 18));
-  if (missing.length >= 2 || score < 58) {
+  if (missingValues.length >= 2 || (score < 58 && missingValues.length)) {
     return {
       label: "Do not trust yet",
       tone: "low",
@@ -11431,8 +11437,11 @@ function buildVerifiedFieldPacket(workbench = {}, loadout = {}, choices = [], wa
   const critical = [vehicle, primary, programmer, lishi];
   const gate = verifiedFieldGate(critical, warnings, proof);
   const missing = critical.filter((choice) => !verifiedChoiceIsReady(choice));
+  const hasVehicleOnlyStart = !cleanString(loadout.vin || workbench.vin) && Boolean(loadout.vehicle?.year || loadout.vehicle?.make || loadout.vehicle?.model);
   const nextStep = cleanString(
-    missing[0]
+    hasVehicleOnlyStart
+      ? "Confirm VIN or keyway"
+      : missing[0]
       ? `Confirm ${missing[0].title}`
       : gate.score >= 90
         ? "Authorize, cut/program, save proof"
