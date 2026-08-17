@@ -372,11 +372,11 @@ const routeMeta = {
   },
   "source-hub": {
     eyebrow: "Owner source setup",
-    title: "Connect Google, QUO, and service apps.",
+    title: "Connect Google, Gmail, QUO, and service apps.",
   },
   dispatch: {
     eyebrow: "Dispatch Intelligence",
-    title: "Calendar, QUO, and field packets.",
+    title: "Calendar, Email, QUO, and field packets.",
   },
   coverage: {
     eyebrow: "Observed proof",
@@ -6442,11 +6442,13 @@ function renderGoogleWorkspace(payload = latestGoogleWorkspace) {
   const warnings = payload.warnings || [];
   const profile = payload.profile || {};
   const calendar = payload.calendar || {};
+  const gmail = payload.gmail || {};
   const sheets = payload.sheets || {};
   const drive = payload.drive || {};
   const cards = [
     ["Connection", payload.unavailable ? "Waiting" : payload.connected ? "Connected" : payload.configured ? "Ready" : "Setup", profile.email || "Google Workspace"],
     ["Calendar", calendar.events || 0, calendar.lastSyncAt ? `Synced ${formatWorkspaceDate(calendar.lastSyncAt)}` : payload.connected ? "Ready to preview" : "Connect first"],
+    ["Gmail", gmail.messages || 0, gmail.permissionGranted ? `Lead intake${gmail.lastSyncAt ? ` ${formatWorkspaceDate(gmail.lastSyncAt)}` : ""}` : payload.connected ? "Reconnect for intake" : "Connect first"],
     ["Sheets", sheets.sheetStats?.length || 0, sheets.lastSyncAt ? `Synced ${formatWorkspaceDate(sheets.lastSyncAt)}` : "Field Data Bridge"],
     ["Drive", drive.jobFolders || 0, drive.parentFolderConfigured ? "Parent folder set" : "Job folders ready"],
   ];
@@ -6478,13 +6480,18 @@ function renderGoogleWorkspace(payload = latestGoogleWorkspace) {
       <article>
         <span>Calendar</span>
         <strong>${escapeHtml(payload.calendarId || "primary")}</strong>
-        <p>${escapeHtml(calendar.sample?.[0]?.summary || "Preview upcoming jobs from the connected calendar.")}</p>
+        <p>${escapeHtml((payload.revenueCalendarIds || []).slice(0, 6).join(", ") || calendar.sample?.[0]?.summary || "Preview upcoming jobs from the connected calendar.")}</p>
+      </article>
+      <article>
+        <span>Gmail intake</span>
+        <strong>${escapeHtml(gmail.permissionGranted ? "Active" : "Needs reconnect")}</strong>
+        <p>${escapeHtml(gmail.setupMessage || (gmail.senders || []).join(", ") || "info@gometrolock.com and tim@wekeycars.com feed Dispatch.")}</p>
       </article>
     </section>
     ${
       warnings.length
         ? `<section class="storage-warning-list">${warnings.map((warning) => `<article>${escapeHtml(warning)}</article>`).join("")}</section>`
-        : `<article class="assistant-card storage-ok-card"><strong>Workspace bridge ready</strong><p>Calendar, Sheets, and Drive hooks are available for owner-side workflow.</p></article>`
+        : `<article class="assistant-card storage-ok-card"><strong>Workspace bridge ready</strong><p>Calendar, Gmail, Sheets, and Drive hooks are available for owner-side workflow.</p></article>`
     }
   `;
 }
@@ -6696,7 +6703,7 @@ async function scheduleJobFromStart() {
       vin: payload.vin,
       vehicle: { year: payload.year, make: payload.make, model: payload.model },
       vehicleLabel: result.job?.vehicle || [payload.year, payload.make, payload.model].filter(Boolean).join(" "),
-      nextStep: result.event?.htmlLink ? "Open dispatch packet" : "Sync Calendar when ready",
+      nextStep: result.event?.htmlLink ? "Open dispatch packet" : "Sync Google when ready",
       source: result.event?.htmlLink ? "Google Calendar" : "TimLock schedule",
       jobId: result.job?.id || payload.id,
       confidencePercent: result.event?.htmlLink ? 80 : 55,
@@ -7152,6 +7159,9 @@ function jobInboxPublicItem(item = {}) {
     headline: cleanInput(item.headline || preview.title || item.vehicleLabel || item.title || item.service || "Dispatch job"),
     subline: cleanInput(item.subline || [item.customer, item.service, item.location].filter(Boolean).join(" | ")),
     packetLine: cleanInput(item.packetLine || [preview.primary, preview.programmer, preview.lishi].filter(Boolean).join(" | ")),
+    revenuePriority: Number(item.revenuePriority || item.revenueScore || item.revenue?.score || 0),
+    moneyAmount: Number(item.moneyAmount || item.revenue?.amount || 0),
+    revenueLabel: cleanInput(item.revenueLabel || item.revenue?.label || ""),
     actionLabel: item.actionLabel || (fieldReady ? "Open Packet" : "Review"),
     sortTime: Number(item.sortTime || Date.parse(item.start || item.scheduledAt || item.schedule || "")) || Number.MAX_SAFE_INTEGER,
   };
@@ -7159,7 +7169,9 @@ function jobInboxPublicItem(item = {}) {
 
 function buildClientJobInboxFromDispatch(payload = {}) {
   const items = (payload.queue || []).map(jobInboxPublicItem).sort((a, b) => {
-    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+    if (a.fieldReady !== b.fieldReady) return a.fieldReady ? -1 : 1;
+    if (Number(a.revenuePriority || 0) !== Number(b.revenuePriority || 0)) return Number(b.revenuePriority || 0) - Number(a.revenuePriority || 0);
+    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? 1 : -1;
     return (a.sortTime || Number.MAX_SAFE_INTEGER) - (b.sortTime || Number.MAX_SAFE_INTEGER);
   });
   const today = items.filter((item) => item.bucket === "overdue" || item.bucket === "today");
@@ -7208,7 +7220,7 @@ function localDispatchFallbackPayload(error = null) {
     generatedAt: new Date().toISOString(),
     days: 14,
     google: latestGoogleWorkspace || {},
-    sources: { calendar: 0, intake: 0, scheduled: queue.length },
+    sources: { calendar: 0, email: 0, intake: 0, scheduled: queue.length },
     summary: {
       total: queue.length,
       connectedCalendar: Boolean(latestGoogleWorkspace?.connected),
@@ -7252,6 +7264,7 @@ function dispatchFormPayload(overrides = {}) {
 
 function dispatchSourceBadge(source = "") {
   if (source === "google-calendar") return "Calendar";
+  if (source === "gmail") return "Email";
   if (source === "service-intake") return "QUO";
   if (source === "timlock-schedule") return "TimLock";
   return "Dispatch";
@@ -7288,6 +7301,7 @@ function renderJobInboxItem(item = {}) {
   const source = dispatchSourceBadge(item.source);
   const status = item.fieldReady ? "Ready" : item.needsAttention ? "Verify" : "Queued";
   const tone = item.fieldReady ? "ready" : item.needsAttention ? "warn" : "queued";
+  const money = Number(item.moneyAmount || item.revenue?.amount || 0);
   return `
     <button class="job-inbox-card ${escapeHtml(tone)}" type="button" data-job-inbox-open="${escapeHtml(item.id)}">
       <span>${escapeHtml([when, source, status].filter(Boolean).join(" | "))}</span>
@@ -7295,6 +7309,7 @@ function renderJobInboxItem(item = {}) {
       <small>${escapeHtml(item.subline || item.customer || item.location || item.service || "Field job")}</small>
       ${item.packetLine ? `<em>${escapeHtml(item.packetLine)}</em>` : ""}
       ${appMode === "owner" && item.vin ? `<small class="owner-inline">${escapeHtml(item.vin)}</small>` : ""}
+      ${money ? `<small class="job-inbox-money">${escapeHtml(`$${money.toFixed(2)} | ${item.revenueLabel || "Money move"}`)}</small>` : ""}
       <b>${escapeHtml(item.actionLabel || "Open Packet")}</b>
     </button>
   `;
@@ -7313,7 +7328,7 @@ function renderJobInboxSection(section = {}) {
         ${
           items.length
             ? items.map(renderJobInboxItem).join("")
-            : `<article class="job-inbox-empty"><strong>No jobs due today</strong><span>Schedule a job, sync Calendar, or import QUO/service app work.</span></article>`
+            : `<article class="job-inbox-empty"><strong>No jobs due today</strong><span>Schedule a job, sync Google, or import QUO/service app work.</span></article>`
         }
       </div>
     </section>
@@ -7340,14 +7355,14 @@ function renderJobInbox(payload = {}) {
     const sourceCounts = payload.sources || {};
     const cache = payload.packetCache || summary.packetCache || {};
     const cacheText = cache.size ? ` | ${cache.size} cached` : "";
-    jobInboxStatus.textContent = `${summary.total || 0} jobs | ${sourceCounts.calendar || 0} Calendar | ${sourceCounts.intake || 0} QUO | ${sourceCounts.scheduled || 0} TimLock${cacheText}`;
+    jobInboxStatus.textContent = `${summary.total || 0} jobs | ${sourceCounts.calendar || 0} Calendar | ${sourceCounts.email || 0} Email | ${sourceCounts.intake || 0} QUO | ${sourceCounts.scheduled || 0} TimLock${cacheText}`;
   }
 }
 
 async function loadJobInbox(options = {}) {
   if (!jobInboxResult) return null;
   try {
-    if (jobInboxStatus && !options.quiet) jobInboxStatus.textContent = options.syncCalendar ? "Syncing Calendar and building packets..." : "Building job inbox...";
+    if (jobInboxStatus && !options.quiet) jobInboxStatus.textContent = options.syncCalendar ? "Syncing Google and building packets..." : "Building job inbox...";
     const payload = await api("/api/job-inbox", {
       method: "POST",
       body: JSON.stringify({
@@ -7438,7 +7453,7 @@ function localCommandOsFallbackPayload(error = null) {
     generatedAt: new Date().toISOString(),
     role: appMode,
     headline: nextJob ? `Open ${nextJob.headline || nextJob.title || "saved job"}` : "Schedule or sync the first job",
-    nextMove: nextJob ? "Open the local packet while the server catches up." : "Schedule a job or retry Google/QUO sync.",
+    nextMove: nextJob ? "Open the local packet while the server catches up." : "Schedule a job or retry Google/source sync.",
     readiness: {
       score: nextJob ? 55 : 35,
       label: "Local fallback",
@@ -7494,9 +7509,9 @@ function renderCommandOs(payload = {}) {
         <div>
           <p class="eyebrow">Next</p>
           <strong>${escapeHtml(nextJob?.title || "No job selected")}</strong>
-          <span>${escapeHtml(nextJob?.packetLine || nextJob?.subline || "Sync Calendar, import QUO/source jobs, or schedule a job.")}</span>
+          <span>${escapeHtml(nextJob?.packetLine || nextJob?.subline || "Sync Google, import source jobs, or schedule a job.")}</span>
         </div>
-        ${nextJob ? `<button class="primary-action small" type="button" data-command-os-action="packet" data-command-os-id="${escapeHtml(nextJob.id)}">${escapeHtml(nextJob.fieldReady ? "Open Packet" : "Review")}</button>` : `<button class="primary-action small" type="button" data-command-os-action="sync">Sync Calendar</button>`}
+        ${nextJob ? `<button class="primary-action small" type="button" data-command-os-action="packet" data-command-os-id="${escapeHtml(nextJob.id)}">${escapeHtml(nextJob.fieldReady ? "Open Packet" : "Review")}</button>` : `<button class="primary-action small" type="button" data-command-os-action="sync">Sync Google</button>`}
       </article>
       <article class="command-os-lane">
         <p class="eyebrow">Attention</p>
@@ -7656,7 +7671,7 @@ function renderJobPacketDrawer(payload = {}, requestedId = "") {
     jobPacketDrawerBody.innerHTML = `
       <article class="job-packet-empty">
         <strong>No job selected</strong>
-        <span>Sync Calendar, import QUO, or schedule a TimLock job.</span>
+        <span>Sync Google, import source jobs, or schedule a TimLock job.</span>
       </article>
     `;
     if (jobPacketDrawerStatus) jobPacketDrawerStatus.textContent = "No packet selected.";
@@ -7676,7 +7691,7 @@ function renderJobPacketDrawer(payload = {}, requestedId = "") {
   const lishi = jobPacketChoiceValue(choices, "lishi", packet.lishi || selected.packetPreview?.lishi);
   const meta = [formatWorkspaceDate(selected.start), selected.customer, selected.phone, selected.location, selected.vin].filter(Boolean);
   const canWriteCalendar = selected.hasCalendarEvent || selected.calendarEventId || selected.source === "google-calendar";
-  const canPromote = selected.source === "service-intake" || (selected.source === "timlock-schedule" && !selected.hasCalendarEvent);
+  const canPromote = selected.source === "service-intake" || selected.source === "gmail" || (selected.source === "timlock-schedule" && !selected.hasCalendarEvent);
   const ownerButtons =
     appMode === "owner"
       ? `
@@ -7781,15 +7796,24 @@ async function handleJobPacketAction(action = "", id = "", button = null) {
 
 function renderDispatchQueueItem(item = {}, selectedId = "") {
   const active = item.id === selectedId;
-  const when = item.start ? formatWorkspaceDate(item.start) : "Unscheduled";
+  const when = item.start ? formatWorkspaceDate(item.start) : item.createdAt ? `Email ${formatWorkspaceDate(item.createdAt)}` : "Unscheduled";
   const meta = [when, item.customer, item.location].filter(Boolean).join(" | ");
   const preview = item.packetPreview || {};
   const packetLine = [preview.primary, preview.programmer, preview.lishi].filter(Boolean).join(" | ");
+  const money = Number(item.moneyAmount || item.revenue?.amount || 0);
+  const revenue = item.revenueLabel || item.revenue?.label || "";
+  const sourceLine = [
+    dispatchSourceBadge(item.source),
+    preview.confidencePercent ? `${preview.confidencePercent}%` : "",
+    item.revenueScore ? `${item.revenueScore} score` : "",
+    money ? `$${money.toFixed(2)}` : "",
+  ].filter(Boolean).join(" | ");
   return `
     <button class="dispatch-queue-card ${active ? "active" : ""}" type="button" data-dispatch-select="${escapeHtml(item.id)}">
-      <span>${escapeHtml(dispatchSourceBadge(item.source))}${preview.confidencePercent ? ` | ${escapeHtml(preview.confidencePercent)}%` : ""}</span>
+      <span>${escapeHtml(sourceLine)}</span>
       <strong>${escapeHtml(dispatchItemTitle(item))}</strong>
       <small>${escapeHtml(meta || item.service || "Review job")}</small>
+      ${revenue ? `<small class="dispatch-revenue-line">${escapeHtml(revenue)}</small>` : ""}
       ${packetLine ? `<small class="dispatch-queue-packet">${escapeHtml(packetLine)}</small>` : ""}
       ${item.vin ? `<em>${escapeHtml(item.vin)}</em>` : item.packetStatus === "queued" ? `<em>Packet queued</em>` : ""}
     </button>
@@ -7811,7 +7835,7 @@ function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
       <section class="dispatch-packet-card empty">
         <p class="eyebrow">AI packet</p>
         <h3>No dispatch item selected</h3>
-        <p>Sync Google Calendar, import QUO/service jobs, or create a TimLock schedule from the start screen.</p>
+        <p>Sync Google, import QUO/service jobs, or create a TimLock schedule from the start screen.</p>
       </section>
     `;
   }
@@ -7865,6 +7889,29 @@ function renderDispatchPacket(packet = {}, selected = {}, payload = {}) {
   `;
 }
 
+function renderDispatchRevenueCommand(payload = {}) {
+  const revenue = payload.revenue || {};
+  const best = revenue.best || {};
+  const total = Number(revenue.totalPotential || 0);
+  const gmail = payload.google?.gmail || {};
+  const missing = gmail.permissionGranted ? "" : gmail.setupMessage || (payload.google?.connected ? "Reconnect Google once for Gmail intake." : "Connect Google for email leads.");
+  return `
+    <section class="dispatch-revenue-command">
+      <div>
+        <p class="eyebrow">Two-week money command</p>
+        <h3>${escapeHtml(best.title || "Sync Google to build the money queue")}</h3>
+        <p>${escapeHtml(best.id ? [best.revenueLabel, best.customer, best.location].filter(Boolean).join(" | ") : "Calendar, Gmail, QUO, and TimLock land here as one ranked dispatch board.")}</p>
+      </div>
+      <div class="dispatch-revenue-stats">
+        <article><span>Visible money</span><strong>${escapeHtml(total ? `$${total.toFixed(2)}` : "$0.00")}</strong></article>
+        <article><span>Best score</span><strong>${escapeHtml(best.revenueScore || 0)}</strong></article>
+        <article><span>Email</span><strong>${escapeHtml(payload.sources?.email || 0)}</strong></article>
+      </div>
+      ${missing ? `<small>${escapeHtml(missing)}</small>` : ""}
+    </section>
+  `;
+}
+
 function renderDispatchIntelligence(payload = {}) {
   if (!dispatchIntelligenceResult) return;
   latestDispatchIntelligence = payload;
@@ -7872,9 +7919,11 @@ function renderDispatchIntelligence(payload = {}) {
   const selected = payload.selected || queue.find((item) => item.id === payload.summary?.selectedId) || {};
   const sources = payload.sources || {};
   dispatchIntelligenceResult.innerHTML = `
+    ${renderDispatchRevenueCommand(payload)}
     <section class="dispatch-summary-grid">
       <article class="metric"><span>Queue</span><strong>${escapeHtml(payload.summary?.total || queue.length || 0)}</strong><p>${escapeHtml(`${payload.days || 14} day window`)}</p></article>
       <article class="metric"><span>Calendar</span><strong>${escapeHtml(sources.calendar || 0)}</strong><p>${escapeHtml(payload.google?.connected ? "Google connected" : "Connect Google")}</p></article>
+      <article class="metric"><span>Email</span><strong>${escapeHtml(sources.email || 0)}</strong><p>${escapeHtml(payload.google?.gmail?.permissionGranted ? "Gmail intake" : "Reconnect Google")}</p></article>
       <article class="metric"><span>QUO</span><strong>${escapeHtml(sources.intake || 0)}</strong><p>Service intake</p></article>
       <article class="metric"><span>TimLock</span><strong>${escapeHtml(sources.scheduled || 0)}</strong><p>Scheduled jobs</p></article>
     </section>
@@ -7887,7 +7936,7 @@ function renderDispatchIntelligence(payload = {}) {
           </div>
         </div>
         <div class="dispatch-queue-list">
-          ${queue.length ? queue.map((item) => renderDispatchQueueItem(item, selected.id)).join("") : `<article class="assistant-card"><strong>No jobs in queue</strong><p>Sync Calendar, import QUO, or schedule a job from the start screen.</p></article>`}
+          ${queue.length ? queue.map((item) => renderDispatchQueueItem(item, selected.id)).join("") : `<article class="assistant-card"><strong>No jobs in queue</strong><p>Sync Google, import QUO, or schedule a job from the start screen.</p></article>`}
         </div>
       </div>
       ${renderDispatchPacket(payload.packet, selected, payload)}
@@ -7901,7 +7950,7 @@ async function loadDispatchIntelligence(options = {}) {
   const payload = dispatchFormPayload(options);
   try {
     if (dispatchIntelligenceStatus && !options.quiet) {
-      dispatchIntelligenceStatus.textContent = payload.syncCalendar ? "Syncing Google Calendar and building dispatch packets..." : "Building Dispatch Intelligence...";
+      dispatchIntelligenceStatus.textContent = payload.syncCalendar ? "Syncing Google Calendar, Gmail, and building dispatch packets..." : "Building Dispatch Intelligence...";
     }
     const result = await api("/api/dispatch-intelligence", {
       method: "POST",
@@ -7914,7 +7963,7 @@ async function loadDispatchIntelligence(options = {}) {
     latestGoogleWorkspace = result.google || latestGoogleWorkspace;
     if (dispatchIntelligenceStatus && !options.quiet) {
       const count = result.summary?.total || result.queue?.length || 0;
-      dispatchIntelligenceStatus.textContent = `Dispatch ready: ${count} job${count === 1 ? "" : "s"} across Calendar, QUO, and TimLock.`;
+      dispatchIntelligenceStatus.textContent = `Dispatch ready: ${count} job${count === 1 ? "" : "s"} across Calendar, Email, QUO, and TimLock.`;
     }
     return result;
   } catch (error) {

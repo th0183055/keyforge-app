@@ -114,6 +114,10 @@ const googleWorkspaceEmpty = {
     lastSyncAt: "",
     events: [],
   },
+  gmail: {
+    lastSyncAt: "",
+    messages: [],
+  },
   drive: {
     jobFolders: [],
   },
@@ -4305,6 +4309,7 @@ function normalizeGoogleWorkspaceStore(workspace = {}) {
   const empty = googleWorkspaceCloneEmpty();
   if (!workspace || typeof workspace !== "object") return empty;
   const calendar = workspace.calendar && typeof workspace.calendar === "object" ? workspace.calendar : {};
+  const gmail = workspace.gmail && typeof workspace.gmail === "object" ? workspace.gmail : {};
   const drive = workspace.drive && typeof workspace.drive === "object" ? workspace.drive : {};
   const sheets = workspace.sheets && typeof workspace.sheets === "object" ? workspace.sheets : {};
   return {
@@ -4317,6 +4322,11 @@ function normalizeGoogleWorkspaceStore(workspace = {}) {
       ...empty.calendar,
       ...calendar,
       events: Array.isArray(calendar.events) ? calendar.events : [],
+    },
+    gmail: {
+      ...empty.gmail,
+      ...gmail,
+      messages: Array.isArray(gmail.messages) ? gmail.messages : [],
     },
     drive: {
       ...empty.drive,
@@ -4889,15 +4899,19 @@ const googleOAuthAuthorizeUrl = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleOAuthTokenUrl = "https://oauth2.googleapis.com/token";
 const googleUserInfoUrl = "https://openidconnect.googleapis.com/v1/userinfo";
 const googleCalendarWriteTimeoutMs = Math.max(2500, Math.min(Number(process.env.GOOGLE_CALENDAR_WRITE_TIMEOUT_MS) || 6500, 15000));
+const googleGmailReadonlyScope = "https://www.googleapis.com/auth/gmail.readonly";
 const googleDefaultScopes = [
   "openid",
   "email",
   "profile",
   "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar.events",
+  googleGmailReadonlyScope,
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/spreadsheets.readonly",
 ];
+const defaultRevenueCalendarIds = ["tim@wekeycars.com", "larry@wekeycars.com", "gage@wekeycars.com", "jason@wekeycars.com", "kurt@wekeycars.com", "kurt@metrolockdm.com"];
+const defaultRevenueEmailSenders = ["info@gometrolock.com", "tim@wekeycars.com"];
 
 function requestOrigin(request) {
   const headers = request?.headers || {};
@@ -4909,6 +4923,30 @@ function requestOrigin(request) {
     cleanString(process.env.PUBLIC_URL).replace(/:\/\/.*/, "") ||
     (host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https");
   return host ? `${proto}://${host}` : "http://127.0.0.1:3000";
+}
+
+function envList(value = "") {
+  return uniqueCleanValues(cleanString(value).split(/[,\n]+/));
+}
+
+function googleRevenueCalendarIds(primaryCalendarId = "") {
+  return uniqueCleanValues([
+    primaryCalendarId,
+    ...envList(process.env.GOOGLE_WORK_CALENDAR_IDS || process.env.GOOGLE_REVENUE_CALENDAR_IDS),
+    ...defaultRevenueCalendarIds,
+  ]);
+}
+
+function googleRevenueEmailSenders() {
+  return uniqueCleanValues([
+    ...envList(process.env.GOOGLE_INTAKE_EMAIL_SENDERS || process.env.GOOGLE_REVENUE_EMAIL_SENDERS),
+    ...defaultRevenueEmailSenders,
+  ]);
+}
+
+function googleWorkspaceHasScope(workspace = {}, scope = "") {
+  const scopes = new Set((workspace.scopes || []).map(cleanString));
+  return scopes.has(scope) || scopes.has("https://mail.google.com/");
 }
 
 function googleClientConfig(request) {
@@ -4931,6 +4969,8 @@ function googleClientConfig(request) {
     redirectUri,
     scopes: configuredScopes.length ? uniqueCleanValues(["openid", "email", "profile", ...configuredScopes]) : googleDefaultScopes,
     calendarId: cleanString(process.env.GOOGLE_CALENDAR_ID) || "primary",
+    revenueCalendarIds: googleRevenueCalendarIds(cleanString(process.env.GOOGLE_CALENDAR_ID) || "primary"),
+    revenueEmailSenders: googleRevenueEmailSenders(),
     driveParentFolderId: cleanString(process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID),
     warnings,
   };
@@ -4954,6 +4994,7 @@ function googleWorkspacePublicStatus(store = {}, request = null) {
   const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
   const config = googleClientConfig(request);
   const connected = googleWorkspaceConnected(workspace);
+  const gmailPermission = googleWorkspaceHasScope(workspace, googleGmailReadonlyScope);
   return {
     generatedAt: new Date().toISOString(),
     configured: config.configured,
@@ -4961,6 +5002,8 @@ function googleWorkspacePublicStatus(store = {}, request = null) {
     profile: googlePublicProfile(workspace.profile),
     scopes: workspace.scopes,
     calendarId: config.calendarId,
+    revenueCalendarIds: config.revenueCalendarIds,
+    revenueEmailSenders: config.revenueEmailSenders,
     redirectUri: config.redirectUri,
     warnings: config.warnings,
     calendar: {
@@ -4968,6 +5011,17 @@ function googleWorkspacePublicStatus(store = {}, request = null) {
       lastSyncAt: workspace.calendar.lastSyncAt || "",
       events: workspace.calendar.events.length,
       sample: workspace.calendar.events.slice(0, 8),
+      syncErrors: Array.isArray(workspace.calendar.syncErrors) ? workspace.calendar.syncErrors : [],
+    },
+    gmail: {
+      connected,
+      permissionGranted: gmailPermission,
+      lastSyncAt: workspace.gmail.lastSyncAt || "",
+      lastError: workspace.gmail.lastError || "",
+      messages: workspace.gmail.messages.length,
+      sample: workspace.gmail.messages.slice(0, 8),
+      senders: config.revenueEmailSenders,
+      setupMessage: connected && !gmailPermission ? "Reconnect Google once to grant Gmail read-only intake." : "",
     },
     drive: {
       connected,
@@ -5249,19 +5303,21 @@ async function handleGoogleOAuthCallback(request, response) {
   }
 }
 
-function googleCalendarEventPublic(event = {}) {
+function googleCalendarEventPublic(event = {}, meta = {}) {
   return {
     id: cleanString(event.id),
+    calendarId: cleanString(meta.calendarId || event.calendarId),
+    calendarLabel: cleanString(meta.calendarLabel || event.calendarLabel || meta.calendarId),
     summary: cleanString(event.summary || "(No title)"),
-    start: cleanString(event.start?.dateTime || event.start?.date),
-    end: cleanString(event.end?.dateTime || event.end?.date),
+    start: cleanString(event.start?.dateTime || event.start?.date || event.start),
+    end: cleanString(event.end?.dateTime || event.end?.date || event.end),
     location: cleanString(event.location),
     status: cleanString(event.status),
     htmlLink: cleanString(event.htmlLink),
     description: cleanString(event.description).slice(0, 8000),
-    timlockSignature: cleanString(event.extendedProperties?.private?.timlockSignature),
-    timlockJobId: cleanString(event.extendedProperties?.private?.timlockJobId),
-    source: cleanString(event.extendedProperties?.private?.timlockSource),
+    timlockSignature: cleanString(event.extendedProperties?.private?.timlockSignature || event.timlockSignature),
+    timlockJobId: cleanString(event.extendedProperties?.private?.timlockJobId || event.timlockJobId),
+    source: cleanString(event.extendedProperties?.private?.timlockSource || event.source),
   };
 }
 
@@ -5349,7 +5405,9 @@ function replaceCachedGoogleCalendarEvent(store = {}, event = {}) {
   const publicEvent = googleCalendarEventPublic(event);
   workspace.calendar.events = [
     publicEvent,
-    ...(workspace.calendar.events || []).filter((item) => cleanString(item.id) !== publicEvent.id),
+    ...(workspace.calendar.events || []).filter(
+      (item) => cleanString(item.id) !== publicEvent.id || cleanString(item.calendarId) !== cleanString(publicEvent.calendarId),
+    ),
   ].filter((item) => item.id || item.summary).slice(0, 500);
   workspace.calendar.lastSyncAt = workspace.calendar.lastSyncAt || new Date().toISOString();
   workspace.updatedAt = new Date().toISOString();
@@ -5362,19 +5420,33 @@ async function syncGoogleCalendarEvents(request, store, options = {}) {
   const days = Math.max(1, Math.min(90, Number(options.days || 14)));
   const timeMin = new Date();
   const timeMax = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-  const apiUrl = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events`);
-  apiUrl.searchParams.set("timeMin", timeMin.toISOString());
-  apiUrl.searchParams.set("timeMax", timeMax.toISOString());
-  apiUrl.searchParams.set("singleEvents", "true");
-  apiUrl.searchParams.set("orderBy", "startTime");
-  apiUrl.searchParams.set("maxResults", String(Math.max(10, Math.min(250, Number(options.limit || 80)))));
-  const payload = await googleApiJson(store, request, apiUrl);
-  const events = (payload.items || []).map(googleCalendarEventPublic).filter((event) => event.id || event.summary);
+  const requestedCalendars = uniqueCleanValues([
+    ...(Array.isArray(options.calendarIds) ? options.calendarIds : envList(options.calendarIds)),
+    ...(options.allWorkCalendars === false ? [config.calendarId] : config.revenueCalendarIds),
+  ]);
+  const events = [];
+  const errors = [];
+  for (const calendarId of requestedCalendars) {
+    try {
+      const apiUrl = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+      apiUrl.searchParams.set("timeMin", timeMin.toISOString());
+      apiUrl.searchParams.set("timeMax", timeMax.toISOString());
+      apiUrl.searchParams.set("singleEvents", "true");
+      apiUrl.searchParams.set("orderBy", "startTime");
+      apiUrl.searchParams.set("maxResults", String(Math.max(10, Math.min(250, Number(options.limit || 120)))));
+      const payload = await googleApiJson(store, request, apiUrl);
+      events.push(...(payload.items || []).map((event) => googleCalendarEventPublic(event, { calendarId })).filter((event) => event.id || event.summary));
+    } catch (error) {
+      errors.push({ calendarId, message: error.message });
+    }
+  }
+  events.sort((a, b) => dispatchDateValue(a.start) - dispatchDateValue(b.start));
   const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
   workspace.calendar = {
     ...workspace.calendar,
     lastSyncAt: new Date().toISOString(),
-    events,
+    events: events.slice(0, 800),
+    syncErrors: errors.slice(0, 12),
   };
   workspace.updatedAt = new Date().toISOString();
   store.googleWorkspace = workspace;
@@ -5382,9 +5454,74 @@ async function syncGoogleCalendarEvents(request, store, options = {}) {
   return {
     google: googleWorkspacePublicStatus(store, request),
     days,
-    events,
-    dispatchJobs: events.map(dispatchItemFromCalendarEvent).slice(0, 80),
+    events: workspace.calendar.events,
+    errors,
+    calendars: requestedCalendars,
+    dispatchJobs: workspace.calendar.events.map(dispatchItemFromCalendarEvent).slice(0, 120),
   };
+}
+
+function gmailHeaderValue(message = {}, name = "") {
+  const headers = message.payload?.headers || message.headers || [];
+  const found = headers.find((header) => cleanString(header.name).toLowerCase() === cleanString(name).toLowerCase());
+  return cleanString(found?.value);
+}
+
+function googleGmailMessagePublic(message = {}, meta = {}) {
+  const internalDate = Number(message.internalDate || 0);
+  const receivedAt = internalDate ? new Date(internalDate).toISOString() : cleanString(gmailHeaderValue(message, "Date"));
+  return {
+    id: cleanString(message.id),
+    threadId: cleanString(message.threadId),
+    from: gmailHeaderValue(message, "From"),
+    subject: gmailHeaderValue(message, "Subject") || "(No subject)",
+    receivedAt,
+    snippet: cleanString(message.snippet).slice(0, 700),
+    labelIds: Array.isArray(message.labelIds) ? message.labelIds.map(cleanString).filter(Boolean) : [],
+    sourceQuery: cleanString(meta.query),
+  };
+}
+
+function gmailSenderQuery(senders = []) {
+  const tokens = uniqueCleanValues(senders).map((sender) => `from:${sender}`);
+  return tokens.length === 1 ? tokens[0] : `(${tokens.join(" OR ")})`;
+}
+
+async function syncGoogleGmailMessages(request, store, options = {}) {
+  const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  if (!googleWorkspaceConnected(workspace)) return { messages: [], skipped: "Google Workspace is not connected." };
+  if (!googleWorkspaceHasScope(workspace, googleGmailReadonlyScope)) {
+    return { messages: workspace.gmail.messages || [], skipped: "Reconnect Google once to grant Gmail read-only intake." };
+  }
+  const days = Math.max(1, Math.min(45, Number(options.days || 14)));
+  const senders = uniqueCleanValues([...(Array.isArray(options.senders) ? options.senders : envList(options.senders)), ...googleRevenueEmailSenders()]);
+  const query = cleanString(options.query) || `${gmailSenderQuery(senders)} newer_than:${Math.max(days, 14)}d -in:spam -in:trash`;
+  const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+  listUrl.searchParams.set("q", query);
+  listUrl.searchParams.set("maxResults", String(Math.max(5, Math.min(50, Number(options.limit || 20)))));
+  const listPayload = await googleApiJson(store, request, listUrl);
+  const messages = [];
+  for (const item of listPayload.messages || []) {
+    try {
+      const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}`);
+      messageUrl.searchParams.set("format", "metadata");
+      for (const header of ["Subject", "From", "Date"]) messageUrl.searchParams.append("metadataHeaders", header);
+      const message = await googleApiJson(store, request, messageUrl);
+      messages.push(googleGmailMessagePublic(message, { query }));
+    } catch {}
+  }
+  const latestWorkspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+  latestWorkspace.gmail = {
+    ...latestWorkspace.gmail,
+    lastSyncAt: new Date().toISOString(),
+    messages: messages.slice(0, 100),
+    senders,
+    query,
+  };
+  latestWorkspace.updatedAt = new Date().toISOString();
+  store.googleWorkspace = latestWorkspace;
+  await writeStore(store);
+  return { messages: latestWorkspace.gmail.messages, query, senders, skipped: "" };
 }
 
 async function createGoogleCalendarEvent(request, store, body = {}, options = {}) {
@@ -5397,7 +5534,7 @@ async function createGoogleCalendarEvent(request, store, body = {}, options = {}
     signal: options.signal,
     body: JSON.stringify(event),
   });
-  const publicEvent = replaceCachedGoogleCalendarEvent(store, created);
+  const publicEvent = replaceCachedGoogleCalendarEvent(store, googleCalendarEventPublic(created, { calendarId: config.calendarId }));
   return { event: publicEvent, google: googleWorkspacePublicStatus(store, request), action: "created" };
 }
 
@@ -5411,7 +5548,7 @@ async function updateGoogleCalendarEvent(request, store, eventId, body = {}, opt
     signal: options.signal,
     body: JSON.stringify(event),
   });
-  const publicEvent = replaceCachedGoogleCalendarEvent(store, updated);
+  const publicEvent = replaceCachedGoogleCalendarEvent(store, googleCalendarEventPublic(updated, { calendarId: config.calendarId }));
   return { event: publicEvent, google: googleWorkspacePublicStatus(store, request), action: "updated" };
 }
 
@@ -5488,7 +5625,9 @@ function scheduleCustomerFromText(text = "") {
 }
 
 function schedulePhoneFromText(text = "") {
-  return scheduleFirstField(text, ["Call", "Phone", "Mobile", "Contact Phone", "Customer Phone"]);
+  const labeled = scheduleFirstField(text, ["Call", "Phone", "Mobile", "Contact Phone", "Customer Phone"]);
+  if (labeled) return labeled;
+  return cleanString(cleanString(text).match(/(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}/)?.[0]);
 }
 
 function parseScheduleJobNotes(notes = "") {
@@ -6372,6 +6511,17 @@ function sourceHubCatalog(store = {}, request = null) {
       action: "settings",
     },
     {
+      id: "google-gmail",
+      name: "Gmail Intake",
+      status: google.gmail?.permissionGranted ? "connected" : google.connected ? "ready" : "setup",
+      detail: google.gmail?.permissionGranted
+        ? `${google.gmail.messages || 0} lead emails cached`
+        : google.connected
+          ? "Reconnect Google once for Gmail read-only intake"
+          : "Connect in Settings",
+      action: "settings",
+    },
+    {
       id: "google-sheets",
       name: "Google Sheets",
       status: google.sheets?.sheetStats?.length ? "connected" : google.connected ? "ready" : "setup",
@@ -6595,7 +6745,8 @@ function dispatchWindowIncludes(item = {}, days = 14) {
   if (!when) return true;
   const now = Date.now();
   const max = now + Math.max(1, Math.min(90, Number(days) || 14)) * 24 * 60 * 60 * 1000;
-  return when >= now - 24 * 60 * 60 * 1000 && when <= max;
+  const lookback = item.source === "gmail" ? Math.max(3, Math.min(45, Number(days) || 14)) * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return when >= now - lookback && when <= max;
 }
 
 function dispatchItemFromCalendarEvent(event = {}) {
@@ -6613,6 +6764,8 @@ function dispatchItemFromCalendarEvent(event = {}) {
     sourceId: cleanString(event.id),
     timlockSignature: calendarEventSignature(event),
     calendarEventId: cleanString(event.id),
+    sourceCalendarId: cleanString(event.calendarId),
+    sourceCalendarLabel: cleanString(event.calendarLabel),
     calendarHtmlLink: cleanString(event.htmlLink),
     title,
     customer,
@@ -6730,11 +6883,57 @@ function dispatchItemFromServiceIntake(record = {}) {
   };
 }
 
+function dispatchItemFromGmailMessage(message = {}) {
+  const text = uniqueCleanValues([message.subject, message.snippet, message.from]).join("\n");
+  const parsedNotes = parseScheduleJobNotes(text);
+  const vin = normalizeVinCandidate(parsedNotes.vin) || extractVinsFromText(text)[0] || "";
+  const vehicle = dispatchVehicleFromRecord({ vin, year: parsedNotes.year, make: parsedNotes.make, model: parsedNotes.model, vehicle: parsedNotes.vehicle }, text);
+  const title = cleanString(message.subject || parsedNotes.vehicle || "Email lead");
+  const fromName = cleanString(message.from.match(/^"?([^"<]+)"?\s*</)?.[1]);
+  return {
+    id: `gmail:${cleanString(message.id) || metkaStableId("gmail", [title, message.receivedAt, message.from])}`,
+    source: "gmail",
+    sourceLabel: "Email",
+    sourceId: cleanString(message.id),
+    gmailThreadId: cleanString(message.threadId),
+    title,
+    customer: parsedNotes.customer || fromName,
+    phone: parsedNotes.phone || schedulePhoneFromText(text),
+    service: cleanString(parsedNotes.service || title || "Email lead"),
+    location: cleanString(parsedNotes.location),
+    notes: text,
+    start: "",
+    createdAt: cleanString(message.receivedAt || new Date().toISOString()),
+    end: "",
+    vin,
+    vehicle,
+    vehicleLabel: dispatchVehicleLabel(vehicle, title),
+    status: "email-lead",
+    externalSourceId: cleanString(parsedNotes.sourceId),
+    sourcePartId: cleanString(parsedNotes.partsUsed || parsedNotes.sourceId),
+    price: parsedNotes.price,
+    subtotal: parsedNotes.subtotal,
+    addOns: parsedNotes.addOns,
+    pricingLevel: parsedNotes.pricingLevel,
+    billing: parsedNotes.billing,
+    billingCode: parsedNotes.billingCode,
+    payment: parsedNotes.payment,
+    programmer: parsedNotes.programmer,
+    programmerPath: parsedNotes.programmerPath,
+    partsUsed: parsedNotes.partsUsed,
+    chargeBreakdown: parsedNotes.chargeBreakdown,
+    amountDue: parsedNotes.amountDue,
+    amountDueCode: parsedNotes.amountDueCode,
+    raw: message,
+  };
+}
+
 function dispatchItemsFromStore(store = {}, days = 14) {
   const google = normalizeGoogleWorkspaceStore(store.googleWorkspace);
   const intake = normalizeServiceIntakeStore(store.serviceIntake);
   const items = [
     ...(google.calendar.events || []).map(dispatchItemFromCalendarEvent),
+    ...(google.gmail.messages || []).map(dispatchItemFromGmailMessage),
     ...(store.scheduledJobs || []).map(dispatchItemFromScheduledJob),
     ...(intake.records || []).map(dispatchItemFromServiceIntake),
   ].filter((item) => dispatchWindowIncludes(item, days));
@@ -6798,18 +6997,111 @@ function dispatchPacketPreview(summary = {}) {
   };
 }
 
+function dispatchMoneyCandidates(value = "") {
+  const text = cleanString(value);
+  if (!text) return [];
+  const candidates = [];
+  for (const match of text.matchAll(/(?:\$|TOTAL(?: STOP AMOUNT)?\s*:?\s*|AMOUNT\s*:?\s*|<)\s*([0-9]{2,5}(?:[,.][0-9]{2})?)/gi)) {
+    const parsed = Number(cleanString(match[1]).replace(/,/g, ""));
+    if (Number.isFinite(parsed) && parsed >= 20 && parsed <= 8000) candidates.push(parsed);
+  }
+  for (const match of text.matchAll(/\b([1-9][0-9]{2,4}\.[0-9]{2})\b/g)) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed >= 75 && parsed <= 8000) candidates.push(parsed);
+  }
+  return candidates;
+}
+
+function dispatchMoneyAmount(item = {}) {
+  const values = [
+    item.price,
+    item.subtotal,
+    item.amountDue,
+    item.chargeBreakdown,
+    item.title,
+    item.service,
+    item.notes,
+    item.payment,
+  ];
+  const candidates = values.flatMap(dispatchMoneyCandidates);
+  return candidates.length ? Math.max(...candidates) : 0;
+}
+
+function dispatchUrgencyScore(item = {}) {
+  const start = dispatchDateValue(item.start || item.scheduledAt || item.createdAt);
+  if (!start) return item.source === "gmail" ? 12 : 8;
+  const hours = (start - Date.now()) / (60 * 60 * 1000);
+  if (hours < -2) return 5;
+  if (hours <= 6) return 24;
+  if (hours <= 24) return 20;
+  if (hours <= 72) return 14;
+  return 8;
+}
+
+function dispatchRevenueAnalysis(item = {}, packetSummary = null) {
+  const text = normalizeVehicleText(dispatchItemSearchText(item));
+  const money = dispatchMoneyAmount(item);
+  const sold = /\bSOLD\b|STATUS\s+SOLD|SOLD JOB|COMPLETED|NET 30|N30/.test(text);
+  const quoted = /\bQUOTE|QUOTED|ESTIMATE|REQUEST|LEAD|EMAIL\b/.test(text);
+  const allKeysLost = /\bAKL\b|ALL KEYS? LOST|NO KEY|LOST KEY/.test(text);
+  const duplicate = /\bDK\b|DUPLICATE|ADD KEY|SPARE/.test(text);
+  const readySignals = [
+    cleanString(item.vin),
+    cleanString(item.vehicleLabel),
+    cleanString(item.location),
+    cleanString(item.customer),
+    cleanString(item.phone),
+    cleanString(item.sourcePartId || item.externalSourceId || item.partsUsed || packetSummary?.primary),
+    cleanString(item.programmer || packetSummary?.programmer),
+  ].filter(Boolean).length;
+  const missing = [
+    cleanString(item.vin) ? "" : "VIN",
+    cleanString(item.vehicleLabel) ? "" : "vehicle",
+    cleanString(item.location) ? "" : "location",
+    cleanString(item.customer || item.phone) ? "" : "contact",
+    cleanString(item.sourcePartId || item.externalSourceId || item.partsUsed || packetSummary?.primary) ? "" : "part",
+    cleanString(item.programmer || packetSummary?.programmer) ? "" : "programmer",
+  ].filter(Boolean);
+  const confidence = Number(packetSummary?.confidencePercent || 0);
+  const moneyScore = money ? Math.min(24, Math.round(money / 18)) : quoted ? 8 : 4;
+  const statusScore = sold ? 22 : quoted || item.source === "gmail" ? 10 : 6;
+  const serviceScore = allKeysLost ? 14 : duplicate ? 9 : /LOCKOUT|UNLOCK/.test(text) ? 7 : 6;
+  const readinessScore = Math.round((readySignals / 7) * 22);
+  const confidenceScore = confidence ? Math.round(Math.min(16, confidence / 7)) : 4;
+  const score = Math.max(5, Math.min(100, moneyScore + statusScore + serviceScore + readinessScore + confidenceScore + dispatchUrgencyScore(item) - missing.length * 3));
+  return {
+    score,
+    label: score >= 82 ? "Best money now" : score >= 66 ? "Strong stop" : score >= 48 ? "Verify first" : "Backlog",
+    amount: money,
+    amountLabel: money ? `$${money.toFixed(2)}` : "",
+    sold,
+    quoted,
+    serviceType: allKeysLost ? "AKL" : duplicate ? "DK" : "Service",
+    missing,
+    readySignals,
+  };
+}
+
+function dispatchRevenueSortValue(item = {}) {
+  return Number(item.revenue?.score || 0);
+}
+
 function dispatchPublicItem(item = {}, packetSummary = null, error = "") {
+  const revenue = dispatchRevenueAnalysis(item, packetSummary);
   return {
     id: item.id,
     source: item.source,
     sourceLabel: item.sourceLabel,
     sourceId: item.sourceId,
+    sourceCalendarId: item.sourceCalendarId,
+    sourceCalendarLabel: item.sourceCalendarLabel,
     title: item.title,
     customer: item.customer,
     phone: item.phone,
     service: item.service,
     location: item.location,
     start: item.start,
+    createdAt: item.createdAt,
     vin: item.vin,
     vehicleLabel: item.vehicleLabel,
     status: item.status,
@@ -6819,6 +7111,10 @@ function dispatchPublicItem(item = {}, packetSummary = null, error = "") {
     packetStatus: packetSummary ? "ready" : error ? "verify" : "queued",
     packetError: cleanString(error),
     packetPreview: dispatchPacketPreview(packetSummary),
+    revenue,
+    moneyAmount: revenue.amount,
+    revenueScore: revenue.score,
+    revenueLabel: revenue.label,
   };
 }
 
@@ -6853,6 +7149,9 @@ function jobInboxPublicItem(item = {}) {
     packetLine: uniqueCleanValues([preview.primary, preview.programmer, preview.lishi]).join(" | "),
     fieldReady,
     needsAttention,
+    revenuePriority: Number(item.revenueScore || item.revenue?.score || 0),
+    moneyAmount: Number(item.moneyAmount || item.revenue?.amount || 0),
+    revenueLabel: cleanString(item.revenueLabel || item.revenue?.label),
     actionLabel: fieldReady ? "Open Packet" : "Review",
   };
 }
@@ -6868,7 +7167,9 @@ function jobInboxSection(id, title, items = [], limit = 6) {
 
 function buildJobInboxFromDispatch(dispatch = {}) {
   const items = (dispatch.queue || []).map(jobInboxPublicItem).sort((a, b) => {
-    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? -1 : 1;
+    if (a.fieldReady !== b.fieldReady) return a.fieldReady ? -1 : 1;
+    if (Number(a.revenuePriority || 0) !== Number(b.revenuePriority || 0)) return Number(b.revenuePriority || 0) - Number(a.revenuePriority || 0);
+    if (a.needsAttention !== b.needsAttention) return a.needsAttention ? 1 : -1;
     return (a.sortTime || Number.MAX_SAFE_INTEGER) - (b.sortTime || Number.MAX_SAFE_INTEGER);
   });
   const todayItems = items.filter((item) => item.bucket === "overdue" || item.bucket === "today");
@@ -7180,6 +7481,15 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   const days = Math.max(1, Math.min(90, Number(body.days || body.windowDays || 14)));
   if (body.syncCalendar && options.canSyncCalendar && googleWorkspaceConnected(store.googleWorkspace)) {
     await syncGoogleCalendarEvents(request, store, { days });
+    await syncGoogleGmailMessages(request, store, { days }).catch(async (error) => {
+      const workspace = normalizeGoogleWorkspaceStore(store.googleWorkspace);
+      workspace.gmail = {
+        ...workspace.gmail,
+        lastError: error.message,
+      };
+      store.googleWorkspace = workspace;
+      await writeStore(store);
+    });
   }
   if (Array.isArray(body.localScheduledJobs) && body.localScheduledJobs.length) {
     store = {
@@ -7191,13 +7501,20 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   const requestedQuery = cleanString(body.q || body.query);
   const normalizedQuery = normalizeVehicleText(requestedQuery);
   const sourceItems = dispatchItemsFromStore(store, days);
-  const items = sourceItems
+  const filteredItems = sourceItems
     .filter((item) => !normalizedQuery || item.id === requestedId || item.sourceId === requestedId || normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizedQuery))
-    .slice(0, Math.max(1, Math.min(80, Number(body.limit || 30))));
+    .slice(0, Math.max(1, Math.min(120, Number(body.limit || 40))));
+  const rankedRawItems = requestedQuery || requestedId
+    ? filteredItems
+    : [...filteredItems].sort((a, b) => {
+        const scoreA = dispatchRevenueAnalysis(a).score;
+        const scoreB = dispatchRevenueAnalysis(b).score;
+        return scoreB - scoreA || dispatchDateValue(a.start || a.createdAt) - dispatchDateValue(b.start || b.createdAt);
+      });
   const selected =
-    (requestedId && items.find((item) => item.id === requestedId || item.sourceId === requestedId)) ||
-    (requestedQuery && items.find((item) => normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizeVehicleText(requestedQuery)))) ||
-    items[0] ||
+    (requestedId && filteredItems.find((item) => item.id === requestedId || item.sourceId === requestedId)) ||
+    (requestedQuery && filteredItems.find((item) => normalizeVehicleText(dispatchItemSearchText(item)).includes(normalizeVehicleText(requestedQuery)))) ||
+    rankedRawItems[0] ||
     null;
   const requestedPrebuildLimit = Number(body.packetPrebuildLimit || body.prebuildLimit || 8);
   const packetPrebuildLimit = Number.isFinite(requestedPrebuildLimit)
@@ -7206,7 +7523,7 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   const selectedBundle = selected ? await buildDispatchPacketBundle(selected, store, { full: true }) : null;
   const packetBundles = new Map();
   if (selectedBundle?.item?.id) packetBundles.set(selectedBundle.item.id, selectedBundle);
-  const previewItems = items
+  const previewItems = rankedRawItems
     .slice(0, packetPrebuildLimit)
     .filter((item) => item.id && !packetBundles.has(item.id));
   const previewBundles = await Promise.all(previewItems.map((item) => buildDispatchPacketBundle(item, store)));
@@ -7217,9 +7534,16 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
   if (allBundles.some((bundle) => bundle?.cacheUpdated) && options.persistCache !== false) {
     await persistDispatchPacketCache(store.dispatchPacketCache);
   }
-  const queue = items.map((item) => dispatchPublicItem(item, packetBundles.get(item.id)?.summary, packetBundles.get(item.id)?.error));
+  const queue = rankedRawItems
+    .map((item) => dispatchPublicItem(item, packetBundles.get(item.id)?.summary, packetBundles.get(item.id)?.error))
+    .sort((a, b) => {
+      if (requestedQuery || requestedId) return dispatchDateValue(a.start || a.createdAt) - dispatchDateValue(b.start || b.createdAt);
+      return dispatchRevenueSortValue(b) - dispatchRevenueSortValue(a) || dispatchDateValue(a.start || a.createdAt) - dispatchDateValue(b.start || b.createdAt);
+    });
+  const items = queue.map((publicItem) => filteredItems.find((item) => item.id === publicItem.id) || publicItem);
   const sources = {
     calendar: items.filter((item) => item.source === "google-calendar").length,
+    email: items.filter((item) => item.source === "gmail").length,
     intake: items.filter((item) => item.source === "service-intake").length,
     scheduled: items.filter((item) => item.source === "timlock-schedule").length,
   };
@@ -7239,6 +7563,12 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
     days,
     google: googleWorkspacePublicStatus(store, request),
     sources,
+    revenue: {
+      totalPotential: queue.reduce((sum, item) => sum + Number(item.moneyAmount || 0), 0),
+      best: queue[0] || null,
+      bestMoneyItems: queue.filter((item) => Number(item.moneyAmount || 0)).slice(0, 5),
+      needsInfo: queue.filter((item) => (item.revenue?.missing || []).length).slice(0, 5),
+    },
     summary: {
       total: items.length,
       connectedCalendar: googleWorkspaceConnected(store.googleWorkspace),
@@ -7257,6 +7587,7 @@ async function buildDispatchIntelligence(request, body = {}, store = {}, options
     next: selected
       ? uniqueCleanValues([
           selected.source === "service-intake" ? "Promote QUO intake to Calendar" : "",
+          selected.source === "gmail" ? "Promote email lead to Calendar" : "",
           selected.calendarEventId || selected.source === "google-calendar" ? "Write TimLock note back to Calendar" : "",
           "Create Drive job folder",
           "Save final proof after completion",
@@ -7300,6 +7631,9 @@ function commandOsPublicJob(item = {}) {
     needsAttention: Boolean(item.needsAttention),
     packetStatus: cleanString(item.packetStatus),
     confidencePercent: Number(preview.confidencePercent || 0),
+    revenuePriority: Number(item.revenuePriority || item.revenueScore || item.revenue?.score || 0),
+    moneyAmount: Number(item.moneyAmount || item.revenue?.amount || 0),
+    revenueLabel: cleanString(item.revenueLabel || item.revenue?.label),
     actionLabel: item.fieldReady ? "Open Packet" : "Review Job",
   };
 }
@@ -7325,6 +7659,7 @@ function commandOsSourceSummary(store = {}, inbox = {}, request = null, role = "
   const metka = buildMetkaBridgeStatus(store);
   const inboxSources = inbox.sources || {};
   const calendarStatus = google.connected ? "ready" : google.configured ? "connect" : "setup";
+  const gmailReady = Boolean(google.gmail?.permissionGranted);
   const sourceHubReady = Number(sourceHub.summary?.intakeRecords || 0);
   const sourceHubStatus = sourceHubReady ? "ready" : sourceHub.summary?.mappings ? "mapped" : "setup";
   const bridgeStatus = metka.connected ? "ready" : "setup";
@@ -7335,6 +7670,13 @@ function commandOsSourceSummary(store = {}, inbox = {}, request = null, role = "
       status: calendarStatus,
       value: Number(google.calendar?.events || inboxSources.calendar || 0),
       detail: google.connected ? "Calendar jobs synced" : google.configured ? "Connect account" : "OAuth setup needed",
+    },
+    {
+      id: "gmail",
+      label: "Email",
+      status: gmailReady ? "ready" : google.connected ? "connect" : "setup",
+      value: Number(google.gmail?.messages || inboxSources.email || 0),
+      detail: gmailReady ? "lead emails synced" : google.connected ? "reconnect Google for Gmail" : "connect Google",
     },
     {
       id: "source-hub",
@@ -7507,14 +7849,15 @@ function dispatchCalendarCompletionNote(item = {}, packet = {}, job = null) {
 
 async function patchCalendarDescription(request, store, eventId, description, options = {}) {
   const config = googleClientConfig(request);
-  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(eventId)}`;
+  const calendarId = cleanString(options.calendarId) || config.calendarId;
+  const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`;
   const updated = await googleApiJson(store, request, apiUrl, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     signal: options.signal,
     body: JSON.stringify({ description: cleanString(description).slice(0, 8000) }),
   });
-  return replaceCachedGoogleCalendarEvent(store, updated);
+  return replaceCachedGoogleCalendarEvent(store, googleCalendarEventPublic(updated, { calendarId }));
 }
 
 async function writeDispatchPacketToCalendar(request, store, body = {}) {
@@ -7528,7 +7871,7 @@ async function writeDispatchPacketToCalendar(request, store, body = {}) {
   const marker = "----- TimLock Dispatch Packet -----";
   const descriptionBase = existingDescription.split(marker)[0].trim();
   const description = uniqueCleanValues([descriptionBase, marker, note]).join("\n\n").slice(0, 8000);
-  const event = await patchCalendarDescription(request, store, eventId, description);
+  const event = await patchCalendarDescription(request, store, eventId, description, { calendarId: item.sourceCalendarId });
   await writeStore(store);
   return { ok: true, event, note, google: googleWorkspacePublicStatus(store, request), packet: dispatchPacketSummary(item, loadout) };
 }
@@ -7589,7 +7932,7 @@ async function completeDispatchItem(request, store, body = {}) {
     const marker = "----- TimLock Completion -----";
     const base = cleanString(item.notes).split(marker)[0].trim();
     const description = uniqueCleanValues([base, dispatchCalendarCompletionNote(item, packet, job)]).join("\n\n");
-    event = await patchCalendarDescription(request, store, eventId, description);
+    event = await patchCalendarDescription(request, store, eventId, description, { calendarId: item.sourceCalendarId });
   }
   if (item.source === "timlock-schedule" && item.sourceId) {
     store.scheduledJobs = (store.scheduledJobs || []).map((scheduled) =>
@@ -7668,6 +8011,17 @@ async function buildWorkspaceBrief(store = {}) {
           : google.configured
             ? "Connect Google Calendar to feed schedule/job timing."
             : "Add Google OAuth env vars to connect Calendar.",
+      },
+      {
+        id: "google-gmail",
+        label: "Gmail Intake",
+        status: google.gmail?.permissionGranted ? "connected" : google.connected ? "setup" : "setup",
+        value: google.gmail?.messages ? `${google.gmail.messages} emails` : "Waiting",
+        detail: google.gmail?.permissionGranted
+          ? `${(google.gmail.senders || []).join(", ")} feed the Dispatch money queue`
+          : google.connected
+            ? "Reconnect Google once to grant Gmail read-only intake."
+            : "Connect Google to pull email leads into Dispatch.",
       },
       {
         id: "google-sheets",

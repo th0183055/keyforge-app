@@ -12603,9 +12603,72 @@ body:not(.is-start-screen) ::selection {
   min-width: 0;
 }
 
+.dispatch-revenue-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(224, 36, 48, 0.36);
+  border-left: 5px solid #e02430;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(224, 36, 48, 0.16), rgba(255, 255, 255, 0.035)),
+    rgba(12, 14, 19, 0.95);
+  color: #f8fafc;
+}
+
+.dispatch-revenue-command h3,
+.dispatch-revenue-command p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dispatch-revenue-command h3 {
+  font-size: clamp(1.05rem, 2vw, 1.45rem);
+}
+
+.dispatch-revenue-command > small {
+  grid-column: 1 / -1;
+  color: #fecaca;
+  font-weight: 800;
+}
+
+.dispatch-revenue-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(88px, 1fr));
+  gap: 8px;
+}
+
+.dispatch-revenue-stats article {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dispatch-revenue-stats span,
+.dispatch-revenue-line,
+.job-inbox-money {
+  color: #fecaca;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dispatch-revenue-stats strong {
+  display: block;
+  margin-top: 4px;
+  color: #ffffff;
+  font-size: 1.05rem;
+}
+
 .dispatch-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -12876,6 +12939,8 @@ body:not(.is-start-screen) .dispatch-packet-card.high {
 
   .dispatch-filter-form,
   .dispatch-summary-grid,
+  .dispatch-revenue-command,
+  .dispatch-revenue-stats,
   .dispatch-workspace,
   .dispatch-packet-grid,
   .dispatch-packet-columns {

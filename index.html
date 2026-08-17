@@ -62,7 +62,7 @@
           </button>
           <button class="nav-item" data-view="dispatch">
             <span>Dispatch</span>
-            <small>Calendar + QUO</small>
+            <small>Google + Email</small>
           </button>
           <button class="nav-item" data-view="workbench">
             <span>Job Packet</span>
@@ -106,7 +106,7 @@
           </button>
           <button class="nav-item" data-view="source-hub" data-owner-only>
             <span>Source Hub</span>
-            <small>Google / QUO</small>
+            <small>Sources</small>
           </button>
           <button class="nav-item" data-view="settings" data-owner-only>
             <span>Settings</span>
@@ -179,7 +179,7 @@
                 </div>
               </div>
               <div class="start-menu-grid">
-                <button type="button" data-view-target="dispatch"><span>Dispatch</span><small>Calendar + QUO</small></button>
+                <button type="button" data-view-target="dispatch"><span>Dispatch</span><small>Google + Email</small></button>
                 <button type="button" data-view-target="workbench"><span>Job Packet</span><small>One answer</small></button>
                 <button type="button" data-view-target="loadout"><span>What To Bring</span><small>Field kit</small></button>
                 <button type="button" data-view-target="proof-vault"><span>Proof Center</span><small>History + save</small></button>
@@ -188,7 +188,7 @@
               </div>
               <div class="start-menu-grid owner-menu-grid" data-owner-only>
                 <button type="button" data-view-target="metka-bridge"><span>Data Bridge</span><small>Metka / Sheets</small></button>
-                <button type="button" data-view-target="source-hub"><span>Source Hub</span><small>Google / QUO</small></button>
+                <button type="button" data-view-target="source-hub"><span>Source Hub</span><small>Sources</small></button>
                 <button type="button" data-view-target="settings"><span>Settings</span><small>Google / storage</small></button>
               </div>
             </aside>
@@ -314,7 +314,7 @@
               <summary>
                 <span>
                   <strong>Operator board</strong>
-                  <small>Calendar, QUO, queue, and owner sync</small>
+                  <small>Calendar, Email, queue, and owner sync</small>
                 </span>
               </summary>
 
@@ -327,13 +327,13 @@
                 </div>
                 <div class="command-os-head-actions">
                   <button class="secondary-action small" type="button" id="refreshCommandOs">Refresh</button>
-                  <button class="primary-action small" type="button" data-command-os-action="sync">Sync Calendar</button>
+                  <button class="primary-action small" type="button" data-command-os-action="sync">Sync Google</button>
                 </div>
               </div>
               <div class="command-os-result" id="commandOsResult">
                 <article class="command-os-empty">
                   <strong>Loading Command OS</strong>
-                  <span>Reading Calendar, QUO/source imports, scheduled jobs, proof, and packet confidence.</span>
+                  <span>Reading Calendar, Email/source imports, scheduled jobs, proof, and packet confidence.</span>
                 </article>
               </div>
             </section>
@@ -343,7 +343,7 @@
                 <div>
                   <p class="eyebrow">Today</p>
                   <strong>Job Inbox</strong>
-                  <span id="jobInboxStatus">Calendar, QUO, and TimLock jobs load here.</span>
+                  <span id="jobInboxStatus">Calendar, Email, QUO, and TimLock jobs load here.</span>
                 </div>
                 <div class="job-inbox-actions">
                   <button class="secondary-action small" type="button" id="refreshJobInbox">Refresh</button>
@@ -353,7 +353,7 @@
               <div class="job-inbox-result" id="jobInboxResult">
                 <article class="job-inbox-empty">
                   <strong>Loading jobs</strong>
-                  <span>Build packets from Calendar, QUO, and saved TimLock jobs.</span>
+                  <span>Build packets from Calendar, Email, QUO, and saved TimLock jobs.</span>
                 </article>
               </div>
             </section>
@@ -421,11 +421,11 @@
             <div class="panel-header">
               <div>
                 <p class="eyebrow">Dispatch Intelligence</p>
-                <h3>Google, QUO, and AI packets in one queue</h3>
+                <h3>Google, Gmail, QUO, and AI packets in one queue</h3>
               </div>
               <div class="proof-vault-actions">
                 <button class="secondary-action small" type="button" id="refreshDispatchIntelligence">Refresh</button>
-                <button class="primary-action small" type="button" id="syncDispatchCalendar" data-owner-only>Sync Calendar</button>
+                <button class="primary-action small" type="button" id="syncDispatchCalendar" data-owner-only>Sync Google</button>
               </div>
             </div>
             <form class="field-os-form compact dispatch-filter-form" id="dispatchIntelligenceForm">
@@ -439,11 +439,11 @@
               </label>
               <button class="secondary-action" type="submit">Build Queue</button>
             </form>
-            <div class="form-status" id="dispatchIntelligenceStatus">Calendar and QUO dispatch brain is ready.</div>
+            <div class="form-status" id="dispatchIntelligenceStatus">Calendar, Gmail, and QUO dispatch brain is ready.</div>
             <div class="dispatch-intelligence-result" id="dispatchIntelligenceResult">
               <article class="assistant-card">
                 <strong>Dispatch queue waiting</strong>
-                <p>Sync Google Calendar or import QUO jobs, then TimLock will build one field packet per dispatch item.</p>
+                <p>Sync Google or import QUO jobs, then TimLock will build one field packet per dispatch item.</p>
               </article>
             </div>
           </section>
@@ -1443,7 +1443,7 @@
             <section class="bridge-hero source-hub-hero">
               <div>
                 <p class="eyebrow">Connect any job source</p>
-                <h3>Turn Google, QUO, and service-app exports into one clean TimLock job queue.</h3>
+                <h3>Turn Google, Gmail, QUO, and service-app exports into one clean TimLock job queue.</h3>
                 <p>Source Hub learns field mappings once, then sends normalized jobs into Dispatch, Job Packet, What To Bring, and AI.</p>
               </div>
               <strong id="sourceHubScore">0<small>ready records</small></strong>
